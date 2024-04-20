@@ -2,19 +2,19 @@
 # Ideally this logic would be in pyproject.toml but it appears
 # easier to do it this way for now.
 
-PYTHON        = python
-PROJECT       = project_euromir
-TESTSDIR      = $(PROJECT)/tests
-DOCSDIR       = docs
-DOCBUILDDIR   = $(DOCSDIR)/_build
-MESONBUILDDIR = build
-ENVDIR        = env
-BINDIR        = $(ENVDIR)/bin
-VENV_OPTS     =
+PYTHON			= python
+PROJECT			= project_euromir
+TESTSDIR		= $(PROJECT)/tests
+DOCSDIR			= docs
+DOCBUILDDIR		= $(DOCSDIR)/_build
+MESONBUILDDIR	= build
+ENVDIR			= env
+BINDIR			= $(ENVDIR)/bin
+VENV_OPTS		=
 
 # Python venv on Windows has different location
 ifeq ($(OS), Windows_NT)
-    BINDIR=$(ENVDIR)/Scripts/
+	BINDIR=$(ENVDIR)/Scripts
 # on Linux we use system-installed packages
 else
 	UNAME_S := $(shell uname -s)
@@ -24,43 +24,40 @@ else
 	export PATH := BINDIR:$(PATH)
 endif
 
-.PHONY: env clean update test lint docs opendocs fix release
+.PHONY: env clean update test lint docs fix release
 
 env:  ## create environment
 	$(PYTHON) -m venv $(VENV_OPTS) $(ENVDIR)
 	python -m pip install --editable .[dev,docs]
-	
+
 clean:  ## clean environment
 	-rm -rif $(DOCBUILDDIR)/*
 	-rm -rif $(MESONBUILDDIR)/*
 	-rm -rf $(ENVDIR)/*
 
 update: clean env  ## update environment
-	
-test:  ## run tests
+
+test:  ## run Python unit tests
 	python -m $(PROJECT).tests
 
-lint:  ## run linter
+lint:  ## run Pylint
 	pylint $(PROJECT)
 
-docs:  ## build docs
+docs:  ## build Sphinx docs
 	sphinx-build -E docs $(DOCBUILDDIR)
 	open $(DOCBUILDDIR)/index.html
 
-opendocs: docs  ## open html docs
-	open $(DOCBUILDDIR)/index.html
-
-fix:  ## auto-fix code
+fix:  ## auto-fix Python code
 	# selected among many code auto-fixers, tweaked in pyproject.toml
 	autopep8 -i -r $(PROJECT)
 	python -m isort $(PROJECT)
 	# this is the best found for the purpose
 	docformatter -r --in-place $(PROJECT)
 
-release: update lint test  ## update version, publish to pypi
+release: update lint test  ## update version, publish to PyPI
 	python -m build
 	twine check dist/*
-	twine upload --skip-existing dist/*
+	# twine upload --skip-existing dist/*
 
 # Thanks to Francoise at marmelab.com for this
 .DEFAULT_GOAL := help

@@ -1,7 +1,7 @@
 project(
   'project_euromir',
-  'c',
-  version: '1.13.0',
+  'c', 'fortran',
+  version: '0.0.1',
   license: 'BSD-3',
   meson_version: '>= 1.1.0',
 )

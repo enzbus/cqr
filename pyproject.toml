@@ -3,7 +3,7 @@ build-backend = 'mesonpy'
 requires = ['meson-python']
 
 [project]
-name = 'project-euromir'
+name = 'project_euromir'
 version = '0.0.1'
 readme = 'README.md'
 requires-python = '>=3.8'
