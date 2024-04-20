@@ -1,0 +1,23 @@
+# development
+env/
+build/
+
+# Codium
+.vscode/
+
+# Sphinx
+docs/_build/
+
+# Unit test / coverage reports
+htmlcov/
+.coverage
+.coverage.*
+
+# C extensions
+*.so
+
+# misc
+.DS_Store
+
+# Byte-compiled / optimized / DLL files
+__pycache__/

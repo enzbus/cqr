@@ -1,0 +1,18 @@
+[build-system]
+build-backend = 'mesonpy'
+requires = ['meson-python']
+
+[project]
+name = 'project-euromir'
+version = '0.0.1'
+readme = 'README.md'
+requires-python = '>=3.8'
+license = {file = 'LICENSE'}
+authors = [{name = 'Enzo Busseti', email = 'enzo.busseti@gmail.com'}]
+dependencies = []
+
+[project.optional-dependencies]
+docs = ["sphinx"]
+dev = [
+    "build", "twine", "pylint", "isort", "autopep8", "docformatter", "numpy",
+    "scipy"]
