@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.10.1)
+project(project_euromir)
+set(src "project_euromir")
+set(linear_algebra_src "project_euromir/linear_algebra.c")
+add_library(linear_algebra SHARED ${linear_algebra_src})

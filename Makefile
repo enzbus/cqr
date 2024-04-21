@@ -24,20 +24,23 @@ else
 	export PATH := BINDIR:$(PATH)
 endif
 
-.PHONY: env clean update test lint docs fix release
+.PHONY: env clean update test lint docs fix release build
 
 env:  ## create environment
 	$(PYTHON) -m venv $(VENV_OPTS) $(ENVDIR)
-	python -m pip install .[dev,docs]
+	$(BINDIR)/python -m pip install .[dev,docs]
+
+build: ## rebuild the compiled objects
+	$(BINDIR)/python -m pip install --force-reinstall .
 
 clean:  ## clean environment
 	-rm -rif $(DOCBUILDDIR)/*
 	-rm -rif $(MESONBUILDDIR)/*
 	-rm -rf $(ENVDIR)/*
 
-update: clean env  ## update environment
+update: clean env  ## clean and recreate environment
 
-test:  ## run Python unit tests
+test: build ## run unit tests on fresh build
 	python -m $(PROJECT).tests
 
 lint:  ## run Pylint

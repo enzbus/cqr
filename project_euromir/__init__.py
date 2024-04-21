@@ -29,3 +29,8 @@
 """project_euromir"""
 
 __version__ = '0.0.1'
+from ctypes import cdll
+import pathlib
+
+linear_algebra = cdll.LoadLibrary(str(pathlib.Path(__file__).with_name('liblinear_algebra.so')))
+print(linear_algebra.csc_matvec)
