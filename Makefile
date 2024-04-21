@@ -28,7 +28,7 @@ endif
 
 env:  ## create environment
 	$(PYTHON) -m venv $(VENV_OPTS) $(ENVDIR)
-	python -m pip install --editable .[dev,docs]
+	python -m pip install .[dev,docs]
 
 clean:  ## clean environment
 	-rm -rif $(DOCBUILDDIR)/*
