@@ -7,7 +7,7 @@ PROJECT			= project_euromir
 TESTSDIR		= $(PROJECT)/tests
 DOCSDIR			= docs
 DOCBUILDDIR		= $(DOCSDIR)/_build
-MESONBUILDDIR	= build
+BUILDDIR		= build
 ENVDIR			= env
 BINDIR			= $(ENVDIR)/bin
 VENV_OPTS		=
@@ -30,17 +30,19 @@ env:  ## create environment
 	$(PYTHON) -m venv $(VENV_OPTS) $(ENVDIR)
 	$(BINDIR)/python -m pip install .[dev,docs]
 
-build: ## rebuild the compiled objects
-	$(BINDIR)/python -m pip install --force-reinstall .
+build: ## build locally (instead of editable install)
+	cmake -S . -B $(BUILDDIR)
+	cmake --build $(BUILDDIR)
+	cp $(BUILDDIR)/*.so $(PROJECT)/
 
 clean:  ## clean environment
-	-rm -rif $(DOCBUILDDIR)/*
-	-rm -rif $(MESONBUILDDIR)/*
+	-rm -rf $(DOCBUILDDIR)/*
+	-rm -rf $(BUILDDIR)/*
 	-rm -rf $(ENVDIR)/*
 
 update: clean env  ## clean and recreate environment
 
-test: build ## run unit tests on fresh build
+test: build ## run unit tests
 	python -m $(PROJECT).tests
 
 lint:  ## run Pylint

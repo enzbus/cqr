@@ -26,22 +26,12 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-"""project_euromir"""
 
-__version__ = '0.0.1'
-import pathlib
-import platform
-from ctypes import cdll
+from unittest import TestCase, main
 
-if platform.system() == 'Linux':
-    _ext = 'so'
-elif platform.system() == 'Windows':
-    _ext = 'dll'
-elif platform.system() == 'Darwin':
-    _ext = 'dylib'
 
-_libname = str(pathlib.Path(__file__).with_name('liblinear_algebra.' + _ext))
+class TestLinearAlgebra(TestCase):
 
-linear_algebra = cdll.LoadLibrary(_libname)
-
-assert hasattr(linear_algebra, 'csc_matvec')
+    def test_import(self):
+        """Test that the wheel installed correctly."""
+        import project_euromir
