@@ -12,8 +12,6 @@ on:
 
 jobs:
 
-  pylint:
-
   packaging:
 
     runs-on: ubuntu-latest
