@@ -30,10 +30,13 @@
 
 __version__ = '0.0.1'
 import pathlib
+import platform
 from ctypes import cdll
 
+_EXTS = {'Linux':'.so', 'Darwin':'.dylib', 'Windows':'.dll'}
+
 for fname in pathlib.Path(__file__).parent.iterdir():
-    if fname.suffix in ['.so', '.dll', '.dylib']:
+    if fname.suffix == _EXTS[platform.system()]:
         print('LOADING LIBRARY', fname)
         LIBRARY = cdll.LoadLibrary(fname)
 
