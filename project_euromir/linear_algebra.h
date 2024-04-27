@@ -34,35 +34,29 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <stdbool.h>
 
 /*
-if sign_plus:
-    output += csc_matrix @ input
-else:
-    output -= csc_matrix @ input
+output += mult * (csc_matrix @ input)
 */
-void csc_matvec(
+void add_csc_matvec(
     const int n, /*number of columns*/
-    const int * restrict col_pointers, 
-    const int * restrict row_indexes,
-    const double * restrict mat_elements,
-    double * restrict output,
-    const double * restrict input,
-    const bool sign_plus
+    const int * col_pointers,
+    const int * row_indexes,
+    const double * mat_elements,
+    double * output,
+    const double * input,
+    const double mult
     );
 
 /*
-if sign_plus:
-    output += csr_matrix @ input
-else:
-    output -= csr_matrix @ input
+output += mult * (csr_matrix @ input)
 */
-void csr_matvec(
+void add_csr_matvec(
     const int m, /*number of rows*/
     const int * row_pointers, 
     const int * col_indexes,
     const double * mat_elements,
     double * output,
     const double * input,
-    const bool sign_plus
+    const double mult
     );
 
 #endif

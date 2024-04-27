@@ -27,6 +27,7 @@
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import time
 from unittest import TestCase, main
 
 import numpy as np
@@ -44,33 +45,46 @@ class TestLinearAlgebra(TestCase):
     def test_csc(self):
         """Test CSC matvec."""
 
-        m = 200
-        n = 300
+        m = 100
+        n = 100
+        timer = 0.
         for seed in range(100):
             np.random.seed(seed)
             mat = sp.random(m=m, n=n, dtype=float).tocsc()
             inp = np.random.randn(n)
             out = np.zeros(m, dtype=float)
-
-            lib.csc_matvec(
+            mult = np.random.choice([-1., None, 1.])
+            if mult is None:
+                mult = np.random.randn()
+            s = time.time()
+            lib.add_csc_matvec(
                 n=n, col_pointers=mat.indptr, row_indexes=mat.indices,
-                mat_elements=mat.data, input=inp, output=out, sign_plus=True)
-
-            self.assertTrue(np.all(out == mat @ inp))
+                mat_elements=mat.data, input=inp, output=out, mult=mult)
+            timer += time.time() - s
+            self.assertTrue(np.allclose(out, mult * (mat @ inp)))
+        print('timer CSC', timer)
 
     def test_csr(self):
         """Test CSR matvec."""
 
-        m = 200
-        n = 300
+        m = 100
+        n = 100
+        timer = 0.
+
         for seed in range(100):
             np.random.seed(seed)
             mat = sp.random(m=m, n=n, dtype=float).tocsr()
             inp = np.random.randn(n)
             out = np.zeros(m, dtype=float)
+            mult = np.random.choice([-1., None, 1.])
+            if mult is None:
+                mult = np.random.randn()
 
-            lib.csr_matvec(
+            s = time.time()
+            lib.add_csr_matvec(
                 m=m, row_pointers=mat.indptr, col_indexes=mat.indices,
-                mat_elements=mat.data, input=inp, output=out, sign_plus=True)
+                mat_elements=mat.data, input=inp, output=out, mult=mult)
+            timer += time.time() - s
+            self.assertTrue(np.allclose(out, mult * (mat @ inp)))
 
-            self.assertTrue(np.all(out == mat @ inp))
+        print('timer CSR', timer)

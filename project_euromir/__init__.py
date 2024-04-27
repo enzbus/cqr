@@ -112,8 +112,8 @@ def _interface_function(function_name, args):
 # Interface to functions
 ##
 
-csc_matvec = _interface_function(
-    function_name='csc_matvec',
+add_csc_matvec = _interface_function(
+    function_name='add_csc_matvec',
     args=(
         ('n', 'int'),
         ('col_pointers', 'int*'),
@@ -121,12 +121,12 @@ csc_matvec = _interface_function(
         ('mat_elements', 'double*'),
         ('output', 'double*'),
         ('input', 'double*'),
-        ('sign_plus', 'bool'),
+        ('mult', 'double'),
     )
 )
 
-csr_matvec = _interface_function(
-    function_name='csr_matvec',
+add_csr_matvec = _interface_function(
+    function_name='add_csr_matvec',
     args=(
         ('m', 'int'),
         ('row_pointers', 'int*'),
@@ -134,6 +134,6 @@ csr_matvec = _interface_function(
         ('mat_elements', 'double*'),
         ('output', 'double*'),
         ('input', 'double*'),
-        ('sign_plus', 'bool'),
+        ('mult', 'double'),
     )
 )
