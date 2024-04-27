@@ -12,7 +12,7 @@ on:
 
 jobs:
 
-  packaging:
+  testing:
 
     runs-on: ubuntu-latest
 
@@ -25,19 +25,5 @@ jobs:
         with:
             python-version: '3.11'
 
-      - name: Package
-        run: |
-              python -m pip install build
-              python -m build
-
-      - name: Install wheel
-        run: |
-              python -m pip install dist/*.whl
-
-      - name: Delete the repo
-        run: |
-              rm -rf *
-      
-      - name: Run tests shipped with the package
-        run: |
-              python -m project_euromir.tests
+      - name: Test using makefile
+        run: make test

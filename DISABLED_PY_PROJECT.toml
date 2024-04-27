@@ -10,8 +10,7 @@ dependencies = ['numpy', 'scipy']
 [project.optional-dependencies]
 docs = ["sphinx"]
 dev = [
-    "build", "twine", "pylint", "isort", "autopep8", "docformatter", "numpy",
-    "scipy"]
+    "build", "twine", "pylint", "isort", "autopep8", "docformatter"]
 
 [build-system]
 requires = ["setuptools", "cmake"]

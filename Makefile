@@ -26,14 +26,17 @@ endif
 
 .PHONY: env clean update test lint docs fix release build
 
-env:  ## create environment
-	$(PYTHON) -m venv $(VENV_OPTS) $(ENVDIR)
-	$(BINDIR)/python -m pip install .[dev,docs]
+# env: build ## create environment
+# 	$(PYTHON) -m venv $(VENV_OPTS) $(ENVDIR)
+# 	$(BINDIR)/python -m pip install numpy scipy
 
 build: ## build locally (instead of editable install)
-	cmake -S . -B $(BUILDDIR)
+	cmake -B$(BUILDDIR)
 	cmake --build $(BUILDDIR)
-	cp $(BUILDDIR)/*.so $(PROJECT)/
+	cp $(BUILDDIR)/*.so $(PROJECT)/ || true
+	cp $(BUILDDIR)/*.dylib $(PROJECT)/ || true
+	cp $(BUILDDIR)/*.dll $(PROJECT)/ || true
+
 
 clean:  ## clean environment
 	-rm -rf $(DOCBUILDDIR)/*
@@ -59,10 +62,10 @@ fix:  ## auto-fix Python code
 	# this is the best found for the purpose
 	docformatter -r --in-place $(PROJECT)
 
-release: update lint test  ## update version, publish to PyPI
-	python -m build
-	twine check dist/*
-	# twine upload --skip-existing dist/*
+# release: update lint test  ## update version, publish to PyPI
+# 	python -m build
+#	twine check dist/*
+#	twine upload --skip-existing dist/*
 
 # Thanks to Francoise at marmelab.com for this
 .DEFAULT_GOAL := help

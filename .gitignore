@@ -17,6 +17,8 @@ htmlcov/
 
 # C extensions
 *.so
+*.dylib
+*.dll
 
 # misc
 .DS_Store

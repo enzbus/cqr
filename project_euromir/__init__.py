@@ -30,18 +30,10 @@
 
 __version__ = '0.0.1'
 import pathlib
-import platform
 from ctypes import cdll
 
-if platform.system() == 'Linux':
-    _ext = 'so'
-elif platform.system() == 'Windows':
-    _ext = 'dll'
-elif platform.system() == 'Darwin':
-    _ext = 'dylib'
+for fname in pathlib.Path(__file__).parent.iterdir():
+    if fname.suffix in ['.so', '.dll', '.dylib']:
+        LIBRARY = cdll.LoadLibrary(fname)
 
-_libname = str(pathlib.Path(__file__).with_name('liblinear_algebra.' + _ext))
-
-linear_algebra = cdll.LoadLibrary(_libname)
-
-assert hasattr(linear_algebra, 'csc_matvec')
+assert hasattr(LIBRARY, 'csc_matvec')
