@@ -34,6 +34,7 @@ from ctypes import cdll
 
 for fname in pathlib.Path(__file__).parent.iterdir():
     if fname.suffix in ['.so', '.dll', '.dylib']:
+        print('LOADING LIBRARY', fname)
         LIBRARY = cdll.LoadLibrary(fname)
 
 assert hasattr(LIBRARY, 'csc_matvec')

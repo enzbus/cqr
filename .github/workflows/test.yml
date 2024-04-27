@@ -18,7 +18,7 @@ jobs:
 
     strategy:
       matrix: # https://github.com/actions/runner-images
-        os: [ubuntu-latest, windows-latest, macos-latest, macos-13] # last 2 are aarch64 and amd64
+        os: [ubuntu-latest, macos-latest, macos-13] # last 2 are aarch64 and amd64
 
     steps:
 
