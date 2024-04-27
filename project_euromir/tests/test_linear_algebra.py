@@ -45,14 +45,17 @@ class TestLinearAlgebra(TestCase):
     def test_csc(self):
         """Test CSC matvec."""
 
-        m = 100
-        n = 100
-        timer = 0.
-        for seed in range(100):
+        m = 1000
+        n = 1000
+        tries = 100
+        timers = np.empty(tries, dtype=float)
+
+        for seed in range(tries):
             np.random.seed(seed)
-            mat = sp.random(m=m, n=n, dtype=float).tocsc()
+            mat = sp.random(m=m, n=n, dtype=float, density=.01).tocsc()
             inp = np.random.randn(n)
-            out = np.zeros(m, dtype=float)
+            out = np.random.randn(m)
+            out1 = np.array(out)
             mult = np.random.choice([-1., None, 1.])
             if mult is None:
                 mult = np.random.randn()
@@ -60,22 +63,24 @@ class TestLinearAlgebra(TestCase):
             lib.add_csc_matvec(
                 n=n, col_pointers=mat.indptr, row_indexes=mat.indices,
                 mat_elements=mat.data, input=inp, output=out, mult=mult)
-            timer += time.time() - s
-            self.assertTrue(np.allclose(out, mult * (mat @ inp)))
-        print('timer CSC', timer)
+            timers[seed] = time.time() - s
+            self.assertTrue(np.allclose(out, out1 + mult * (mat @ inp)))
+        print('timer CSC', np.median(timers))
 
     def test_csr(self):
         """Test CSR matvec."""
 
-        m = 100
-        n = 100
-        timer = 0.
+        m = 1000
+        n = 1000
+        tries = 100
+        timers = np.empty(tries, dtype=float)
 
-        for seed in range(100):
+        for seed in range(tries):
             np.random.seed(seed)
-            mat = sp.random(m=m, n=n, dtype=float).tocsr()
+            mat = sp.random(m=m, n=n, dtype=float, density=.01).tocsr()
             inp = np.random.randn(n)
-            out = np.zeros(m, dtype=float)
+            out = np.random.randn(m)
+            out1 = np.array(out)
             mult = np.random.choice([-1., None, 1.])
             if mult is None:
                 mult = np.random.randn()
@@ -84,7 +89,7 @@ class TestLinearAlgebra(TestCase):
             lib.add_csr_matvec(
                 m=m, row_pointers=mat.indptr, col_indexes=mat.indices,
                 mat_elements=mat.data, input=inp, output=out, mult=mult)
-            timer += time.time() - s
-            self.assertTrue(np.allclose(out, mult * (mat @ inp)))
+            timers[seed] = time.time() - s
+            self.assertTrue(np.allclose(out, out1 + mult * (mat @ inp)))
 
-        print('timer CSR', timer)
+        print('timer CSR', np.median(timers))
