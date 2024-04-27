@@ -30,4 +30,6 @@ jobs:
             python-version: '3.11'
 
       - name: Test using makefile
-        run: make test
+        run: |
+              python -m pip install numpy scipy
+              make test
