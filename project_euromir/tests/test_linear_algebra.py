@@ -29,9 +29,11 @@
 
 from unittest import TestCase, main
 
-import project_euromir as lib
-import scipy.sparse as sp
 import numpy as np
+import scipy.sparse as sp
+
+import project_euromir as lib
+
 
 class TestLinearAlgebra(TestCase):
 
@@ -48,11 +50,8 @@ class TestLinearAlgebra(TestCase):
         inp = np.random.randn(n)
         out = np.zeros(m, dtype=float)
 
-
         lib.csc_matvec(
             n=n, col_pointers=mat.indptr, row_indexes=mat.indices,
             mat_elements=mat.data, input=inp, output=out, sign_plus=True)
-        
+
         self.assertTrue(np.all(out == mat @ inp))
-
-

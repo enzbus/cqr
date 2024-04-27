@@ -29,26 +29,64 @@
 """project_euromir"""
 
 __version__ = '0.0.1'
+
+import ctypes
 import pathlib
 import platform
+
 import numpy as _np
-import ctypes
+
+##
+# Load library
+##
 
 _EXTS = {'Linux': '.so', 'Darwin': '.dylib', 'Windows': '.dll'}
-_T = {
-    'int': ctypes.c_int, 
-    'int*': ctypes.POINTER(ctypes.c_int),
-    'double': ctypes.c_double,
-    'double*': ctypes.POINTER(ctypes.c_double),
-    'bool': ctypes.c_bool, 
-    }
 
 for fname in pathlib.Path(__file__).parent.iterdir():
     if fname.suffix == _EXTS[platform.system()]:
         print('LOADING LIBRARY', fname)
         LIBRARY = ctypes.cdll.LoadLibrary(fname)
+        break
+else:
+    raise ImportError(
+        'Could not load the compiled library!')
+
+##
+# Utilities for interfacing via ctypes
+##
+
+_T = {  # ctypes
+    'int': ctypes.c_int,
+    'int*': ctypes.POINTER(ctypes.c_int),
+    'double': ctypes.c_double,
+    'double*': ctypes.POINTER(ctypes.c_double),
+    'bool': ctypes.c_bool,
+}
+
+_NT = {  # np.dtypes
+    'int': _np.int32,
+    'double': _np.float64,
+    'bool': bool
+}
+
+
+def _ndarray_to_pointer(ndarray, c_type):
+    """1-dimensional Numpy array to pointer."""
+    assert len(ndarray.ctypes.shape) == 1
+    assert len(ndarray.ctypes.strides) == 1
+    oldptr = ndarray.ctypes.data
+    result = ndarray.astype(  # only copies if conversion required
+        dtype=_NT[c_type], order='C', copy=False)
+    assert result.ctypes.data == oldptr  # relax if required
+    return result.ctypes.data_as(_T[c_type + '*'])  # no copy
+
+
+##
+# Interface to functions
+##
 
 assert hasattr(LIBRARY, 'csc_matvec')
+
 
 LIBRARY.csc_matvec.argtypes = [
     _T['int'],
@@ -58,19 +96,19 @@ LIBRARY.csc_matvec.argtypes = [
     _T['double*'],
     _T['double*'],
     _T['bool'],
-    ]
+]
 LIBRARY.csc_matvec.restype = None
 
 
 def csc_matvec(
         n, col_pointers, row_indexes, mat_elements, output, input, sign_plus):
     """csc matvec"""
-    
+
     LIBRARY.csc_matvec(
         _T['int'](n),
-        col_pointers.ctypes.data_as(_T['int*']),
-        row_indexes.ctypes.data_as(_T['int*']),
-        mat_elements.ctypes.data_as(_T['double*']),
-        output.ctypes.data_as(_T['double*']),
-        input.ctypes.data_as(_T['double*']),
+        _ndarray_to_pointer(col_pointers, 'int'),
+        _ndarray_to_pointer(row_indexes, 'int'),
+        _ndarray_to_pointer(mat_elements, 'double'),
+        _ndarray_to_pointer(output, 'double'),
+        _ndarray_to_pointer(input, 'double'),
         _T['bool'](sign_plus))
