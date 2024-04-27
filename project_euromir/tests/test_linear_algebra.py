@@ -44,29 +44,33 @@ class TestLinearAlgebra(TestCase):
     def test_csc(self):
         """Test CSC matvec."""
 
-        m = 20
-        n = 30
-        mat = sp.random(m=m, n=n, dtype=float).tocsc()
-        inp = np.random.randn(n)
-        out = np.zeros(m, dtype=float)
+        m = 200
+        n = 300
+        for seed in range(100):
+            np.random.seed(seed)
+            mat = sp.random(m=m, n=n, dtype=float).tocsc()
+            inp = np.random.randn(n)
+            out = np.zeros(m, dtype=float)
 
-        lib.csc_matvec(
-            n=n, col_pointers=mat.indptr, row_indexes=mat.indices,
-            mat_elements=mat.data, input=inp, output=out, sign_plus=True)
+            lib.csc_matvec(
+                n=n, col_pointers=mat.indptr, row_indexes=mat.indices,
+                mat_elements=mat.data, input=inp, output=out, sign_plus=True)
 
-        self.assertTrue(np.all(out == mat @ inp))
+            self.assertTrue(np.all(out == mat @ inp))
 
     def test_csr(self):
         """Test CSR matvec."""
 
-        m = 20
-        n = 30
-        mat = sp.random(m=m, n=n, dtype=float).tocsr()
-        inp = np.random.randn(n)
-        out = np.zeros(m, dtype=float)
+        m = 200
+        n = 300
+        for seed in range(100):
+            np.random.seed(seed)
+            mat = sp.random(m=m, n=n, dtype=float).tocsr()
+            inp = np.random.randn(n)
+            out = np.zeros(m, dtype=float)
 
-        lib.csr_matvec(
-            m=m, row_pointers=mat.indptr, col_indexes=mat.indices,
-            mat_elements=mat.data, input=inp, output=out, sign_plus=True)
+            lib.csr_matvec(
+                m=m, row_pointers=mat.indptr, col_indexes=mat.indices,
+                mat_elements=mat.data, input=inp, output=out, sign_plus=True)
 
-        self.assertTrue(np.all(out == mat @ inp))
+            self.assertTrue(np.all(out == mat @ inp))
