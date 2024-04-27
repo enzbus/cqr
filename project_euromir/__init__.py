@@ -31,13 +31,46 @@
 __version__ = '0.0.1'
 import pathlib
 import platform
-from ctypes import cdll
+import numpy as _np
+import ctypes
 
-_EXTS = {'Linux':'.so', 'Darwin':'.dylib', 'Windows':'.dll'}
+_EXTS = {'Linux': '.so', 'Darwin': '.dylib', 'Windows': '.dll'}
+_T = {
+    'int': ctypes.c_int, 
+    'int*': ctypes.POINTER(ctypes.c_int),
+    'double': ctypes.c_double,
+    'double*': ctypes.POINTER(ctypes.c_double),
+    'bool': ctypes.c_bool, 
+    }
 
 for fname in pathlib.Path(__file__).parent.iterdir():
     if fname.suffix == _EXTS[platform.system()]:
         print('LOADING LIBRARY', fname)
-        LIBRARY = cdll.LoadLibrary(fname)
+        LIBRARY = ctypes.cdll.LoadLibrary(fname)
 
 assert hasattr(LIBRARY, 'csc_matvec')
+
+LIBRARY.csc_matvec.argtypes = [
+    _T['int'],
+    _T['int*'],
+    _T['int*'],
+    _T['double*'],
+    _T['double*'],
+    _T['double*'],
+    _T['bool'],
+    ]
+LIBRARY.csc_matvec.restype = None
+
+
+def csc_matvec(
+        n, col_pointers, row_indexes, mat_elements, output, input, sign_plus):
+    """csc matvec"""
+    
+    LIBRARY.csc_matvec(
+        _T['int'](n),
+        col_pointers.ctypes.data_as(_T['int*']),
+        row_indexes.ctypes.data_as(_T['int*']),
+        mat_elements.ctypes.data_as(_T['double*']),
+        output.ctypes.data_as(_T['double*']),
+        input.ctypes.data_as(_T['double*']),
+        _T['bool'](sign_plus))

@@ -29,9 +29,30 @@
 
 from unittest import TestCase, main
 
+import project_euromir as lib
+import scipy.sparse as sp
+import numpy as np
 
 class TestLinearAlgebra(TestCase):
 
-    def test_import(self):
-        """Test that the wheel installed correctly."""
-        import project_euromir
+    # def test_import(self):
+    #     """Test that the wheel installed correctly."""
+    #     import project_euromir
+
+    def test_csc(self):
+        """Test CSC matvec."""
+
+        m = 20
+        n = 30
+        mat = sp.random(m=m, n=n, dtype=float).tocsc()
+        inp = np.random.randn(n)
+        out = np.zeros(m, dtype=float)
+
+
+        lib.csc_matvec(
+            n=n, col_pointers=mat.indptr, row_indexes=mat.indices,
+            mat_elements=mat.data, input=inp, output=out, sign_plus=True)
+        
+        self.assertTrue(np.all(out == mat @ inp))
+
+
