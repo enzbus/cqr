@@ -30,9 +30,9 @@
 
 __version__ = '0.0.1'
 
-import ctypes
-import pathlib
-import platform
+import ctypes as _ctypes
+import pathlib as _pathlib
+import platform as _platform
 
 import numpy as _np
 
@@ -42,10 +42,10 @@ import numpy as _np
 
 _EXTS = {'Linux': '.so', 'Darwin': '.dylib', 'Windows': '.dll'}
 
-for fname in pathlib.Path(__file__).parent.iterdir():
-    if fname.suffix == _EXTS[platform.system()]:
-        print('LOADING LIBRARY', fname)
-        LIBRARY = ctypes.cdll.LoadLibrary(fname)
+for _fname in _pathlib.Path(__file__).parent.iterdir():
+    if _fname.suffix == _EXTS[_platform.system()]:
+        print('LOADING LIBRARY', _fname)
+        LIBRARY = _ctypes.cdll.LoadLibrary(_fname)
         break
 else:
     raise ImportError(
@@ -56,11 +56,11 @@ else:
 ##
 
 _T = {  # ctypes
-    'int': ctypes.c_int,
-    'int*': ctypes.POINTER(ctypes.c_int),
-    'double': ctypes.c_double,
-    'double*': ctypes.POINTER(ctypes.c_double),
-    'bool': ctypes.c_bool,
+    'int': _ctypes.c_int,
+    'int*': _ctypes.POINTER(_ctypes.c_int),
+    'double': _ctypes.c_double,
+    'double*': _ctypes.POINTER(_ctypes.c_double),
+    'bool': _ctypes.c_bool,
 }
 
 _NT = {  # np.dtypes
@@ -69,9 +69,9 @@ _NT = {  # np.dtypes
     'bool': bool
 }
 
-
 def _ndarray_to_pointer(ndarray, c_type):
     """1-dimensional Numpy array to pointer."""
+    assert isinstance(ndarray, _np.ndarray)
     assert len(ndarray.ctypes.shape) == 1
     assert len(ndarray.ctypes.strides) == 1
     oldptr = ndarray.ctypes.data
@@ -80,35 +80,74 @@ def _ndarray_to_pointer(ndarray, c_type):
     assert result.ctypes.data == oldptr  # relax if required
     return result.ctypes.data_as(_T[c_type + '*'])  # no copy
 
+def _python_to_c(obj, c_type):
+    """Convert Python scalars or simple Numpy arrays to C objects."""
+    if c_type[-1] == '*':
+        return _ndarray_to_pointer(obj, c_type[:-1])
+    return _T[c_type](obj)
+
+def _interface_function(function_name, args):
+    """Interface via (Numpy) ctypes a void function."""
+    assert hasattr(LIBRARY, function_name)
+
+    getattr(LIBRARY, function_name).argtypes = [_T[el[1]] for el in args]
+    getattr(LIBRARY, function_name).restype = None
+
+    def fun(**kwargs):
+        funargs = [_python_to_c(kwargs[arg], c_type) for arg, c_type in args]
+        return getattr(LIBRARY, function_name)(*funargs)
+
+    fun.__doc__ = f"{function_name}\n\n"
+    for arg, c_type in args:
+        fun.__doc__ += f':param {arg}:\n'
+        fun.__doc__ += f':type {arg}: {c_type}\n'
+    
+    return fun
+
 
 ##
 # Interface to functions
 ##
 
-assert hasattr(LIBRARY, 'csc_matvec')
+csc_matvec = _interface_function(
+    function_name = 'csc_matvec',
+    args = (
+        ('n', 'int'),
+        ('col_pointers', 'int*'),
+        ('row_indexes', 'int*'),
+        ('mat_elements', 'double*'),
+        ('output', 'double*'),
+        ('input', 'double*'),
+        ('sign_plus', 'bool'),
+    )
+)
 
 
-LIBRARY.csc_matvec.argtypes = [
-    _T['int'],
-    _T['int*'],
-    _T['int*'],
-    _T['double*'],
-    _T['double*'],
-    _T['double*'],
-    _T['bool'],
-]
-LIBRARY.csc_matvec.restype = None
+# assert hasattr(LIBRARY, 'csc_matvec')
 
 
-def csc_matvec(
-        n, col_pointers, row_indexes, mat_elements, output, input, sign_plus):
-    """csc matvec"""
+# LIBRARY.csc_matvec.argtypes = [
+#     _T['int'],
+#     _T['int*'],
+#     _T['int*'],
+#     _T['double*'],
+#     _T['double*'],
+#     _T['double*'],
+#     _T['bool'],
+# ]
+# LIBRARY.csc_matvec.restype = None
 
-    LIBRARY.csc_matvec(
-        _T['int'](n),
-        _ndarray_to_pointer(col_pointers, 'int'),
-        _ndarray_to_pointer(row_indexes, 'int'),
-        _ndarray_to_pointer(mat_elements, 'double'),
-        _ndarray_to_pointer(output, 'double'),
-        _ndarray_to_pointer(input, 'double'),
-        _T['bool'](sign_plus))
+
+# def csc_matvec(
+#         n, col_pointers, row_indexes, mat_elements, output, input, sign_plus):
+#     """csc matvec"""
+
+#     LIBRARY.csc_matvec(
+#         _python_to_c(n, 'int'),
+#         _python_to_c(col_pointers, 'int*'),
+#         _python_to_c(row_indexes, 'int*'),
+#         _python_to_c(mat_elements, 'double*'),
+#         _python_to_c(output, 'double*'),
+#         _python_to_c(input, 'double*'),
+#         _python_to_c(sign_plus, 'bool')
+#     )
