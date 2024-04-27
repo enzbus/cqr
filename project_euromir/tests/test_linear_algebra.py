@@ -55,3 +55,18 @@ class TestLinearAlgebra(TestCase):
             mat_elements=mat.data, input=inp, output=out, sign_plus=True)
 
         self.assertTrue(np.all(out == mat @ inp))
+
+    def test_csr(self):
+        """Test CSR matvec."""
+
+        m = 20
+        n = 30
+        mat = sp.random(m=m, n=n, dtype=float).tocsr()
+        inp = np.random.randn(n)
+        out = np.zeros(m, dtype=float)
+
+        lib.csr_matvec(
+            m=m, row_pointers=mat.indptr, col_indexes=mat.indices,
+            mat_elements=mat.data, input=inp, output=out, sign_plus=True)
+
+        self.assertTrue(np.all(out == mat @ inp))

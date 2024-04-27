@@ -69,6 +69,7 @@ _NT = {  # np.dtypes
     'bool': bool
 }
 
+
 def _ndarray_to_pointer(ndarray, c_type):
     """1-dimensional Numpy array to pointer."""
     assert isinstance(ndarray, _np.ndarray)
@@ -80,11 +81,13 @@ def _ndarray_to_pointer(ndarray, c_type):
     assert result.ctypes.data == oldptr  # relax if required
     return result.ctypes.data_as(_T[c_type + '*'])  # no copy
 
+
 def _python_to_c(obj, c_type):
     """Convert Python scalars or simple Numpy arrays to C objects."""
     if c_type[-1] == '*':
         return _ndarray_to_pointer(obj, c_type[:-1])
     return _T[c_type](obj)
+
 
 def _interface_function(function_name, args):
     """Interface via (Numpy) ctypes a void function."""
@@ -101,7 +104,7 @@ def _interface_function(function_name, args):
     for arg, c_type in args:
         fun.__doc__ += f':param {arg}:\n'
         fun.__doc__ += f':type {arg}: {c_type}\n'
-    
+
     return fun
 
 
@@ -110,8 +113,8 @@ def _interface_function(function_name, args):
 ##
 
 csc_matvec = _interface_function(
-    function_name = 'csc_matvec',
-    args = (
+    function_name='csc_matvec',
+    args=(
         ('n', 'int'),
         ('col_pointers', 'int*'),
         ('row_indexes', 'int*'),
@@ -122,32 +125,15 @@ csc_matvec = _interface_function(
     )
 )
 
-
-# assert hasattr(LIBRARY, 'csc_matvec')
-
-
-# LIBRARY.csc_matvec.argtypes = [
-#     _T['int'],
-#     _T['int*'],
-#     _T['int*'],
-#     _T['double*'],
-#     _T['double*'],
-#     _T['double*'],
-#     _T['bool'],
-# ]
-# LIBRARY.csc_matvec.restype = None
-
-
-# def csc_matvec(
-#         n, col_pointers, row_indexes, mat_elements, output, input, sign_plus):
-#     """csc matvec"""
-
-#     LIBRARY.csc_matvec(
-#         _python_to_c(n, 'int'),
-#         _python_to_c(col_pointers, 'int*'),
-#         _python_to_c(row_indexes, 'int*'),
-#         _python_to_c(mat_elements, 'double*'),
-#         _python_to_c(output, 'double*'),
-#         _python_to_c(input, 'double*'),
-#         _python_to_c(sign_plus, 'bool')
-#     )
+csr_matvec = _interface_function(
+    function_name='csr_matvec',
+    args=(
+        ('m', 'int'),
+        ('row_pointers', 'int*'),
+        ('col_indexes', 'int*'),
+        ('mat_elements', 'double*'),
+        ('output', 'double*'),
+        ('input', 'double*'),
+        ('sign_plus', 'bool'),
+    )
+)
