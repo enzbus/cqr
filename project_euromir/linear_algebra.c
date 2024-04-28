@@ -31,9 +31,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "linear_algebra.h"
 
-#define MATVEC_IMPL 3
+#define CSC_IMPL 3
+#define CSR_IMPL 2 // for some reason it's faster (?)
 
-#if MATVEC_IMPL == 1
+#if CSC_IMPL == 1
 
 void add_csc_matvec(
     const int n, /*number of columns*/
@@ -51,7 +52,7 @@ void add_csc_matvec(
             output[row_indexes[i]] += mult * (mat_elements[i] * input[j]);
 };
 
-#elif MATVEC_IMPL == 2
+#elif CSC_IMPL == 2
 
 // profiling experiments: this one helps over the above
 void add_csc_matvec(
@@ -82,7 +83,7 @@ void add_csc_matvec(
    }
 };
 
-#elif MATVEC_IMPL == 3
+#elif CSC_IMPL == 3
 
 void add_csc_matvec(
     const int n, /*number of columns*/
@@ -117,6 +118,8 @@ void add_csc_matvec(
         col_pointers++;
     }
 };
+#endif
+#if CSR_IMPL == 3
 
 void add_csr_matvec(
     const int m, /*number of rows*/
@@ -136,7 +139,7 @@ void add_csr_matvec(
     for (i = 0; i<m; i++){
         for (j = *row_pointers; j < *(row_pointers + 1); j++){
             input_ptr = input + *col_indexes;
-            (*output) += mult * (*mat_elements) * (*input_ptr);
+            (*output) += mult * ((*mat_elements) * (*input_ptr));
             mat_elements++;
             col_indexes++;
         }
@@ -146,9 +149,7 @@ void add_csr_matvec(
 };
 
 
-#endif
-
-#if MATVEC_IMPL == 1
+#elif CSR_IMPL == 1
 
 void add_csr_matvec(
     const int m, /*number of rows*/
@@ -167,7 +168,7 @@ void add_csr_matvec(
 
 };
 
-#elif MATVEC_IMPL == 2
+#elif CSR_IMPL == 2
 
 void add_csr_matvec(
     const int m, /*number of rows*/

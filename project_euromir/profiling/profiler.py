@@ -85,8 +85,12 @@ class Profiler:
                 self.one_sample_experiment()
                 self._timers[seed] = time.time() - t
 
-            self._meantimes[idx] = np.mean(self._timers)
-            self._stdtimes[idx] = np.std(self._timers)
+            # remove outliers (garbage collector)
+            self._timers[:] = np.sort(self._timers)
+            self._meantimes[idx] = np.mean(
+                self._timers[self._tries//10:-(self._tries//10)])
+            self._stdtimes[idx] = np.std(
+                self._timers[self._tries//10:-(self._tries//10)])
 
         self.fit_curve()
         self.print_result()

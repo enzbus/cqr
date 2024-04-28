@@ -91,9 +91,12 @@ class CSR(CSC):
 
 if __name__ == '__main__':
 
-    # WHICH = CSC
-    WHICH = CSR
+    # print('CSC')
+    # csc = CSC(
+    #     m=1000, n=1000, tries=100, complexities=np.linspace(.01, .25, 200))
+    # csc.run()
 
-    c = WHICH(
+    print('CSR')
+    csr = CSR(
         m=1000, n=1000, tries=100, complexities=np.linspace(.01, .25, 200))
-    c.run()
+    csr.run()
