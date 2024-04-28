@@ -1,58 +1,70 @@
-import project_euromir as lib
-import time
 import numpy as np
 import scipy.sparse as sp
-import matplotlib.pyplot as plt
-from scipy.optimize import curve_fit
 
-m = 1000
-n = 1000
-tries = 100
-timers = np.empty(tries, dtype=float)
+import project_euromir as lib
 
-meantimes = []
-stdtimes = []
-densities = np.linspace(.01, 1, 100)
-inp = np.random.randn(n)
-out = np.random.randn(m)
-mult = 1.
+from .profiler import Profiler
 
-for density in densities:
 
-    mat = sp.random(m=m, n=n, dtype=float, density=density).tocsc()
+class CSC(Profiler):
 
-    for seed in range(tries):
+    def __init__(
+            self, m=1000, n=1000, tries=100,
+            complexities=np.linspace(.01, .25, 200)):
+        self.m = m
+        self.n = n
+
+        self.input_vector = np.zeros(n)
+        self.output_vector = np.zeros(m)
+        self.mult = None
+        self.matrix = None
+
+        super().__init__(
+            complexities=complexities, tries=tries,
+            experiment_name=f'matvec of a {self.m}x{self.n} matrix')
+
+    def setup_at_complexity(self, complexity):
+        """Method called to set up the experiment at given complexity.
+
+        This is called once for each complexity value.
+        """
+        self.matrix = sp.random(
+            m=self.m, n=self.n, dtype=float, density=complexity).tocsc()
+
+    def prepare_sample_experiment(self, seed):
+        """Method called repeatedly to set up each sample experiment.
+
+        ``seed`` is ranged over ``tries``.
+        """
         np.random.seed(seed)
-        inp[:] = np.random.randn(n)
-        s = time.time()
+        self.input_vector[:] = np.random.randn(self.n)
+        # self.output_vector[:] = np.random.randn(self.m)
+        # self.matrix.data[:] = np.random.randn(self.matrix.nnz)
+        self.mult = np.random.choice([-1,1,np.nan])
+        if np.isnan(self.mult):
+            self.mult = np.random.randn()
+    
+    def one_sample_experiment(self):
+        """Method called repeatedly to run experiment.
+
+        The call to this method is timed.
+        """
+
         lib.add_csc_matvec(
-            n=n, col_pointers=mat.indptr, row_indexes=mat.indices,
-            mat_elements=mat.data, input=inp, output=out, mult=mult)
-        timers[seed] = time.time() - s
-    print('timer CSC', np.median(timers))
-    meantimes.append(np.mean(timers))
-    stdtimes.append(np.std(timers))
+            n=self.n, col_pointers=self.matrix.indptr,
+            row_indexes=self.matrix.indices,
+            mat_elements=self.matrix.data, input=self.input_vector,
+            output=self.output_vector, mult=self.mult)
 
-## LINEAR FIT USING SCIPY W/ERROR PROPAGATION
+    @staticmethod
+    def curve(x, slope, intercept):  # , square):
+        """Function used for the curve fit. You can use any *args after x."""
+        return slope*x + intercept  # + square * (x**2)
 
-def linear_f(x,a,b):
-    return a*x+b
+    curve_parameter_names = ('SLOPE', 'INTERCEPT')  # , 'SQUARE')
 
-(a, b), Sigma = curve_fit(
-    linear_f,xdata=densities,ydata=meantimes,sigma=stdtimes,
-    absolute_sigma=True)
-stda, stdb = np.sqrt(np.diag(Sigma))
-print(f'INTERCEPT (s): {a:.3e} plusminus {stda:.3e}')
-print(f'SLOPE (s/density): {b:.3e} plusminus {stdb:.3e} ')
 
-plt.errorbar(x=densities, y=meantimes, yerr=stdtimes)
-plt.plot(densities, linear_f(densities, a, b))
-plt.title(f'matvec of a {m}x{n} matrix')
-plt.ylim(
-    b + np.min(densities)*a - 2*np.median(stdtimes), 
-    b + np.max(densities)*a + 2*np.median(stdtimes)
-    )
-plt.ylabel(f'median time out of {tries}')
-plt.xlabel('density')
-plt.show()
+if __name__ == '__main__':
 
+    c = CSC(m=1000, n=1000, tries=100, complexities=np.linspace(.01, .25, 200))
+    c.run()

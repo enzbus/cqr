@@ -31,27 +31,27 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "linear_algebra.h"
 
-// #define CSC_IMPL 3
+#define CSC_IMPL 3
 
-// #if CSC_IMPL == 1
+#if CSC_IMPL == 1
 
-// void add_csc_matvec(
-//     const int n, /*number of columns*/
-//     const int * col_pointers,
-//     const int * row_indexes,
-//     const double * mat_elements,
-//     double * output,
-//     const double * input,
-//     const double mult
-//     ){
-//     int j, i;
+void add_csc_matvec(
+    const int n, /*number of columns*/
+    const int * col_pointers,
+    const int * row_indexes,
+    const double * mat_elements,
+    double * output,
+    const double * input,
+    const double mult
+    ){
+    int j, i;
 
-//     for (j = 0; j<n; j++)
-//         for (i = col_pointers[j]; i < col_pointers[j + 1]; i++)
-//             output[row_indexes[i]] += mult * (mat_elements[i] * input[j]);
-// };
+    for (j = 0; j<n; j++)
+        for (i = col_pointers[j]; i < col_pointers[j + 1]; i++)
+            output[row_indexes[i]] += mult * (mat_elements[i] * input[j]);
+};
 
-// #elif CSC_IMPL == 2
+#elif CSC_IMPL == 2
 
 // profiling experiments: this one helps over the above
 void add_csc_matvec(
@@ -82,42 +82,42 @@ void add_csc_matvec(
    }
 };
 
-// #elif CSC_IMPL == 3
+#elif CSC_IMPL == 3
 
-// void add_csc_matvec(
-//     const int n, /*number of columns*/
-//     const int * restrict col_pointers,
-//     const int * restrict row_indexes,
-//     const double * restrict mat_elements,
-//     double * restrict output,
-//     const double * restrict input,
-//     const double mult
-//     ){
-//     int j, i;
+void add_csc_matvec(
+    const int n, /*number of columns*/
+    const int * restrict col_pointers,
+    const int * restrict row_indexes,
+    const double * restrict mat_elements,
+    double * restrict output,
+    const double * restrict input,
+    const double mult
+    ){
+    int j, i;
 
-//     const double * restrict input_ptr = input;
-//     const int * restrict col_pointers_ptr = col_pointers;
-//     const int * restrict row_indexes_ptr = row_indexes;
-//     const int * restrict col_pointers_ptr_next = col_pointers + 1;
-//     const double * restrict mat_elements_ptr;
-//     double * restrict output_ptr;
+    const double * restrict input_ptr = input;
+    const int * restrict col_pointers_ptr = col_pointers;
+    const int * restrict row_indexes_ptr = row_indexes;
+    const int * restrict col_pointers_ptr_next = col_pointers + 1;
+    const double * restrict mat_elements_ptr;
+    double * restrict output_ptr;
 
-//     for (j = 0; j<n; j++){
-//         mat_elements_ptr = mat_elements + *col_pointers_ptr;
-//         row_indexes_ptr = row_indexes + *col_pointers_ptr;
-//         for (i = *col_pointers_ptr; i < *col_pointers_ptr_next; i++){
-//             output_ptr = output + *row_indexes_ptr;
-//             (*output_ptr) += ((*mat_elements_ptr) * (*input_ptr));
-//             mat_elements_ptr++;
-//             row_indexes_ptr++;
-//         }
-//         input_ptr++;
-//         col_pointers_ptr++;
-//         col_pointers_ptr_next++;
-//     }
-// };
+    for (j = 0; j<n; j++){
+        mat_elements_ptr = mat_elements + *col_pointers_ptr;
+        row_indexes_ptr = row_indexes + *col_pointers_ptr;
+        for (i = *col_pointers_ptr; i < *col_pointers_ptr_next; i++){
+            output_ptr = output + *row_indexes_ptr;
+            (*output_ptr) += mult * ((*mat_elements_ptr) * (*input_ptr));
+            mat_elements_ptr++;
+            row_indexes_ptr++;
+        }
+        input_ptr++;
+        col_pointers_ptr++;
+        col_pointers_ptr_next++;
+    }
+};
 
-// #endif
+#endif
 
 
 void add_csr_matvec(
