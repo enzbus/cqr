@@ -31,9 +31,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include "linear_algebra.h"
 
-#define CSC_IMPL 3
+#define MATVEC_IMPL 3
 
-#if CSC_IMPL == 1
+#if MATVEC_IMPL == 1
 
 void add_csc_matvec(
     const int n, /*number of columns*/
@@ -51,7 +51,7 @@ void add_csc_matvec(
             output[row_indexes[i]] += mult * (mat_elements[i] * input[j]);
 };
 
-#elif CSC_IMPL == 2
+#elif MATVEC_IMPL == 2
 
 // profiling experiments: this one helps over the above
 void add_csc_matvec(
@@ -82,7 +82,7 @@ void add_csc_matvec(
    }
 };
 
-#elif CSC_IMPL == 3
+#elif MATVEC_IMPL == 3
 
 void add_csc_matvec(
     const int n, /*number of columns*/
@@ -93,32 +93,62 @@ void add_csc_matvec(
     const double * restrict input,
     const double mult
     ){
+    /*Could refactor, but easier to read with explicit row and col indexes.
+    Should not matter, they're treated as counters in the for condition.
+    
+    In terms of mult, it's better to separate methods (add, sub, generic),
+    since the sign/number they're called with is known at compile time. For
+    now just keeping the one.
+    */
     int j, i;
 
-    const double * restrict input_ptr = input;
-    const int * restrict col_pointers_ptr = col_pointers;
-    const int * restrict row_indexes_ptr = row_indexes;
-    const int * restrict col_pointers_ptr_next = col_pointers + 1;
-    const double * restrict mat_elements_ptr;
     double * restrict output_ptr;
+    mat_elements += *col_pointers; // always 0?
+    row_indexes += *col_pointers;
 
     for (j = 0; j<n; j++){
-        mat_elements_ptr = mat_elements + *col_pointers_ptr;
-        row_indexes_ptr = row_indexes + *col_pointers_ptr;
-        for (i = *col_pointers_ptr; i < *col_pointers_ptr_next; i++){
-            output_ptr = output + *row_indexes_ptr;
-            (*output_ptr) += mult * ((*mat_elements_ptr) * (*input_ptr));
-            mat_elements_ptr++;
-            row_indexes_ptr++;
+        for (i = *col_pointers; i < *(col_pointers + 1); i++){
+            output_ptr = output + *row_indexes;
+            (*output_ptr) += mult * ((*mat_elements) * (*input));
+            mat_elements++;
+            row_indexes++;
         }
-        input_ptr++;
-        col_pointers_ptr++;
-        col_pointers_ptr_next++;
+        input++;
+        col_pointers++;
     }
 };
 
+void add_csr_matvec(
+    const int m, /*number of rows*/
+    const int * row_pointers, 
+    const int * col_indexes,
+    const double * mat_elements,
+    double * output,
+    const double * input,
+    const double mult
+    ){
+    int j, i;
+
+    const double * restrict input_ptr;
+    mat_elements += *row_pointers; // always 0?
+    col_indexes += *row_pointers;
+
+    for (i = 0; i<m; i++){
+        for (j = *row_pointers; j < *(row_pointers + 1); j++){
+            input_ptr = input + *col_indexes;
+            (*output) += mult * (*mat_elements) * (*input_ptr);
+            mat_elements++;
+            col_indexes++;
+        }
+        output++;
+        row_pointers++;
+    }
+};
+
+
 #endif
 
+#if MATVEC_IMPL == 1
 
 void add_csr_matvec(
     const int m, /*number of rows*/
@@ -137,28 +167,31 @@ void add_csr_matvec(
 
 };
 
+#elif MATVEC_IMPL == 2
 
-// void add_csr_matvec(
-//     const int m, /*number of rows*/
-//     const int * row_pointers, 
-//     const int * col_indexes,
-//     const double * mat_elements,
-//     double * output,
-//     const double * input,
-//     const double mult
-//     ){
-//     int j, i;
-//     if (mult == 1.0){ 
-//         for (i = 0; i<m; i++)
-//             for (j = row_pointers[i]; j < row_pointers[i + 1]; j++)
-//                 output[i] +=  mat_elements[j] * input[col_indexes[j]];
-//     } else if (mult == -1.0){
-//         for (i = 0; i<m; i++)
-//             for (j = row_pointers[i]; j < row_pointers[i + 1]; j++)
-//                 output[i] -=  mat_elements[j] * input[col_indexes[j]];
-//     } else {
-//         for (i = 0; i<m; i++)
-//             for (j = row_pointers[i]; j < row_pointers[i + 1]; j++)
-//                 output[i] += mult * (mat_elements[j] * input[col_indexes[j]]);
-//     }
-// };
+void add_csr_matvec(
+    const int m, /*number of rows*/
+    const int * row_pointers, 
+    const int * col_indexes,
+    const double * mat_elements,
+    double * output,
+    const double * input,
+    const double mult
+    ){
+    int j, i;
+    if (mult == 1.0){ 
+        for (i = 0; i<m; i++)
+            for (j = row_pointers[i]; j < row_pointers[i + 1]; j++)
+                output[i] +=  mat_elements[j] * input[col_indexes[j]];
+    } else if (mult == -1.0){
+        for (i = 0; i<m; i++)
+            for (j = row_pointers[i]; j < row_pointers[i + 1]; j++)
+                output[i] -=  mat_elements[j] * input[col_indexes[j]];
+    } else {
+        for (i = 0; i<m; i++)
+            for (j = row_pointers[i]; j < row_pointers[i + 1]; j++)
+                output[i] += mult * (mat_elements[j] * input[col_indexes[j]]);
+    }
+};
+
+#endif

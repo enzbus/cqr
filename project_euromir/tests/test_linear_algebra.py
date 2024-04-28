@@ -67,6 +67,70 @@ class TestLinearAlgebra(TestCase):
             self.assertTrue(np.allclose(out, out1 + mult * (mat @ inp)))
         print('timer CSC', np.median(timers))
 
+    def test_csc_degen(self):
+        """Test csc matvec with degenerate matrices."""
+        m = 20
+        n = 30
+        for mat in [
+            sp.csc_matrix((m, n), dtype=float),  # empty matrix
+            sp.hstack([  # first half cols are zero
+                sp.csc_matrix((m, n//2), dtype=float),
+                sp.csc_matrix(np.ones((m, n//2)))]),
+            sp.hstack([  # second half cols are zero
+                sp.csc_matrix(np.ones((m, n//2))),
+                sp.csc_matrix((m, n//2), dtype=float)]),
+            sp.vstack([  # first half rows are zero
+                sp.csc_matrix((m//2, n), dtype=float),
+                sp.csc_matrix(np.ones((m//2, n)))]),
+            sp.vstack([  # second half rows are zero
+                sp.csc_matrix(np.ones((m//2, n))),
+                sp.csc_matrix((m//2, n), dtype=float)])
+        ]:
+
+            assert mat.shape == (m, n)
+            assert isinstance(mat, sp.csc_matrix)
+
+            inp = np.random.randn(n)
+            out = np.random.randn(m)
+            oldo = np.copy(out)
+            mult = 3.
+            lib.add_csc_matvec(
+                n=n, col_pointers=mat.indptr, row_indexes=mat.indices,
+                mat_elements=mat.data, input=inp, output=out, mult=mult)
+            self.assertTrue(np.allclose(oldo + mult * (mat @ inp), out))
+
+    def test_csr_degen(self):
+        """Test csr matvec with degenerate matrices (copied from above)."""
+        m = 20
+        n = 30
+        for mat in [
+            sp.csc_matrix((m, n), dtype=float),  # empty matrix
+            sp.hstack([  # first half cols are zero
+                sp.csc_matrix((m, n//2), dtype=float),
+                sp.csc_matrix(np.ones((m, n//2)))]),
+            sp.hstack([  # second half cols are zero
+                sp.csc_matrix(np.ones((m, n//2))),
+                sp.csc_matrix((m, n//2), dtype=float)]),
+            sp.vstack([  # first half rows are zero
+                sp.csc_matrix((m//2, n), dtype=float),
+                sp.csc_matrix(np.ones((m//2, n)))]),
+            sp.vstack([  # second half rows are zero
+                sp.csc_matrix(np.ones((m//2, n))),
+                sp.csc_matrix((m//2, n), dtype=float)])
+        ]:
+
+            assert mat.shape == (m, n)
+            mat = sp.csr_matrix(mat)
+
+            inp = np.random.randn(n)
+            out = np.random.randn(m)
+            oldo = np.copy(out)
+            mult = 3.
+            lib.add_csr_matvec(
+                m=m, row_pointers=mat.indptr, col_indexes=mat.indices,
+                mat_elements=mat.data, input=inp, output=out, mult=mult)
+            self.assertTrue(np.allclose(oldo + mult * (mat @ inp), out))
+
     def test_csr(self):
         """Test CSR matvec."""
 

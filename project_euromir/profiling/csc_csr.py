@@ -21,7 +21,8 @@ class CSC(Profiler):
 
         super().__init__(
             complexities=complexities, tries=tries,
-            experiment_name=f'matvec of a {self.m}x{self.n} matrix')
+            experiment_name=f'{self.__class__.__name__} matvec'
+            + f' of a {self.m}x{self.n} matrix')
 
     def setup_at_complexity(self, complexity):
         """Method called to set up the experiment at given complexity.
@@ -40,10 +41,10 @@ class CSC(Profiler):
         self.input_vector[:] = np.random.randn(self.n)
         # self.output_vector[:] = np.random.randn(self.m)
         # self.matrix.data[:] = np.random.randn(self.matrix.nnz)
-        self.mult = np.random.choice([-1,1,np.nan])
+        self.mult = np.random.choice([-1, 1, np.nan])
         if np.isnan(self.mult):
             self.mult = np.random.randn()
-    
+
     def one_sample_experiment(self):
         """Method called repeatedly to run experiment.
 
@@ -64,7 +65,35 @@ class CSC(Profiler):
     curve_parameter_names = ('SLOPE', 'INTERCEPT')  # , 'SQUARE')
 
 
+class CSR(CSC):
+    """Variant to do CSR profiling."""
+
+    def setup_at_complexity(self, complexity):
+        """Method called to set up the experiment at given complexity.
+
+        This is called once for each complexity value.
+        """
+        self.matrix = sp.random(
+            m=self.m, n=self.n, dtype=float, density=complexity).tocsr()
+
+    def one_sample_experiment(self):
+        """Method called repeatedly to run experiment.
+
+        The call to this method is timed.
+        """
+
+        lib.add_csr_matvec(
+            m=self.m, row_pointers=self.matrix.indptr,
+            col_indexes=self.matrix.indices,
+            mat_elements=self.matrix.data, input=self.input_vector,
+            output=self.output_vector, mult=self.mult)
+
+
 if __name__ == '__main__':
 
-    c = CSC(m=1000, n=1000, tries=100, complexities=np.linspace(.01, .25, 200))
+    # WHICH = CSC
+    WHICH = CSR
+
+    c = WHICH(
+        m=1000, n=1000, tries=100, complexities=np.linspace(.01, .25, 200))
     c.run()
