@@ -30,23 +30,40 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
 /*
+Algorithm (Ruiz scaling) is described here:
 https://web.stanford.edu/~takapoui/preconditioning.pdf
+
+It is applied to the matrix:
+
+[ A   b]
+[ c.T 0]
+
+Naming convention is described in section 5 here:
+https://web.stanford.edu/~boyd/papers/pdf/scs.pdf
+
+e, d, rho, and sigma are taken as starting values,
+the caller should initialize them to 1. to prevent warm starting
 */
+
 void ruiz_l2_equilibrate(
-    int m, /*number of columns*/
+    int m, /*number of rows*/
     int n, /*number of columns*/
 
     const double * restrict b, /* len m */
     const double * restrict c, /* len n */ 
-    const int * restrict col_pointers,
-    const int * restrict row_indexes,
+    const int * restrict col_pointers, /*CSC matrix*/
+    const int * restrict row_indexes, /*CSC matrix*/
     const double * restrict mat_elements, /* len nnz */
 
     double * restrict b_transformed, /* len m */
-    double * restrict c_transformed, /* len m */
+    double * restrict c_transformed, /* len n */
     double * restrict mat_elements_transformed, /* len nnz */
+    double * restrict d, /*len m, row scaler*/
+    double * restrict e, /*len n, columns scaler*/
+    double * restrict sigma, /*len 1*/
+    double * restrict rho, /*len 1*/
 
     const double eps_1,
     const double eps_2,
     const int max_iters,
-    );
+);

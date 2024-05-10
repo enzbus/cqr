@@ -28,3 +28,31 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
+
+
+void ruiz_l2_equilibrate(
+    int m, /*number of rows*/
+    int n, /*number of columns*/
+
+    const double * restrict b, /* len m */
+    const double * restrict c, /* len n */ 
+    const int * restrict col_pointers, /*CSC matrix*/
+    const int * restrict row_indexes, /*CSC matrix*/
+    const double * restrict mat_elements, /* len nnz */
+
+    double * restrict b_transformed, /* len m */
+    double * restrict c_transformed, /* len n */
+    double * restrict mat_elements_transformed, /* len nnz */
+    double * restrict d, /*len m, row scaler*/
+    double * restrict e, /*len n, columns scaler*/
+    double * restrict sigma, /*len 1*/
+    double * restrict rho, /*len 1*/
+
+    const double eps_1,
+    const double eps_2,
+    const int max_iters,
+){
+
+   //for now assume e, d, sigma, rho are initalized to 1
+
+}
