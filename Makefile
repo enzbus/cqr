@@ -11,10 +11,12 @@ BUILDDIR		= build
 ENVDIR			= env
 BINDIR			= $(ENVDIR)/bin
 VENV_OPTS		=
+CMAKE_OPTS		=
 
 # Python venv on Windows has different location
 ifeq ($(OS), Windows_NT)
 	BINDIR=$(ENVDIR)/Scripts
+	CMAKE_OPTS = -G "MinGW Makefiles"
 # on Linux we use system-installed packages
 else
 	UNAME_S := $(shell uname -s)
@@ -31,7 +33,7 @@ endif
 # 	$(BINDIR)/python -m pip install numpy scipy
 
 build: ## build locally (instead of editable install)
-	cmake -B$(BUILDDIR)
+	cmake -B$(BUILDDIR)  $(CMAKE_OPTS)
 	cmake --build $(BUILDDIR) #--config Release # necessary on msw
 	cmake --install $(BUILDDIR)
 	# debugging on gh msw
