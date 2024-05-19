@@ -31,7 +31,7 @@ endif
 # 	$(BINDIR)/python -m pip install numpy scipy
 
 build: ## build locally (instead of editable install)
-	cmake -B$(BUILDDIR)
+	cmake -B$(BUILDDIR) -DCMAKE_BUILD_TYPE=Release
 	cmake --build $(BUILDDIR)
 	ls -hal build/
 	ls -hal build/Debug || true
