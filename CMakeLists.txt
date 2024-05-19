@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10.1)
+cmake_minimum_required(VERSION 3.15)
 project(project_euromir)
 
 set(SRC
@@ -10,10 +10,12 @@ set(CMAKE_BUILD_TYPE "Release")
 add_library(project_euromir SHARED ${SRC})
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
-# other msw specific opt is in the Makefile (this defaults to FALSE on msw)
-set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS TRUE)
+# stay away from visual studio, would require bunch of hacks in the code
+if(WIN32)
+  set(CMAKE_GENERATOR "MinGW Makefiles")
+endif()
 
-set(CMAKE_C_FLAGS "-O3 -Wall -fbounds-check") # -Wextra doesn't work for msw
+set(CMAKE_C_FLAGS "-O3 -Wall -fbounds-check -Wextra")
 set(CMAKE_VERBOSE_MAKEFILE 1)
 
 install(TARGETS project_euromir

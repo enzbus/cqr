@@ -32,7 +32,7 @@ endif
 
 build: ## build locally (instead of editable install)
 	cmake -B$(BUILDDIR)
-	cmake --build $(BUILDDIR) --config Release # necessary on msw
+	cmake --build $(BUILDDIR) #--config Release # necessary on msw
 	cmake --install $(BUILDDIR)
 	# debugging on gh msw
 	nm D:/a/project_euromir/project_euromir/project_euromir/project_euromir.dll || true
