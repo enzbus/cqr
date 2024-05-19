@@ -41,17 +41,18 @@ import numpy as _np
 ##
 
 _EXTS = {'Linux': '.so', 'Darwin': '.dylib', 'Windows': '.dll'}
+_LOADERS = {'Linux': 'cdll', 'Darwin': 'cdll', 'Windows': 'windll'}
 
 for _fname in _pathlib.Path(__file__).parent.iterdir():
     if _fname.suffix == _EXTS[_platform.system()]:
         print('LOADING LIBRARY', _fname)
-        LIBRARY = _ctypes.cdll.LoadLibrary(str(_fname))
+        LIBRARY = getattr(
+            _ctypes, _LOADERS[_platform.system()]).LoadLibrary(str(_fname))
         break
 else:
     raise ImportError(
         'Could not load the compiled library!')
 
-print(dir(LIBRARY))
 ##
 # Utilities for interfacing via ctypes
 ##
