@@ -33,8 +33,6 @@ endif
 build: ## build locally (instead of editable install)
 	cmake -B$(BUILDDIR)
 	cmake --build $(BUILDDIR) --config Release # necessary on msw
-	ls -hal build/
-	ls -hal build/Debug || true
 	cmake --install $(BUILDDIR)
 
 clean:  ## clean environment

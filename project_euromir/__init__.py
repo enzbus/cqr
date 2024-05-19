@@ -51,6 +51,7 @@ else:
     raise ImportError(
         'Could not load the compiled library!')
 
+print(dir(LIBRARY))
 ##
 # Utilities for interfacing via ctypes
 ##
