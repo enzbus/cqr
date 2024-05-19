@@ -6,7 +6,7 @@ set(SRC
 add_library(project_euromir SHARED ${SRC})
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
-set(CMAKE_C_FLAGS "-O3 -Wall -Wextra -fbounds-check")
+set(CMAKE_C_FLAGS "-O3 -Wall -fbounds-check") # -Wextra doesn't work for win
 set(CMAKE_VERBOSE_MAKEFILE 1)
 
 install(TARGETS project_euromir
