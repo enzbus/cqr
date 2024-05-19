@@ -34,6 +34,7 @@ build: ## build locally (instead of editable install)
 	cmake -B$(BUILDDIR)
 	cmake --build $(BUILDDIR) --config Release # necessary on msw
 	cmake --install $(BUILDDIR)
+	nm --demangle project_euromir/libproject_euromir.dll || true
 
 clean:  ## clean environment
 	-rm -rf $(DOCBUILDDIR)/*
