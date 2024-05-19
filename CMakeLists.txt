@@ -3,6 +3,9 @@ project(project_euromir)
 set(SRC
   project_euromir/linear_algebra.c
 )
+
+set(CMAKE_BUILD_TYPE Release)
+
 add_library(project_euromir SHARED ${SRC})
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
