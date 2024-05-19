@@ -41,7 +41,7 @@ import numpy as _np
 ##
 
 _EXTS = {'Linux': '.so', 'Darwin': '.dylib', 'Windows': '.dll'}
-_LOADERS = {'Linux': 'cdll', 'Darwin': 'cdll', 'Windows': 'oledll'}
+_LOADERS = {'Linux': 'cdll', 'Darwin': 'cdll', 'Windows': 'windll'}
 
 for _fname in _pathlib.Path(__file__).parent.iterdir():
     if _fname.suffix == _EXTS[_platform.system()]:
@@ -94,7 +94,7 @@ def _python_to_c(obj, c_type):
 
 def _interface_function(function_name, args):
     """Interface via (Numpy) ctypes a void function."""
-    assert hasattr(LIBRARY, function_name)
+    #assert hasattr(LIBRARY, function_name)
 
     getattr(LIBRARY, function_name).argtypes = [_T[el[1]] for el in args]
     getattr(LIBRARY, function_name).restype = None
