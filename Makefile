@@ -33,10 +33,7 @@ endif
 build: ## build locally (instead of editable install)
 	cmake -B$(BUILDDIR)
 	cmake --build $(BUILDDIR)
-	cp $(BUILDDIR)/*.so $(PROJECT)/ || true
-	cp $(BUILDDIR)/*.dylib $(PROJECT)/ || true
-	cp $(BUILDDIR)/*.dll $(PROJECT)/ || true
-
+	cmake --install $(BUILDDIR)
 
 clean:  ## clean environment
 	-rm -rf $(DOCBUILDDIR)/*

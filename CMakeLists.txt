@@ -8,3 +8,7 @@ message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
 set(CMAKE_C_FLAGS "-O3 -Wall -Wextra -fbounds-check")
 set(CMAKE_VERBOSE_MAKEFILE 1)
+
+install(TARGETS project_euromir
+    DESTINATION ${CMAKE_SOURCE_DIR}/project_euromir
+    COMPONENT project_euromir)
