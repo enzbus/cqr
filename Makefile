@@ -33,11 +33,12 @@ endif
 build: ## build locally (instead of editable install)
 	cmake -B$(BUILDDIR)
 	cmake --build $(BUILDDIR)
+	ls -hal build/
 	cmake --install $(BUILDDIR)
 
 clean:  ## clean environment
 	-rm -rf $(DOCBUILDDIR)/*
-	-rm -rf $(BUILDDIR)/*
+	-rm -rf $(BUILDDIR)/
 	-rm -rf $(ENVDIR)/*
 
 update: clean env  ## clean and recreate environment
