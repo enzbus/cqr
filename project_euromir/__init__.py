@@ -45,7 +45,7 @@ _EXTS = {'Linux': '.so', 'Darwin': '.dylib', 'Windows': '.dll'}
 for _fname in _pathlib.Path(__file__).parent.iterdir():
     if _fname.suffix == _EXTS[_platform.system()]:
         print('LOADING LIBRARY', _fname)
-        LIBRARY = _ctypes.cdll.LoadLibrary(_fname)
+        LIBRARY = _ctypes.cdll.LoadLibrary(str(_fname))
         break
 else:
     raise ImportError(
