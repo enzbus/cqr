@@ -34,6 +34,7 @@ build: ## build locally (instead of editable install)
 	cmake -B$(BUILDDIR)
 	cmake --build $(BUILDDIR)
 	ls -hal build/
+	ls -hal build/Debug || true
 	cmake --install $(BUILDDIR)
 
 clean:  ## clean environment
