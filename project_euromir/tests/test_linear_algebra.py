@@ -65,7 +65,7 @@ class TestLinearAlgebra(TestCase):
                 mat_elements=mat.data, input=inp, output=out, mult=mult)
             timers[seed] = time.time() - s
             self.assertTrue(np.allclose(out, out1 + mult * (mat @ inp)))
-        print('timer CSC', np.median(timers))
+        print(f'timer CSC {np.median(timers):e}')
 
     def test_csc_degen(self):
         """Test csc matvec with degenerate matrices."""
@@ -156,4 +156,4 @@ class TestLinearAlgebra(TestCase):
             timers[seed] = time.time() - s
             self.assertTrue(np.allclose(out, out1 + mult * (mat @ inp)))
 
-        print('timer CSR', np.median(timers))
+        print(f'timer CSR {np.median(timers):e}')

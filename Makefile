@@ -36,8 +36,6 @@ build: ## build locally (instead of editable install)
 	cmake -B$(BUILDDIR)  $(CMAKE_OPTS)
 	cmake --build $(BUILDDIR)
 	cmake --install $(BUILDDIR)
-	# debugging on gh msw
-	nm D:/a/project_euromir/project_euromir/project_euromir/project_euromir.dll || true
 
 clean:  ## clean environment
 	-rm -rf $(DOCBUILDDIR)/*
