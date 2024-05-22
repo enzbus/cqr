@@ -25,6 +25,8 @@ class CMake(build_ext):
         # that goes in site-packages/
         shlib_filename = self.get_ext_filename(self.extensions[0].name)
 
+        print('TARGET NAME', shlib_filename)
+
         # rename here the compiled shared library
         _builds = list(Path(self.build_lib).iterdir())
         assert len(_builds) == 1
