@@ -29,8 +29,14 @@ class CMake(build_ext):
 
         # rename here the compiled shared library
         _builds = list(Path(self.build_lib).iterdir())
+
+        # on win, MinGW builds a .dll.a as well, which we don't need
+        _builds = [el for el in _builds if not el.name.endswith('dll.a')]
+
+        # make sure nothing else is there
         assert len(_builds) == 1
         _build = _builds[0]
+
         _build.rename(_build.parent / shlib_filename)
 
         # breakpoint()
