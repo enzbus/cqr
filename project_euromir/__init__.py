@@ -40,8 +40,15 @@ import numpy as _np
 # Load library
 ##
 
-_EXTS = {'Linux': '.so', 'Darwin': '.so', # setuptools uses .so, not .dylib
-    'Windows': '.dll'}
+_EXTS = {
+    # I'm matching setuptools extensions, but these are pure sh libs, there's
+    # no Python.h in there!
+    'Linux': '.so',
+    #'Darwin': '.dylib',
+    'Darwin': '.so', # setuptools uses .so, not .dylib
+    #'Windows': '.dll',
+    'Windows': '.pyd', # setuptools uses this extension
+    }
 
 for _fname in _pathlib.Path(__file__).parent.parent.iterdir():
     if _fname.name.startswith('project_euromir')\
