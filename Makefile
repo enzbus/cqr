@@ -28,14 +28,14 @@ endif
 
 .PHONY: env clean update test lint docs fix release build
 
-# env: build ## create environment
-# 	$(PYTHON) -m venv $(VENV_OPTS) $(ENVDIR)
-# 	$(BINDIR)/python -m pip install numpy scipy
+env: ## create environment
+	$(PYTHON) -m venv $(VENV_OPTS) $(ENVDIR)
+	$(BINDIR)/python -m pip install -e .
 
-build: ## build locally (instead of editable install)
-	cmake -B$(BUILDDIR)  $(CMAKE_OPTS)
-	cmake --build $(BUILDDIR)
-	cmake --install $(BUILDDIR)
+# build: ## build locally (instead of editable install)
+# 	cmake -B$(BUILDDIR)  $(CMAKE_OPTS)
+# 	cmake --build $(BUILDDIR)
+# 	cmake --install $(BUILDDIR)
 
 clean:  ## clean environment
 	-rm -rf $(DOCBUILDDIR)/*
@@ -44,7 +44,7 @@ clean:  ## clean environment
 
 update: clean env  ## clean and recreate environment
 
-test: build ## run unit tests
+test: #build ## run unit tests
 	python -m $(PROJECT).tests
 
 lint:  ## run Pylint

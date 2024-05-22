@@ -26,7 +26,7 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-"""project_euromir"""
+"""project_euromir."""
 
 __version__ = '0.0.1'
 
@@ -42,8 +42,9 @@ import numpy as _np
 
 _EXTS = {'Linux': '.so', 'Darwin': '.dylib', 'Windows': '.dll'}
 
-for _fname in _pathlib.Path(__file__).parent.iterdir():
-    if _fname.suffix == _EXTS[_platform.system()]:
+for _fname in _pathlib.Path(__file__).parent.parent.iterdir():
+    if _fname.name.startswith('project_euromir')\
+            and (_fname.suffix == _EXTS[_platform.system()]):
         print('LOADING LIBRARY', _fname)
         LIBRARY = _ctypes.cdll.LoadLibrary(str(_fname))
         break
