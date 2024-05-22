@@ -40,7 +40,8 @@ import numpy as _np
 # Load library
 ##
 
-_EXTS = {'Linux': '.so', 'Darwin': '.dylib', 'Windows': '.dll'}
+_EXTS = {'Linux': '.so', 'Darwin': '.so', # setuptools uses .so, not .dylib
+    'Windows': '.dll'}
 
 for _fname in _pathlib.Path(__file__).parent.parent.iterdir():
     if _fname.name.startswith('project_euromir')\
