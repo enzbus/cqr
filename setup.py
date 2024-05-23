@@ -47,8 +47,8 @@ class CMake(build_ext):
         _builds = [el for el in _builds if not el.name.endswith('dll.a')]
 
         # make sure nothing else is there
-        breakpoint()
-        #assert len(_builds) == 1
+        #breakpoint()
+        assert len(_builds) == 1
         _build = _builds[0]
 
         _build.rename(_build.parent / shlib_filename)
