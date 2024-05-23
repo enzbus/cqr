@@ -5,6 +5,19 @@ from setuptools import Extension, setup
 
 from setuptools.command.build_ext import build_ext #import SubCommand
 
+# Better solution:
+# - override build_py to run cmake with the windows specific option
+# - use the editable flag to redirect the cmake install dir to the source dir
+# - remove hack to rename libproject_euromir.so/dll/dylib to whatever build_ext
+#   was using
+# - make sure bdist_wheel takes whatever is in the build_lib directory as the
+#   wheel content (might need to append to an internal list, hopefully not)
+# - go back to putting the sh lib in the package directory, same level as the
+#   __init__.py
+# - override the bdist_wheel Command, probably only its get_tag method, to
+#   rename the wheel to the correct platform. cpython version is py3-none ! 
+
+
 class CMake(build_ext):
     
     def run(self):
@@ -34,7 +47,8 @@ class CMake(build_ext):
         _builds = [el for el in _builds if not el.name.endswith('dll.a')]
 
         # make sure nothing else is there
-        assert len(_builds) == 1
+        breakpoint()
+        #assert len(_builds) == 1
         _build = _builds[0]
 
         _build.rename(_build.parent / shlib_filename)
