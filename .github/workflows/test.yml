@@ -40,27 +40,59 @@ jobs:
       - name: Test
         run: python -m project_euromir.tests
 
-  pip_install:
+#
+# not yet, needs a bunch of fixes to work in GH (windows doesn't recognize
+# rm -rf, ...)
+# 
 
-    runs-on: ${{ matrix.os }}
+  # pip_install:
 
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest, macos-13]
+  #   runs-on: ${{ matrix.os }}
 
-    steps:
+  #   strategy:
+  #     matrix:
+  #       os: [ubuntu-latest, windows-latest, macos-latest, macos-13]
 
-      - uses: actions/checkout@v4
+  #   steps:
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-            python-version: '3.11'
+  #     - uses: actions/checkout@v4
 
-      - name: Pip install and remove repo
-        run: |
-              python -m pip install -v .
-              rm -rf *
+  #     - name: Set up Python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #           python-version: '3.11'
 
-      - name: Test
-        run: python -m project_euromir.tests
+  #     - name: Pip install and remove repo
+  #       run: |
+  #             python -m pip install -v .
+  #             rm -rf *
+
+  #     - name: Test
+  #       run: python -m project_euromir.tests
+
+  # wheel_install:
+
+  #   runs-on: ${{ matrix.os }}
+
+  #   strategy:
+  #     matrix:
+  #       os: [ubuntu-latest, windows-latest, macos-latest, macos-13]
+
+  #   steps:
+
+  #     - uses: actions/checkout@v4
+
+  #     - name: Set up Python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #           python-version: '3.11'
+
+  #     - name: Create wheel, install, and remove repo
+  #       run: |
+  #             python -m pip install setuptools build wheel
+  #             make pybuild # does also renaming of the wheel, needed for CIBuildWheel
+  #             pip install dist/*.whl
+  #             rm -rf *
+
+  #     - name: Test
+  #       run: python -m project_euromir.tests
