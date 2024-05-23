@@ -1,9 +1,9 @@
 name: Test
 
-env:
-  # https://github.com/actions/runner-images
-  # last 2 are aarch64 and amd64
-  OSS: [ubuntu-latest, windows-latest, macos-latest, macos-13]
+# env:
+#   # https://github.com/actions/runner-images
+#   # last 2 are aarch64 and amd64
+#   OSS: [ubuntu-latest, windows-latest, macos-latest, macos-13]
 
 on:
 
@@ -23,7 +23,7 @@ jobs:
 
     strategy:
       matrix:
-        os:  ${{ OSS }}
+        os:  [ubuntu-latest, windows-latest, macos-latest, macos-13]
 
     steps:
 
@@ -46,7 +46,7 @@ jobs:
 
     strategy:
       matrix:
-        os: ${{ OSS }}
+        os: [ubuntu-latest, windows-latest, macos-latest, macos-13]
 
     steps:
 
