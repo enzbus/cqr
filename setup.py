@@ -22,6 +22,7 @@ from setuptools.command.build_py import build_py #import SubCommand
 #   rename the wheel to the correct platform. cpython version is py3-none ! 
 
 def _run_cmake(extras=()):
+    extras = list(extras)
     if platform.system() == 'Windows':
         extras += ["-G", "MinGW Makefiles"]
     subprocess.run(['cmake', '-Bbuild'] + list(extras), check=True)
