@@ -1,0 +1,14 @@
+# Specify what goes in the Python source distributions
+
+# needed for building
+include CMakeLists.txt
+
+# for our source
+global-include *.c *.h *.f90 *.f
+
+# for l-bfgs
+graft */Lbfgsb.3.0
+
+# it's part of the source
+graft */profiling
+

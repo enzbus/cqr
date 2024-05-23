@@ -26,7 +26,7 @@ else
 	export PATH := BINDIR:$(PATH)
 endif
 
-.PHONY: env clean update test lint docs fix release build
+.PHONY: env clean update test lint docs fix release build pybuild
 
 env: ## create environment
 	$(PYTHON) -m venv $(VENV_OPTS) $(ENVDIR)
@@ -38,11 +38,22 @@ env: ## create environment
 # 	cmake --install $(BUILDDIR)
 
 clean:  ## clean environment
-	-rm -rf $(DOCBUILDDIR)/*
-	-rm -rf $(BUILDDIR)/
-	-rm -rf $(ENVDIR)/*
+	-rm -rf $(DOCBUILDDIR)
+	-rm -rf $(BUILDDIR)
+	-rm -rf $(ENVDIR)
+	-rm -rf $(PROJECT).egg-info
+	-rm $(PROJECT)/*.dylib
+	-rm $(PROJECT)/*.so
+	-rm $(PROJECT)/*.dll
+
 
 update: clean env  ## clean and recreate environment
+
+pybuild: ## create Python packages
+	python -m build
+	python setup.py build # only used to get platform tag
+	$(eval TAG=`python -c "from wheel.bdist_wheel import get_platform; print(get_platform('build/lib'))"`)
+	python -m wheel tags dist/*.whl --platform="${TAG}" --remove
 
 test: #build ## run unit tests
 	python -m $(PROJECT).tests

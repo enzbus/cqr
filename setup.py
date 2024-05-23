@@ -1,11 +1,12 @@
 import platform
 from pathlib import Path
 import subprocess
-from setuptools import Extension, setup
+from setuptools import setup #Extension, setup
 
-from setuptools.command.build_ext import build_ext #import SubCommand
+# from setuptools.command.build_ext import build_ext #import SubCommand
 from setuptools.command.build_py import build_py #import SubCommand
-from setuptools.command.develop import develop #import SubCommand
+#from setuptools.command.develop import develop #import SubCommand
+#from wheel.bdist_wheel import bdist_wheel #import SubCommand
 
 
 # Better solution:
@@ -27,11 +28,17 @@ def _run_cmake(extras=()):
     subprocess.run(['cmake', '--build', 'build'], check=True)
     subprocess.run(['cmake', '--install', 'build'], check=True)
 
-class CmakeDevelop(develop):
-    # maybe we don't need this class!
-    def run(self):
-        _run_cmake()
-        super().run()
+# class CmakeDevelop(develop):
+#     # maybe we don't need this class!
+#     def run(self):
+#         raise Exception
+#         _run_cmake()
+#         super().run()
+
+# class CmakeWheel(bdist_wheel):
+#     def run(self):
+#         breakpoint()
+#         super().run()
 
 class CmakeBuild(build_py):
 
@@ -44,9 +51,9 @@ class CmakeBuild(build_py):
         super().run()
 
 setup(
-    name='project_euromir',
-    version='0.0.1',
-    packages=['project_euromir', 'project_euromir.tests'],
+    #name='project_euromir',
+    #version='0.0.1',
+    #packages=['project_euromir', 'project_euromir.tests'],
     #package_data={'project_euromir':['libproject_euromir.so']},
     #libraries=[('project_euromir', {'sources':['project_euromir/linear_algebra.c'],})],
     # ext_modules=[
@@ -59,10 +66,13 @@ setup(
     # I guess this is unused
     # include_dirs=['project_euromir/'],
     #libraries=[True],
+    #include_package_data=True,
+    #package_data={'': ['*.c', '*.h', '*.f77', '*.f90']},
     cmdclass={
-        #'build_ext':CMake, 
+        #'build_ext':CMake,
         'build_py':CmakeBuild,
-        'develop':CmakeDevelop,
+        #'develop':CmakeDevelop,
+        #'bdist_wheel':CmakeWheel,
         },
-    install_requires=["numpy", "scipy"]
+    #install_requires=["numpy", "scipy"]
 )
