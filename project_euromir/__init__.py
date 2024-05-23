@@ -41,18 +41,13 @@ import numpy as _np
 ##
 
 _EXTS = {
-    # I'm matching setuptools extensions, but these are pure sh libs, there's
-    # no Python.h in there!
     'Linux': '.so',
-    #'Darwin': '.dylib',
-    'Darwin': '.so', # setuptools uses .so, not .dylib
-    #'Windows': '.dll',
-    'Windows': '.pyd', # setuptools uses this extension
+    'Darwin': '.dylib',
+    'Windows': '.dll',
     }
 
-for _fname in _pathlib.Path(__file__).parent.parent.iterdir():
-    if _fname.name.startswith('project_euromir')\
-            and (_fname.suffix == _EXTS[_platform.system()]):
+for _fname in _pathlib.Path(__file__).parent.iterdir():
+    if _fname.suffix == _EXTS[_platform.system()]:
         print('LOADING LIBRARY', _fname)
         LIBRARY = _ctypes.cdll.LoadLibrary(str(_fname))
         break
