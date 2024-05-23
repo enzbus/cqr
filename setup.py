@@ -21,15 +21,14 @@ from setuptools.command.develop import develop #import SubCommand
 #   rename the wheel to the correct platform. cpython version is py3-none ! 
 
 def _run_cmake(extras=()):
-    extras = list(extras)
     if platform.system() == 'Windows':
         extras += ["-G", "MinGW Makefiles"]
-    subprocess.run(['cmake', '-Bbuild'] + extras, check=True)
+    subprocess.run(['cmake', '-Bbuild'] + list(extras), check=True)
     subprocess.run(['cmake', '--build', 'build'], check=True)
     subprocess.run(['cmake', '--install', 'build'], check=True)
 
 class CmakeDevelop(develop):
-
+    # maybe we don't need this class!
     def run(self):
         _run_cmake()
         super().run()
@@ -37,9 +36,10 @@ class CmakeDevelop(develop):
 class CmakeBuild(build_py):
 
     def run(self):
-        assert not self.editable_mode
-        _libdir = str(Path.cwd()/self.build_lib/'project_euromir')
-        extras = [f"-DMOVE_SHLIB_TO:FILEPATH={_libdir}"]
+        extras = []
+        if not self.editable_mode:
+            _libdir = str(Path.cwd()/self.build_lib/'project_euromir')
+            extras += [f"-DMOVE_SHLIB_TO:FILEPATH={_libdir}"]
         _run_cmake(extras)
         super().run()
 
