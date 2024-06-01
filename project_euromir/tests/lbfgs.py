@@ -78,6 +78,8 @@ def lbfgs_multiply(
 
     memory = past_steps.shape[0]
     assert past_grad_diffs.shape[0] == memory
+    assert past_grad_diffs.shape[1] == len(current_gradient)
+    assert past_steps.shape[1] == len(current_gradient)
 
     # compute rhos;
     # this needs to be optimized for numerical stability, normalize by geo mean
@@ -117,20 +119,23 @@ def _lbfgs_multiply_dense(
     current_gradient: np.array,
     past_steps: np.array,
     past_grad_diffs: np.array,
-    memory: int = 5,
     base_inverse_diagonal: float | np.array = 1.
 ):
     """Same as above using dense matrix."""
 
-    memory = past_steps.shape[1]
-    assert past_grad_diffs.shape[1] == memory
+    memory = past_steps.shape[0]
+    assert past_grad_diffs.shape[0] == memory
+    assert past_grad_diffs.shape[1] == len(current_gradient)
+    assert past_steps.shape[1] == len(current_gradient)
 
-    H = np.diag(base_inverse_diagonal)
+    H = np.diag(
+        np.ones(len(current_gradient)) * base_inverse_diagonal
+        if np.isscalar(base_inverse_diagonal) else base_inverse_diagonal)
 
     for i in range(memory):
         rho = 1. / np.dot(past_steps[i], past_grad_diffs[i])
         left = np.eye(len(H)) - rho * np.outer(
-            past_grad_diffs[i], past_steps[i])
+            past_steps[i], past_grad_diffs[i])
         right = left.T
         H = left @ H @ right + rho * np.outer(past_steps[i], past_steps[i])
 

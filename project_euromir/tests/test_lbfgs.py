@@ -40,3 +40,28 @@ from . import lbfgs
 
 class TestLBFGS(TestCase):
     """Test L-BFGS functions."""
+
+    def test_base(self):
+        """Test Python implementation."""
+
+        n = 10  # size
+        for m in [0, 1, 2, 5]:  # memory
+
+            np.random.seed(m)
+            current_gradient = np.random.randn(n)
+
+            past_grad_diffs = np.random.randn(m, n)
+            past_steps = np.random.randn(m, n)
+
+            dense_direction = lbfgs._lbfgs_multiply_dense(
+                current_gradient=current_gradient, past_steps=past_steps,
+                past_grad_diffs=past_grad_diffs)
+
+            sparse_direction = lbfgs.lbfgs_multiply(
+                current_gradient=current_gradient, past_steps=past_steps,
+                past_grad_diffs=past_grad_diffs)
+
+            self.assertTrue(np.allclose(dense_direction, sparse_direction))
+
+            print(dense_direction)
+            print(sparse_direction)
