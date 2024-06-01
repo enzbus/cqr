@@ -36,15 +36,17 @@ import scipy.sparse.linalg as spl
 
 logger = logging.getLogger()
 
+
 def _cones_separation_matrix(zero, nonneg, second_order):
     """Sparse matrix that maps entries into which cone they belong to."""
     return sp.block_diag(
         [sp.eye(zero+nonneg)] + [np.ones((1, el)) for el in second_order]
-        + [1.]) # we add the one for use below
+        + [1.])  # we add the one for use below
 
-def hsde_ruiz_equilibration( # pylint: disable=too-many-arguments
-        matrix, b, c, dimensions, d=None, e=None, rho = 1., sigma = 1.,
-        eps_rows = 1E-4, eps_cols = 1E-4, max_iters=25):
+
+def hsde_ruiz_equilibration(  # pylint: disable=too-many-arguments
+        matrix, b, c, dimensions, d=None, e=None, rho=1., sigma=1.,
+        eps_rows=1E-4, eps_cols=1E-4, max_iters=25):
     """Ruiz equilibration of problem matrices for the HSDE system.
 
     :param matrix: Problem matrix.
@@ -104,7 +106,7 @@ def hsde_ruiz_equilibration( # pylint: disable=too-many-arguments
     e_and_sigma[-1] = sigma
 
     work_matrix = sp.diags(d_and_rho[:-1]
-        ) @ matrix @ sp.diags(e_and_sigma[:-1])
+                           ) @ matrix @ sp.diags(e_and_sigma[:-1])
     work_b = e_and_sigma[-1] * sp.diags(d_and_rho[:-1]) @ b
     work_c = d_and_rho[-1] * sp.diags(e_and_sigma[:-1]) @ c
 
@@ -128,9 +130,9 @@ def hsde_ruiz_equilibration( # pylint: disable=too-many-arguments
         norm_cols_and_b[-1] = np.linalg.norm(work_b)
 
         r1 = max(norm_rows_and_c[norm_rows_and_c > 0]
-            ) / min(norm_rows_and_c[norm_rows_and_c > 0])
+                 ) / min(norm_rows_and_c[norm_rows_and_c > 0])
         r2 = max(norm_cols_and_b[norm_cols_and_b > 0]
-            ) / min(norm_cols_and_b[norm_cols_and_b > 0])
+                 ) / min(norm_cols_and_b[norm_cols_and_b > 0])
 
         logger.info('Equilibration iter %s: r1=%s, r2=%s', i, r1, r2)
         if (r1-1 < eps_rows) and (r2-1 < eps_cols):
@@ -144,7 +146,7 @@ def hsde_ruiz_equilibration( # pylint: disable=too-many-arguments
                 norm_cols_and_b > 0]**(-0.5)
 
         work_matrix = sp.diags(d_and_rho[:-1]
-            ) @ matrix @ sp.diags(e_and_sigma[:-1])
+                               ) @ matrix @ sp.diags(e_and_sigma[:-1])
         work_b = e_and_sigma[-1] * sp.diags(d_and_rho[:-1]) @ b
         work_c = d_and_rho[-1] * sp.diags(e_and_sigma[:-1]) @ c
 

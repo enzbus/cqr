@@ -44,7 +44,7 @@ _EXTS = {
     'Linux': '.so',
     'Darwin': '.dylib',
     'Windows': '.dll',
-    }
+}
 
 for _fname in _pathlib.Path(__file__).parent.iterdir():
     if _fname.suffix == _EXTS[_platform.system()]:
