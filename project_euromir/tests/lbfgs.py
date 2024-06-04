@@ -162,9 +162,7 @@ def strong_wolfe(
     MINPACK. Hopefully it works!
 
     Idea: start from unit step. If Armijo rule is not satisfied, backtrack.
-    If curvature condition is not satisfied, make step longer. If neither is
-    satisfied, try both until we find a point where either is. Then restart
-    from there.
+    Else if curvature condition is not satisfied, make step longer.
 
     Default c_1 and c_2 are the same as in MINPACK-2/vmlm, from my tests they
     seem like good choices.
@@ -182,50 +180,9 @@ def strong_wolfe(
     return armijo, curvature
 
 
-# def _wolfe_conditions(
-#         current_point: np.array,
-#         current_loss: float,
-#         current_gradient: np.array,
-#         direction: np.array,
-#         step_size: float,
-#         next_loss: float,
-#         next_gradient: np.array,
-#         c_1: float = 1e-4,
-#         c_2: float = 0.9):
-#     """Choice satisfies Armijo rule and curvature condition.
-
-#     See Numerical Optimization, Nocedal & Wright, Chapter 3.
-#     """
-
-#     gradient_times_direction = current_gradient @ direction
-#     assert gradient_times_direction < 0
-
-#     armijo = \
-#         next_loss <= current_loss + c_1 * step_size * gradient_times_direction
-
-#     curvature = next_gradient @ direction >= c_2 * gradient_times_direction
-
-#     return armijo and curvature
-
-
-# def _armijo(
-#         current_loss: float,
-#         current_gradient_dot_direction: float,
-#         step_size: float,
-#         next_loss: float,
-#         c_1: float = 1e-4,):
-#     """Choice satisfies Armijo rule."""
-
-#     assert current_gradient_dot_direction < 0
-#     # breakpoint()
-#     # print('armijo rhs', current_loss + c_1 * step_size * current_gradient_dot_direction)
-
-#     return next_loss <= current_loss + c_1 * step_size * current_gradient_dot_direction
-
-
 def minimize_lbfgs(
         loss_and_gradient_function, initial_point, memory=5, max_iters=100,
-        c_1=1e-3, c_2=.9, rho=.9, max_ls=20):
+        c_1=1e-3, c_2=.9, ls_backtrack=.5, ls_forward=1.1, max_ls=20):
     """Minimize function using back-tracked L-BFGS."""
 
     n = len(initial_point)
@@ -234,27 +191,43 @@ def minimize_lbfgs(
     past_grad_diffs = np.empty((memory, n), dtype=float)
 
     current_point = np.empty(n, dtype=float)
+    current_gradient = np.empty(n, dtype=float)
+    next_point = np.empty(n, dtype=float)
+    next_gradient = np.empty(n, dtype=float)
+    direction = np.empty(n, dtype=float)
+
     current_point[:] = initial_point
 
-    current_loss, current_gradient = loss_and_gradient_function(current_point)
+    current_loss, current_gradient[:] = loss_and_gradient_function(
+        current_point)
 
     for i in range(max_iters):
+
+        if np.linalg.norm(current_gradient) < 1e-16:
+            print('CONVERGED')
+            break
+
         print('iter', i)
         print('current_loss', current_loss)
         print('current_gradient', current_gradient)
+        print('current_gradient norm', np.linalg.norm(current_gradient))
 
-        direction = - _lbfgs_multiply_dense(
+        if i == 0:
+            scale = 1/np.linalg.norm(current_gradient)
+        else:
+            scale = np.dot(past_steps[-1], past_grad_diffs[-1]) / np.dot(
+                past_grad_diffs[-1], past_grad_diffs[-1])
+
+        direction[:] = - _lbfgs_multiply_dense(
             current_gradient=current_gradient,
             past_steps=past_steps[memory-i:],
-            past_grad_diffs=past_grad_diffs[memory-i:])
+            past_grad_diffs=past_grad_diffs[memory-i:],
+            base_inverse_diagonal=scale)
 
-        # line search
         step_size = 1.
         for _ in range(max_ls):
-            # print('backtracking', _)
-            step = step_size * direction
-            next_point = current_point + step
-            next_loss, next_gradient = loss_and_gradient_function(
+            next_point[:] = current_point + step_size * direction
+            next_loss, next_gradient[:] = loss_and_gradient_function(
                 next_point)
 
             armijo, curvature = strong_wolfe(
@@ -267,21 +240,21 @@ def minimize_lbfgs(
                 'step_size', step_size, 'armijo', armijo, 'curvature', curvature)
 
             if not armijo:
-                step_size *= .5
+                step_size *= ls_backtrack
                 continue
 
             if not curvature:
-                step_size *= 1.1
+                step_size *= ls_forward
                 continue
 
             # both are satisfied
             past_steps[:-1] = past_steps[1:]
             past_grad_diffs[:-1] = past_grad_diffs[1:]
-            past_steps[-1] = step
+            past_steps[-1] = step_size * direction
             past_grad_diffs[-1] = next_gradient - current_gradient
-            current_point = next_point
+            current_point[:] = next_point
             current_loss = next_loss
-            current_gradient = next_gradient
+            current_gradient[:] = next_gradient
             break
 
         else:

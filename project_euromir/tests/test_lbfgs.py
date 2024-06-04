@@ -81,19 +81,6 @@ class TestLBFGS(TestCase):
             gradient = 2 * A.T @ residual
             return loss, gradient
 
-        # import matplotlib.pyplot as plt
-        # l, g = loss_and_gradient_function(np.zeros(n))
-
-        # alphas = np.linspace(0,0.03,100)
-        # losses_on_line = []
-        # grads_on_line = []
-        # for alpha in alphas:
-        #     losses_on_line.append(loss_and_gradient_function(-alpha * g)[0])
-        #     grads_on_line.append(loss_and_gradient_function(-alpha * g)[1])
-        # plt.plot(alphas, losses_on_line)
-        # plt.show()
-        # breakpoint()
-
         result = sp.optimize.fmin_l_bfgs_b(
             loss_and_gradient_function, x0=np.zeros(n))
         print(result)
@@ -101,7 +88,11 @@ class TestLBFGS(TestCase):
         x = lbfgs.minimize_lbfgs(
             loss_and_gradient_function=loss_and_gradient_function,
             initial_point=np.zeros(n), memory=10, max_iters=100, c_1=1e-3,
-            c_2=0.9, rho=.9, max_ls=100)
+            c_2=0.9, max_ls=20)
+
+        self.assertTrue(np.allclose(A @ x, b))
+        self.assertLess(
+            np.linalg.norm(A @ x - b), np.linalg.norm(A @ result[0] - b))
 
 
 if __name__ == '__main__':  # pragma: no cover
@@ -109,26 +100,3 @@ if __name__ == '__main__':  # pragma: no cover
     from unittest import main
     logging.basicConfig(level='INFO')
     main()
-    # np.random.seed(0)
-    # m = 10
-    # n = 20
-    # A = np.random.randn(m,n)
-    # b = np.random.randn(m)
-
-    # def loss_and_gradient_function(x):
-    #     residual = A @ x - b
-    #     loss = np.linalg.norm(residual) ** 2
-    #     gradient = 2 * A.T @ residual
-    #     return loss, gradient
-
-    # import matplotlib.pyplot as plt
-    # l, g = loss_and_gradient_function(np.zeros(n))
-
-    # alphas = np.linspace(0,0.03,100)
-    # losses_on_line = []
-    # grads_on_line = []
-    # for alpha in alphas:
-    #     losses_on_line.append(loss_and_gradient_function(-alpha * g)[0])
-    #     grads_on_line.append(loss_and_gradient_function(-alpha * g)[1])
-    # plt.plot(alphas, losses_on_line)
-    # plt.show()
