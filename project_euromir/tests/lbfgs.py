@@ -93,7 +93,7 @@ def lbfgs_multiply(
         rhos[i] = 1. / np.dot(past_steps[i], past_grad_diffs[i])
 
     # using paper notation
-    q = current_gradient
+    q = np.copy(current_gradient)
 
     # right part, backward iteration
     alphas = np.empty(memory, dtype=float)
@@ -218,7 +218,7 @@ def minimize_lbfgs(
             scale = np.dot(past_steps[-1], past_grad_diffs[-1]) / np.dot(
                 past_grad_diffs[-1], past_grad_diffs[-1])
 
-        direction[:] = - _lbfgs_multiply_dense(
+        direction[:] = - lbfgs_multiply(
             current_gradient=current_gradient,
             past_steps=past_steps[memory-i:],
             past_grad_diffs=past_grad_diffs[memory-i:],
