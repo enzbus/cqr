@@ -208,7 +208,7 @@ def minimize_lbfgs(
     current_point[:] = initial_point
 
     # the function can also modify the current_point (projection)
-    current_loss, current_gradient[:] = loss_and_gradient_function(
+    current_loss, current_gradient[:], active_set = loss_and_gradient_function(
         current_point)
 
     for i in range(max_iters):
@@ -225,21 +225,24 @@ def minimize_lbfgs(
         if i == 0:
             scale = 1/np.linalg.norm(current_gradient)
         elif memory > 0:
-            scale = np.dot(past_steps[-1], past_grad_diffs[-1]) / np.dot(
-                past_grad_diffs[-1], past_grad_diffs[-1])
+            scale = np.dot(past_steps[-1, active_set], past_grad_diffs[-1, active_set]) / np.dot(
+                past_grad_diffs[-1, active_set], past_grad_diffs[-1, active_set])
 
-        direction[:] = - lbfgs_multiply(
-            current_gradient=current_gradient,
-            past_steps=past_steps[memory-i:],
-            past_grad_diffs=past_grad_diffs[memory-i:],
+        direction[:] = 0.
+        direction[active_set] = - lbfgs_multiply(
+            current_gradient=current_gradient[active_set],
+            past_steps=past_steps[memory-i:, active_set],
+            past_grad_diffs=past_grad_diffs[memory-i:, active_set],
             base_inverse_diagonal=scale)
+
+        assert np.all(direction[~active_set] == 0.)
 
         step_size = 1.
         for _ in range(max_ls):
             next_point[:] = current_point + step_size * direction
 
             # the function can also modify the next_point (projection)
-            next_loss, next_gradient[:] = loss_and_gradient_function(
+            next_loss, next_gradient[:], active_set = loss_and_gradient_function(
                 next_point)
 
             armijo, curvature = strong_wolfe(

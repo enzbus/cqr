@@ -49,6 +49,7 @@ class TestLBFGS(TestCase):
 
             np.random.seed(m)
             current_gradient = np.random.randn(n)
+            active_set = np.ones(n, dtype=bool)
 
             past_grad_diffs = np.random.randn(m, n)
             past_steps = np.random.randn(m, n)
@@ -79,7 +80,8 @@ class TestLBFGS(TestCase):
             residual = A @ x - b
             loss = np.linalg.norm(residual) ** 2
             gradient = 2 * A.T @ residual
-            return loss, gradient
+            active_set = np.ones(n, dtype=bool)
+            return loss, gradient, active_set
 
         result = sp.optimize.fmin_l_bfgs_b(
             loss_and_gradient_function, x0=np.zeros(n))
@@ -112,10 +114,9 @@ class TestLBFGS(TestCase):
             loss = np.linalg.norm(residual) ** 2
             gradient = 2 * A.T @ residual
             # zero out gradient going towards constraint (not away from it)
-            gradient[(x==0.) & (gradient > 0.)] = 0.
-            return loss, gradient
-
-        # TODO: test whether better to zero out past geometry of zeroed out vars
+            inactive_set = (x==0.) & (gradient > 0.)
+            gradient[inactive_set] = 0.
+            return loss, gradient, ~inactive_set
 
         result = sp.optimize.fmin_l_bfgs_b(
             loss_and_gradient_function, x0=np.zeros(n), bounds=[[0, None]]*n)
@@ -123,7 +124,7 @@ class TestLBFGS(TestCase):
 
         x = lbfgs.minimize_lbfgs(
             loss_and_gradient_function=loss_and_gradient_function,
-            initial_point=np.zeros(n), memory=0, max_iters=100, c_1=1e-3,
+            initial_point=np.zeros(n), memory=5, max_iters=100, c_1=1e-3,
             c_2=0.9, max_ls=20)
 
         self.assertGreaterEqual(np.min(x), 0.)
