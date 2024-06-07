@@ -1,4 +1,7 @@
 # Specify what goes in the Python source distributions
+# 
+# To figure out: when installing from sdist, build works fine but all source
+# files get copied to the site-packages subfolder as well
 
 # needed for building
 include CMakeLists.txt

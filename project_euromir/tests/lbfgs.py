@@ -85,12 +85,17 @@ def lbfgs_multiply(
     assert past_grad_diffs.shape[1] == len(current_gradient)
     assert past_steps.shape[1] == len(current_gradient)
 
+    norms_steps = np.linalg.norm(past_steps, axis=1)
+    norms_grad_diffs = np.linalg.norm(past_grad_diffs, axis=1)
+    assert len(norms_steps) == memory
+    ratios = norms_steps / norms_grad_diffs
+
     # compute rhos;
-    # this needs to be optimized for numerical stability, normalize by geo mean
-    # of l2 norms of s,y pairs
-    rhos = np.empty(memory, dtype=float)
+    rhos_normalized = np.empty(memory, dtype=float)
     for i in range(memory):
-        rhos[i] = 1. / np.dot(past_steps[i], past_grad_diffs[i])
+        rhos_normalized[i] = 1. / np.dot(
+            past_steps[i]/norms_steps[i],
+            past_grad_diffs[i]/norms_grad_diffs[i])
 
     # using paper notation
     q = np.copy(current_gradient)
@@ -98,8 +103,10 @@ def lbfgs_multiply(
     # right part, backward iteration
     alphas = np.empty(memory, dtype=float)
     for i in range(memory-1, -1, -1):
-        alphas[i] = rhos[i] * np.dot(past_steps[i], q)
-        q -= alphas[i] * past_grad_diffs[i]
+        alphas[i] = rhos_normalized[i] * np.dot(
+            past_steps[i]/norms_steps[i], q)
+        q -= alphas[i] * (
+            past_grad_diffs[i]/norms_grad_diffs[i])
 
     # center part
     r = base_inverse_diagonal * q
@@ -113,8 +120,11 @@ def lbfgs_multiply(
     # left part, forward iteration
     betas = np.empty(memory, dtype=float)
     for i in range(memory):
-        betas[i] = rhos[i] * np.dot(past_grad_diffs[i], r)
-        r += (alphas[i] - betas[i]) * past_steps[i]
+        betas[i] = rhos_normalized[i] * np.dot(
+            past_grad_diffs[i] / np.linalg.norm(past_grad_diffs[i]), r)
+        r += (
+            alphas[i] * ratios[i] - betas[i]) * (
+                past_steps[i] / norms_steps[i])
 
     return r
 
@@ -147,7 +157,6 @@ def _lbfgs_multiply_dense(
 
 
 def strong_wolfe(
-        current_point: np.array,
         current_loss: float,
         current_gradient: np.array,
         direction: np.array,
@@ -198,6 +207,7 @@ def minimize_lbfgs(
 
     current_point[:] = initial_point
 
+    # the function can also modify the current_point (projection)
     current_loss, current_gradient[:] = loss_and_gradient_function(
         current_point)
 
@@ -214,7 +224,7 @@ def minimize_lbfgs(
 
         if i == 0:
             scale = 1/np.linalg.norm(current_gradient)
-        else:
+        elif memory > 0:
             scale = np.dot(past_steps[-1], past_grad_diffs[-1]) / np.dot(
                 past_grad_diffs[-1], past_grad_diffs[-1])
 
@@ -227,13 +237,14 @@ def minimize_lbfgs(
         step_size = 1.
         for _ in range(max_ls):
             next_point[:] = current_point + step_size * direction
+
+            # the function can also modify the next_point (projection)
             next_loss, next_gradient[:] = loss_and_gradient_function(
                 next_point)
 
             armijo, curvature = strong_wolfe(
-                current_point=current_point, current_loss=current_loss,
-                current_gradient=current_gradient, direction=direction,
-                step_size=step_size, next_loss=next_loss,
+                current_loss=current_loss, current_gradient=current_gradient,
+                direction=direction, step_size=step_size, next_loss=next_loss,
                 next_gradient=next_gradient, c_1=c_1, c_2=c_2)
 
             print(
@@ -250,8 +261,9 @@ def minimize_lbfgs(
             # both are satisfied
             past_steps[:-1] = past_steps[1:]
             past_grad_diffs[:-1] = past_grad_diffs[1:]
-            past_steps[-1] = step_size * direction
-            past_grad_diffs[-1] = next_gradient - current_gradient
+            if memory > 0:
+                past_steps[-1] = next_point - current_point
+                past_grad_diffs[-1] = next_gradient - current_gradient
             current_point[:] = next_point
             current_loss = next_loss
             current_gradient[:] = next_gradient
