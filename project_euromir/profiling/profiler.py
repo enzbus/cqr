@@ -71,7 +71,10 @@ class Profiler:
         raise NotImplementedError
 
     def run(self):
-        """Run suite of experiments. This is 2 nested for loops."""
+        """Run suite of experiments.
+
+        This is 2 nested for loops.
+        """
         for idx, complexity in enumerate(self._complexities):
 
             np.random.seed(idx)
@@ -98,7 +101,10 @@ class Profiler:
 
     @staticmethod
     def curve(x, *args):
-        """Function used for the curve fit. You can use any *args after x."""
+        """Function used for the curve fit.
+
+        You can use any *args after x.
+        """
         raise NotImplementedError
 
     curve_parameter_names = None  # string tuple

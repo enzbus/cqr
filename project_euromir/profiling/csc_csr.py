@@ -59,7 +59,10 @@ class CSC(Profiler):
 
     @staticmethod
     def curve(x, slope, intercept):  # , square):
-        """Function used for the curve fit. You can use any *args after x."""
+        """Function used for the curve fit.
+
+        You can use any *args after x.
+        """
         return slope*x + intercept  # + square * (x**2)
 
     curve_parameter_names = ('SLOPE', 'INTERCEPT')  # , 'SQUARE')

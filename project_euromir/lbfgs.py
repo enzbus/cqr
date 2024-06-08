@@ -26,9 +26,8 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
 """Pure Python implementation of L-BFGS for testing.
- 
+
 We only need the multiplication of the gradient at the current point by the
 approximate inverse of the second derivative. Line search and choosing next
 point are done externally.
@@ -37,7 +36,7 @@ References:
 
 - Original paper:
     Updating quasi-Newton matrices with limited storage, Nocedal 1980
-    https://doi.org/10.1090/S0025-5718-1980-0572855-7 
+    https://doi.org/10.1090/S0025-5718-1980-0572855-7
     (easy to find non-paywalled)
 
 - Reference implementation: MINPACK-2, vmlm module
@@ -55,7 +54,11 @@ References:
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 def lbfgs_multiply(
@@ -71,7 +74,7 @@ def lbfgs_multiply(
     :param past_steps: First dimension is L-BFGS memory. Most recent step is
         last row.
     :type past_steps: np.array (2-dimensional)
-    :param past_grad_diffs: First dimension is L-BFGS memory. Most recent 
+    :param past_grad_diffs: First dimension is L-BFGS memory. Most recent
         gradient difference is last row.
     :type past_grad_diffs: np.array (2-dimensional)
     :param base_inverse_diagonal: Diagonal of :math:`H_0`, the base inverse
@@ -84,6 +87,10 @@ def lbfgs_multiply(
     assert past_grad_diffs.shape[0] == memory
     assert past_grad_diffs.shape[1] == len(current_gradient)
     assert past_steps.shape[1] == len(current_gradient)
+
+    logger.info(
+        'calling lbfgs_multiply with scale %.2e and memory %s',
+        base_inverse_diagonal, memory)
 
     norms_steps = np.linalg.norm(past_steps, axis=1)
     norms_grad_diffs = np.linalg.norm(past_grad_diffs, axis=1)
@@ -142,6 +149,10 @@ def _lbfgs_multiply_dense(
     assert past_grad_diffs.shape[1] == len(current_gradient)
     assert past_steps.shape[1] == len(current_gradient)
 
+    logger.info(
+        'calling lbfgs_multiply_dense with scale %.2e and memory %s',
+        base_inverse_diagonal, memory)
+
     H = np.diag(
         np.ones(len(current_gradient)) * base_inverse_diagonal
         if np.isscalar(base_inverse_diagonal) else base_inverse_diagonal)
@@ -177,21 +188,35 @@ def strong_wolfe(
     seem like good choices.
     """
 
-    gradient_times_direction = current_gradient @ direction
-    assert gradient_times_direction < 0
+    gradient_dot_direction = current_gradient @ direction
+    assert gradient_dot_direction < 0
 
     armijo = \
-        next_loss <= current_loss + c_1 * step_size * gradient_times_direction
+        next_loss <= current_loss + c_1 * step_size * gradient_dot_direction
 
-    curvature = abs(next_gradient @ direction) <= c_2 * abs(
-        gradient_times_direction)
+    next_gradient_dot_direction = next_gradient @ direction
+    curvature = abs(next_gradient_dot_direction) <= c_2 * abs(
+        gradient_dot_direction)
+
+    logger.info(
+        'evaluating strong Wolfe conditions with step_size=%s', step_size)
+    logger.info(
+        '\tArmijo is %s, with next_loss=%.2e, current_loss=%.2e'
+        ' gradient_times_direction=%.2e;',
+        armijo, next_loss, current_loss, gradient_dot_direction,
+    )
+    logger.info(
+        '\tcurvature condition is %s with next_gradient_dot_direction=%.2e;',
+        curvature, next_gradient_dot_direction
+    )
 
     return armijo, curvature
 
 
 def minimize_lbfgs(
         loss_and_gradient_function, initial_point, memory=5, max_iters=100,
-        c_1=1e-3, c_2=.9, ls_backtrack=.5, ls_forward=1.1, max_ls=20):
+        c_1=1e-3, c_2=.9, ls_backtrack=.5, ls_forward=1.1, max_ls=20,
+        use_active_set = False):
     """Minimize function using back-tracked L-BFGS."""
 
     n = len(initial_point)
@@ -207,9 +232,16 @@ def minimize_lbfgs(
 
     current_point[:] = initial_point
 
-    # the function can also modify the current_point (projection)
-    current_loss, current_gradient[:], active_set = loss_and_gradient_function(
-        current_point)
+    if use_active_set:
+        current_active_set = np.empty(n, dtype=bool)
+        next_active_set = np.empty(n, dtype=bool)
+        # the function can also modify the current_point (projection)
+        current_loss, current_gradient[:], current_active_set[:] = loss_and_gradient_function(
+            current_point)
+
+    else:
+        current_loss, current_gradient[:] = loss_and_gradient_function(
+            current_point)
 
     for i in range(max_iters):
 
@@ -217,41 +249,71 @@ def minimize_lbfgs(
             print('CONVERGED')
             break
 
-        print('iter', i)
-        print('current_loss', current_loss)
-        print('current_gradient', current_gradient)
-        print('current_gradient norm', np.linalg.norm(current_gradient))
+        logger.info('l-bfgs iteration %s: current loss %.17e', i, current_loss)
+        if use_active_set:
+            logger.info(
+                '\tcurrent_active set: %s variables out of %s are active',
+                np.sum(current_active_set), len(current_active_set))
+        logger.info(
+            '\tcurrent_gradient: has norm %s and max abs value %s',
+            np.linalg.norm(current_gradient), np.max(np.abs(current_gradient)))
+
+        # print('iter', i)
+        # print('current_loss', current_loss)
+        # print('current_gradient', current_gradient)
+        # print('current_gradient norm', np.linalg.norm(current_gradient))
 
         if i == 0:
             scale = 1/np.linalg.norm(current_gradient)
         elif memory > 0:
-            scale = np.dot(past_steps[-1, active_set], past_grad_diffs[-1, active_set]) / np.dot(
-                past_grad_diffs[-1, active_set], past_grad_diffs[-1, active_set])
+            if use_active_set:
+                scale = np.dot(past_steps[-1, current_active_set], past_grad_diffs[-1, current_active_set]) / np.dot(
+                    past_grad_diffs[-1, current_active_set], past_grad_diffs[-1, current_active_set])
+            else:
+                scale = np.dot(past_steps[-1], past_grad_diffs[-1]) / np.dot(
+                    past_grad_diffs[-1], past_grad_diffs[-1])
 
-        direction[:] = 0.
-        direction[active_set] = - lbfgs_multiply(
-            current_gradient=current_gradient[active_set],
-            past_steps=past_steps[memory-i:, active_set],
-            past_grad_diffs=past_grad_diffs[memory-i:, active_set],
-            base_inverse_diagonal=scale)
-
-        assert np.all(direction[~active_set] == 0.)
+        if use_active_set:
+            direction[:] = 0.
+            direction[current_active_set] = - lbfgs_multiply(
+                current_gradient=current_gradient[current_active_set],
+                past_steps=past_steps[memory-i:, current_active_set],
+                past_grad_diffs=past_grad_diffs[memory-i:, current_active_set],
+                base_inverse_diagonal=scale)
+            assert np.all(direction[~current_active_set] == 0.)
+        else:
+            direction[:] = - lbfgs_multiply(
+                current_gradient=current_gradient,
+                past_steps=past_steps[memory-i:],
+                past_grad_diffs=past_grad_diffs[memory-i:],
+                base_inverse_diagonal=scale)
 
         step_size = 1.
         for _ in range(max_ls):
             next_point[:] = current_point + step_size * direction
 
-            # the function can also modify the next_point (projection)
-            next_loss, next_gradient[:], active_set = loss_and_gradient_function(
-                next_point)
+            if use_active_set:
+                # the function can also modify the next_point (projection)
+                next_loss, next_gradient[:], next_active_set[:] = \
+                    loss_and_gradient_function(next_point)
+                logger.info(
+                    'next_active_set has %s variables in it that are not'
+                    ' in current_active_set, and %s variables not in it that'
+                    ' are in current_active_set',
+                    np.sum(next_active_set & (~current_active_set)),
+                    np.sum(~(next_active_set) & current_active_set),
+                )
+            else:
+                next_loss, next_gradient[:] = loss_and_gradient_function(
+                    next_point)
 
             armijo, curvature = strong_wolfe(
                 current_loss=current_loss, current_gradient=current_gradient,
                 direction=direction, step_size=step_size, next_loss=next_loss,
                 next_gradient=next_gradient, c_1=c_1, c_2=c_2)
 
-            print(
-                'step_size', step_size, 'armijo', armijo, 'curvature', curvature)
+            # print(
+            #     'step_size', step_size, 'armijo', armijo, 'curvature', curvature)
 
             if not armijo:
                 step_size *= ls_backtrack
@@ -262,6 +324,7 @@ def minimize_lbfgs(
                 continue
 
             # both are satisfied
+            logger.info('line search converged in %s iterations', _+1)
             past_steps[:-1] = past_steps[1:]
             past_grad_diffs[:-1] = past_grad_diffs[1:]
             if memory > 0:
@@ -270,6 +333,8 @@ def minimize_lbfgs(
             current_point[:] = next_point
             current_loss = next_loss
             current_gradient[:] = next_gradient
+            if use_active_set:
+                current_active_set[:] = next_active_set
             break
 
         else:

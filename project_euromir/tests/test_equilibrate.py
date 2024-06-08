@@ -35,7 +35,6 @@ import numpy as np
 import scipy as sp
 
 import project_euromir as lib
-
 from project_euromir import equilibrate
 
 logging.basicConfig(level='INFO')

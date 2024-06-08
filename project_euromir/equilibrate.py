@@ -34,7 +34,7 @@ import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spl
 
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 
 
 def _cones_separation_matrix(zero, nonneg, second_order):

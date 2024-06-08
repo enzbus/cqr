@@ -34,7 +34,6 @@ import numpy as np
 import scipy as sp
 
 import project_euromir as lib
-
 from project_euromir import lbfgs
 
 
@@ -79,11 +78,10 @@ class TestLBFGS(TestCase):
             residual = A @ x - b
             loss = np.linalg.norm(residual) ** 2
             gradient = 2 * A.T @ residual
-            active_set = np.ones(n, dtype=bool)
-            return loss, gradient, active_set
+            return loss, gradient
 
         result = sp.optimize.fmin_l_bfgs_b(
-            loss_and_gradient_function, x0=np.zeros(n))
+            loss_and_gradient_function, x0=np.zeros(n), iprint=99)
         print(result)
 
         x = lbfgs.minimize_lbfgs(
@@ -113,23 +111,23 @@ class TestLBFGS(TestCase):
             loss = np.linalg.norm(residual) ** 2
             gradient = 2 * A.T @ residual
             # zero out gradient going towards constraint (not away from it)
-            inactive_set = (x==0.) & (gradient > 0.)
+            inactive_set = (x == 0.) & (gradient > 0.)
             gradient[inactive_set] = 0.
             return loss, gradient, ~inactive_set
 
         result = sp.optimize.fmin_l_bfgs_b(
-            loss_and_gradient_function, x0=np.zeros(n), bounds=[[0, None]]*n)
+            loss_and_gradient_function, x0=np.zeros(n), bounds=[[0, None]]*n,
+            iprint=99)
         print(result)
 
         x = lbfgs.minimize_lbfgs(
             loss_and_gradient_function=loss_and_gradient_function,
             initial_point=np.zeros(n), memory=5, max_iters=100, c_1=1e-3,
-            c_2=0.9, max_ls=20)
+            c_2=0.9, max_ls=20, use_active_set=True)
 
         self.assertGreaterEqual(np.min(x), 0.)
         self.assertLess(
             np.linalg.norm(A @ x - b), np.linalg.norm(A @ result[0] - b))
-
 
 
 if __name__ == '__main__':  # pragma: no cover
