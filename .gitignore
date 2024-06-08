@@ -30,3 +30,6 @@ __pycache__/
 # L-BFGS-B when compiled separately
 */Lbfgsb.3.0/x.*
 */Lbfgsb.3.0/*.dat
+
+# Python testing
+*coverage.xml

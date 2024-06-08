@@ -35,7 +35,7 @@ import scipy as sp
 
 import project_euromir as lib
 
-from . import lbfgs
+from project_euromir import lbfgs
 
 
 class TestLBFGS(TestCase):
@@ -49,7 +49,6 @@ class TestLBFGS(TestCase):
 
             np.random.seed(m)
             current_gradient = np.random.randn(n)
-            active_set = np.ones(n, dtype=bool)
 
             past_grad_diffs = np.random.randn(m, n)
             past_steps = np.random.randn(m, n)

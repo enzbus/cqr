@@ -30,7 +30,7 @@ endif
 
 env: ## create environment
 	$(PYTHON) -m venv $(VENV_OPTS) $(ENVDIR)
-	$(BINDIR)/python -m pip install -v -e .
+	$(BINDIR)/python -m pip install -v -e .[dev,tests,docs]
 
 # build: ## build locally (instead of editable install)
 # 	cmake -B$(BUILDDIR)  $(CMAKE_OPTS)
@@ -56,7 +56,14 @@ pybuild: ## create Python packages
 	python -m wheel tags dist/*.whl --platform="${TAG}" --remove
 
 test: #build ## run unit tests
-	python -m $(PROJECT).tests
+	$(BINDIR)/python -m coverage run -m $(PROJECT).tests
+	$(BINDIR)/python -m coverage report
+	$(BINDIR)/python -m coverage xml
+	$(BINDIR)/diff-cover coverage.xml --config-file pyproject.toml
+
+coverage:  ## open html cov report
+	$(BINDIR)/python -m coverage html --fail-under=0 # overwrite pyproject.toml default
+	open htmlcov/index.html
 
 lint:  ## run Pylint
 	pylint $(PROJECT)
