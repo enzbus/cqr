@@ -33,7 +33,7 @@ better understand the notation:
 
 This program always has a non-zero solution for which the objective is zero,
 thanks to the guarantees from the convex duality theory of the `homogeneous
-self-dual embedding <https://doi.org/10.1287/moor.19.1.53>`.
+self-dual embedding <https://doi.org/10.1287/moor.19.1.53>`_.
 The system matrix :math:`Q` is skew symmetric, so at convergence it is
 guaranteed that :math:`u` and :math:`v` are orthogonal, and hence no other
 requirements are needed on the formulation above to recover an optimal solution
