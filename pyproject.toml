@@ -12,7 +12,7 @@ docs = ["sphinx"]
 dev = [
     "build", "twine", "pylint", "isort", "autopep8", "docformatter", "cvxpy",
     "diff_cover"]
-tests = [
+test = [
     "cvxpy", 'coverage[toml]']
 
 [build-system]

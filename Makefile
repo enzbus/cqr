@@ -30,7 +30,7 @@ endif
 
 env: ## create environment
 	$(PYTHON) -m venv $(VENV_OPTS) $(ENVDIR)
-	$(BINDIR)/python -m pip install -v -e .[dev,tests,docs]
+	$(BINDIR)/python -m pip install -v -e .[dev,test,docs]
 
 # build: ## build locally (instead of editable install)
 # 	cmake -B$(BUILDDIR)  $(CMAKE_OPTS)

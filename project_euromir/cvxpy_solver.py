@@ -107,10 +107,10 @@ class Solver(ConicSolver):
 
         def loss_gradient(variable):
             residual = system_matrix @ variable
-            err = np.minimum(variable[n:], 0)
+            err = np.minimum(variable[n+zero:], 0)
             loss = np.linalg.norm(residual)**2 + np.linalg.norm(err)**2
             grad = 2 * (system_matrix.T @ residual)
-            grad[n:] += 2 * err
+            grad[n+zero:] += 2 * err
             return loss, grad
 
         x_0 = np.zeros(system_matrix.shape[1])
