@@ -34,6 +34,9 @@ import numpy as np
 import scipy.sparse as sp
 
 import project_euromir as lib
+from project_euromir.linear_algebra import Q_matvec
+
+from .test_equilibrate import _make_Q
 
 
 class TestLinearAlgebra(TestCase):

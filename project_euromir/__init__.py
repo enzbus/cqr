@@ -141,3 +141,12 @@ add_csr_matvec = _interface_function(
         ('mult', 'double'),
     )
 )
+
+###
+# CVXPY interface
+###
+
+try:
+    from .cvxpy_solver import Solver
+except ImportError:
+    pass
