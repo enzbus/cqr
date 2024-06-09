@@ -11,7 +11,7 @@ may inherit the name, once it's completed.
 Compared to that 2018 Stanford research project, it has a completely new
 codebase (written from scratch) and it removes various unnecessary
 dependencies. It also has a modified algorithm, which is guaranteed to preserve
-strong convexity (unlike many similar attempts). It uses a simplified version
+convexity (unlike many similar attempts). It uses a simplified version
 of the 2018 algorithm only for the final polishing.
 
 Algorithm (draft)
@@ -21,7 +21,7 @@ The algorithm is under development. This is the current model, see the
 `scs <https://web.stanford.edu/~boyd/papers/pdf/scs.pdf>`_ and
 `conic refinement
 <https://stanford.edu/~boyd/papers/pdf/cone_prog_refine.pdf>`_ papers to
-understand the notation:
+better understand the notation:
 
 .. math::
 
@@ -31,23 +31,29 @@ understand the notation:
 
     \end{array}
 
-The system matrix :math:`Q` from the homogeneous self-dual embedding is skew
-symmetric, so at convergence it is guaranteed that :math:`u` and :math:`v` are
-orthogonal. The objective function is clearly convex and has continuous
-derivative. If we drop the zero cone variables (as we do), the projections
-onto :math:`\mathbf{R}`, and any all-zero rows and columns of :math:`Q`, it is
-also strongly convex. The conditioning and Lipschitz constant are all dependent
-on the conditioning of :math:`Q`, we apply by default standard `Ruiz diagonal
-pre-conditioning <https://web.stanford.edu/~takapoui/preconditioning.pdf>`_.
+This program always has a non-zero solution for which the objective is zero,
+thanks to the guarantees from the convex duality theory of the `homogeneous
+self-dual embedding <https://doi.org/10.1287/moor.19.1.53>`.
+The system matrix :math:`Q` is skew symmetric, so at convergence it is
+guaranteed that :math:`u` and :math:`v` are orthogonal, and hence no other
+requirements are needed on the formulation above to recover an optimal solution
+(or certificate) for the original program.
+
+The objective function is clearly convex and has continuous derivative. The
+conditioning depends on the conditioning of :math:`Q`, we apply by default
+standard `Ruiz diagonal pre-conditioning
+<https://web.stanford.edu/~takapoui/preconditioning.pdf>`_.
 
 We use `limited-memory BFGS
 <https://doi.org/10.1090/S0025-5718-1980-0572855-7>`_, as it's implemented in
 the `variable-metric limited memory module of MINPACK-2
-<https://ftp.mcs.anl.gov/pub/MINPACK-2/>`_, for the minimization routine.
+<https://ftp.mcs.anl.gov/pub/MINPACK-2/vmlm>`_, for the minimization routine.
 
 We then use the 2018 conic refinement algorithm (simplified, without the
-normalization step), for the final refinement of the solution obtained from the
-BFGS loop.
+normalization step), using `LSQR
+<https://web.stanford.edu/group/SOL/software/lsqr/>`_ on the HDSE residual
+operator, for the final refinement of the approximate solution obtained from
+the BFGS loop.
 
 The approach is clearly globally convergent, and it can probably be showed to
 converge super-linearly. However, theoretical bounds on convergence have very
