@@ -26,14 +26,54 @@
 # CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 # OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-"""Unit tests runner."""
+"""Simple testing of the CVXPY solver interface."""
 
-from unittest import main
+from unittest import TestCase, main
 
-from .test_equilibrate import TestEquilibrate
-from .test_lbfgs import TestLBFGS
-from .test_linear_algebra import TestLinearAlgebra
-from .test_solver import TestSolver
+import cvxpy as cp
+import numpy as np
 
-if __name__ == '__main__':
+from project_euromir.cvxpy_solver import Solver
+
+
+class TestSolver(TestCase):
+    """Test solver."""
+
+    def test_simple(self):
+        """Test on simple LP."""
+        np.random.seed(0)
+        m, n = 20, 20
+        x = cp.Variable(n)
+        A = np.random.randn(m, n)
+        b = np.random.randn(m)
+        objective = cp.norm1(A @ x - b)
+        constraints = [cp.abs(x) <= .5]
+        cp.Problem(cp.Minimize(objective), constraints).solve(solver=Solver())
+
+        self.assertTrue(np.isclose(np.max(np.abs(x.value)), .5))
+        project_euromir_solution = x.value
+
+        cp.Problem(cp.Minimize(objective), constraints).solve(
+            solver='CLARABEL')
+
+        clarabel_solution = x.value
+
+        pe = np.sum(np.abs(A @ project_euromir_solution - b))
+        clarabel = np.sum(np.abs(A @ clarabel_solution - b))
+
+        print(pe)
+        print(clarabel)
+
+        print(project_euromir_solution)
+        print(clarabel_solution)
+
+        self.assertTrue(
+            np.allclose(project_euromir_solution, clarabel_solution))
+
+        self.assertTrue(np.isclose(pe, clarabel))
+
+
+if __name__ == '__main__': # pragma: no cover
+    import logging
+    logging.basicConfig(level='INFO')
     main()
