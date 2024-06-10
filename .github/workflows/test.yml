@@ -37,7 +37,7 @@ jobs:
       - name: Install libraries # f2c, temporary
         run:  |
               if [ "$RUNNER_OS" == "Linux" ]; then
-                apt install f2c
+                sudo apt install f2c -y
               elif [ "$RUNNER_OS" == "macOS" ]; then
                 brew install f2c
               fi
