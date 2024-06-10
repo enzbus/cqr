@@ -39,6 +39,8 @@ jobs:
               if [ "$RUNNER_OS" == "Linux" ]; then
                 sudo apt install f2c -y
               elif [ "$RUNNER_OS" == "macOS" ]; then
+                # https://github.com/davidchall/homebrew-hep
+                brew tap davidchall/hep
                 brew install f2c
               fi
 
