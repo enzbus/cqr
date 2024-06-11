@@ -1,3 +1,38 @@
+/*
+BSD 3-Clause License
+
+Copyright (c) 2024-, Enzo Busseti
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+Minimal changes by hand to the f2c translation of the original code from
+MINPACK-2. See copyright notices below.
+*/
+
+
 /* dcstep.f -- translated by f2c (version 20200916).
    You must link the resulting object file with libf2c:
 	on Microsoft Windows system, link with libf2c.lib;
@@ -10,21 +45,31 @@
 		http://www.netlib.org/f2c/libf2c.zip
 */
 
-#include "f2c.h"
+#include <math.h>
+#include <stdbool.h>
 
-/* Subroutine */ int dcstep_(doublereal *stx, doublereal *fx, doublereal *dx, 
-	doublereal *sty, doublereal *fy, doublereal *dy, doublereal *stp, 
-	doublereal *fp, doublereal *dp, logical *brackt, doublereal *stpmin, 
-	doublereal *stpmax)
+#include "minpack.h"
+
+/* Subroutine */ void dcstep(
+	double *stx,
+	double *fx,
+	double *dx,
+	double *sty,
+	double *fy,
+	double *dy,
+	double *stp,
+	double *fp,
+	double *dp,
+	bool *brackt,
+	double *stpmin,
+	double *stpmax)
 {
     /* System generated locals */
-    doublereal d__1, d__2, d__3;
+    double d__1, d__2, d__3;
 
-    /* Builtin functions */
-    double sqrt(doublereal);
 
     /* Local variables */
-    static doublereal p, q, r__, s, sgnd, stpc, stpf, stpq, gamma, theta;
+    double p, q, r__, s, sgnd, stpc, stpf, stpq, gamma, theta;
 
 /*     ********** */
 
@@ -147,7 +192,7 @@
 	} else {
 	    stpf = stpc + (stpq - stpc) / 2.;
 	}
-	*brackt = TRUE_;
+	*brackt = true;
 /*     Second case: A lower function value and derivatives of opposite */
 /*     sign. The minimum is bracketed. If the cubic step is farther from */
 /*     stp than the secant step, the cubic step is taken, otherwise the */
@@ -175,7 +220,7 @@
 	} else {
 	    stpf = stpq;
 	}
-	*brackt = TRUE_;
+	*brackt = true;
 /*     Third case: A lower function value, derivatives of the same sign, */
 /*     and the magnitude of the derivative decreases. */
     } else if (abs(*dp) < abs(*dx)) {
@@ -286,6 +331,5 @@
     }
 /*     Compute the new step. */
     *stp = stpf;
-    return 0;
 } /* dcstep_ */
 
