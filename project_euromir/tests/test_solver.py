@@ -32,6 +32,7 @@ from unittest import TestCase, main
 
 import cvxpy as cp
 import numpy as np
+import time
 
 from project_euromir.cvxpy_solver import Solver
 
@@ -48,13 +49,17 @@ class TestSolver(TestCase):
         b = np.random.randn(m)
         objective = cp.norm1(A @ x - b)
         constraints = [cp.abs(x) <= .5]
+        s = time.time()
         cp.Problem(cp.Minimize(objective), constraints).solve(solver=Solver())
-
+        print('PROTOTYPE SOLVER TOOK', time.time() - s)
         self.assertTrue(np.isclose(np.max(np.abs(x.value)), .5))
         project_euromir_solution = x.value
 
+
+        s = time.time()
         cp.Problem(cp.Minimize(objective), constraints).solve(
-            solver='CLARABEL')
+            solver='CLARABEL', verbose=True)
+        print('CLARABEL TOOK', time.time() - s)
 
         clarabel_solution = x.value
 

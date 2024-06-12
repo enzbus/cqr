@@ -3,7 +3,7 @@ project(project_euromir)
 
 set(SRC
   project_euromir/linear_algebra.c
-  # project_euromir/dcsrch.c
+  project_euromir/dcsrch.c
   project_euromir/dcstep.c
 )
 

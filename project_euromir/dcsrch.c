@@ -32,7 +32,10 @@ Some changes by hand to the f2c translation of the original FORTRAN code from
 Lbfgsb3.0. See copyright notice therein.
 
 We remove the task string and replace it with an integer return value:
-positive for valid tasks, negative for errors.
+positive for valid tasks, negative for errors. Return 0 means the current
+point is valid (convergence). Return 1 means re-call the function with
+start=False and new point. Initially must be called with start=true, then
+with start=false.
 */
 
 
@@ -59,29 +62,32 @@ positive for valid tasks, negative for errors.
 	double *ftol,
 	double *gtol,
 	double *xtol,
-	char *task, 
+	//char *task, 
 	double *stpmin,
 	double *stpmax,
 	int *isave,
 	double *dsave,
-	ftnlen task_len)
+	//ftnlen task_len
+	bool start
+	)
 {
     /* System generated locals */
     double d__1;
 
     /* Builtin functions */
-    integer s_cmp(char *, char *, ftnlen, ftnlen);
-    /* Subroutine */ int s_copy(char *, char *, ftnlen, ftnlen);
+    // integer s_cmp(char *, char *, ftnlen, ftnlen);
+    // /* Subroutine */ int s_copy(char *, char *, ftnlen, ftnlen);
 
     /* Local variables */
     double fm, gm, fx, fy, gx, gy, fxm, fym, gxm, gym, stx, sty;
     int stage;
+	int task = -100; // should never be returned
     double finit, ginit, width, ftest, gtest, stmin, stmax, width1;
     bool brackt;
-    extern /* Subroutine */ int dcstep_(doublereal *, doublereal *, 
-	    doublereal *, doublereal *, doublereal *, doublereal *, 
-	    doublereal *, doublereal *, doublereal *, logical *, doublereal *,
-	     doublereal *);
+    // extern /* Subroutine */ int dcstep_(doublereal *, doublereal *, 
+	//     doublereal *, doublereal *, doublereal *, doublereal *, 
+	//     doublereal *, doublereal *, doublereal *, logical *, doublereal *,
+	//      doublereal *);
 
 /*     ********** */
 
@@ -221,13 +227,15 @@ positive for valid tasks, negative for errors.
 
 /*     ********** */
 /*     Initialization block. */
-    /* Parameter adjustments */
+    /* Subtract 1 from pointers to use FORTRAN indexing.*/
     --dsave;
     --isave;
 
     /* Function Body */
     //if (s_cmp(task, "START", (ftnlen)5, (ftnlen)5) == 0) {
 /*        Check the input arguments for errors. */
+	if (start) {
+
 	if (*stp < *stpmin) {
 		return -1;
 	    //s_copy(task, "ERROR: STP .LT. STPMIN", task_len, (ftnlen)22);
@@ -286,14 +294,15 @@ positive for valid tasks, negative for errors.
 	gy = ginit;
 	stmin = 0.;
 	stmax = *stp + *stp * 4.;
-	s_copy(task, "FG", task_len, (ftnlen)2);
+	//s_copy(task, "FG", task_len, (ftnlen)2);
+	task = 1;
 	goto L10;
     } else {
 /*        Restore local variables. */
 	if (isave[1] == 1) {
-	    brackt = TRUE_;
+	    brackt = true;
 	} else {
-	    brackt = FALSE_;
+	    brackt = false;
 	}
 	stage = isave[2];
 	ginit = dsave[1];
@@ -318,25 +327,31 @@ positive for valid tasks, negative for errors.
     }
 /*     Test for warnings. */
     if (brackt && (*stp <= stmin || *stp >= stmax)) {
-	s_copy(task, "WARNING: ROUNDING ERRORS PREVENT PROGRESS", task_len, (
-		ftnlen)41);
+	//s_copy(task, "WARNING: ROUNDING ERRORS PREVENT PROGRESS", task_len, (
+	//	ftnlen)41);
+		task = 2;
     }
     if (brackt && stmax - stmin <= *xtol * stmax) {
-	s_copy(task, "WARNING: XTOL TEST SATISFIED", task_len, (ftnlen)28);
-    }
+	//s_copy(task, "WARNING: XTOL TEST SATISFIED", task_len, (ftnlen)28);
+		task = 3;
+	}
     if (*stp == *stpmax && *f <= ftest && *g <= gtest) {
-	s_copy(task, "WARNING: STP = STPMAX", task_len, (ftnlen)21);
-    }
+	//s_copy(task, "WARNING: STP = STPMAX", task_len, (ftnlen)21);
+		task = 4;
+	}
     if (*stp == *stpmin && (*f > ftest || *g >= gtest)) {
-	s_copy(task, "WARNING: STP = STPMIN", task_len, (ftnlen)21);
-    }
+	//s_copy(task, "WARNING: STP = STPMIN", task_len, (ftnlen)21);
+		task = 5;
+	}
 /*     Test for convergence. */
     if (*f <= ftest && abs(*g) <= *gtol * (-ginit)) {
-	s_copy(task, "CONVERGENCE", task_len, (ftnlen)11);
-    }
+	//s_copy(task, "CONVERGENCE", task_len, (ftnlen)11);
+		task = 0;
+	}
 /*     Test for termination. */
-    if (s_cmp(task, "WARN", (ftnlen)4, (ftnlen)4) == 0 || s_cmp(task, "CONV", 
-	    (ftnlen)4, (ftnlen)4) == 0) {
+    //if (s_cmp(task, "WARN", (ftnlen)4, (ftnlen)4) == 0 || s_cmp(task, "CONV", 
+	//    (ftnlen)4, (ftnlen)4) == 0) {
+	if ((task == 0) || (task > 1)) {
 	goto L10;
     }
 /*     A modified function is used to predict the step during the */
@@ -351,7 +366,7 @@ positive for valid tasks, negative for errors.
 	gxm = gx - gtest;
 	gym = gy - gtest;
 /*        Call dcstep to update stx, sty, and to compute the new step. */
-	dcstep_(&stx, &fxm, &gxm, &sty, &fym, &gym, stp, &fm, &gm, &brackt, &
+	dcstep(&stx, &fxm, &gxm, &sty, &fym, &gym, stp, &fm, &gm, &brackt, &
 		stmin, &stmax);
 /*        Reset the function and derivative values for f. */
 	fx = fxm + stx * gtest;
@@ -360,7 +375,7 @@ positive for valid tasks, negative for errors.
 	gy = gym + gtest;
     } else {
 /*       Call dcstep to update stx, sty, and to compute the new step. */
-	dcstep_(&stx, &fx, &gx, &sty, &fy, &gy, stp, f, g, &brackt, &stmin, &
+	dcstep(&stx, &fx, &gx, &sty, &fy, &gy, stp, f, g, &brackt, &stmin, &
 		stmax);
     }
 /*     Decide if a bisection step is needed. */
@@ -384,12 +399,13 @@ positive for valid tasks, negative for errors.
     *stp = min(*stp,*stpmax);
 /*     If further progress is not possible, let stp be the best */
 /*     point obtained during the search. */
-    if (brackt && (*stp <= stmin || *stp >= stmax) || brackt && stmax - stmin 
-	    <= *xtol * stmax) {
+    if (((brackt) && ((*stp <= stmin) || (*stp >= stmax))) 
+		|| ((brackt) && (stmax - stmin <= *xtol * stmax))) {
 	*stp = stx;
     }
 /*     Obtain another function and derivative. */
-    s_copy(task, "FG", task_len, (ftnlen)2);
+    //s_copy(task, "FG", task_len, (ftnlen)2);
+	task = 1;
 L10:
 /*     Save local variables. */
     if (brackt) {
@@ -411,6 +427,6 @@ L10:
     dsave[11] = stmax;
     dsave[12] = width;
     dsave[13] = width1;
-    return 0;
+    return task;
 } /* dcsrch_ */
 

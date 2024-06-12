@@ -26,7 +26,7 @@ else
 	export PATH := BINDIR:$(PATH)
 endif
 
-.PHONY: env clean update test lint docs fix release build pybuild
+.PHONY: env clean update test lint docs fix release build pybuild cmake
 
 env: ## create environment
 	$(PYTHON) -m venv $(VENV_OPTS) $(ENVDIR)
@@ -45,6 +45,12 @@ clean:  ## clean environment
 	-rm $(PROJECT)/*.dylib
 	-rm $(PROJECT)/*.so
 	-rm $(PROJECT)/*.dll
+
+cmake:  ## run cmake and copy shared library to project folder
+	rm -rf $(BUILDDIR)
+	cmake -S . -B $(BUILDDIR)/
+	cmake --build $(BUILDDIR)/
+	cmake --install $(BUILDDIR)/ 
 
 
 update: clean env  ## clean and recreate environment

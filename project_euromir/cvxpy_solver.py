@@ -124,6 +124,10 @@ class Solver(ConicSolver):
             factr=0., pgtol=0.,
             maxiter=1e10)
 
+        stats = lbfgs_result[2]
+        stats.pop('grad')
+        print(stats)
+
         u = lbfgs_result[0][:n+m+1]
         v = np.zeros(n+m+1)
         v[n+zero:] = lbfgs_result[0][n+m+1:]

@@ -93,7 +93,7 @@ def _python_to_c(obj, c_type):
     return _T[c_type](obj)
 
 
-def _interface_function(function_name, args):
+def _interface_function(function_name, args, returns=None):
     """Interface via (Numpy) ctypes a void function."""
     assert hasattr(LIBRARY, function_name)
 
@@ -102,12 +102,17 @@ def _interface_function(function_name, args):
 
     def fun(**kwargs):
         funargs = [_python_to_c(kwargs[arg], c_type) for arg, c_type in args]
+        if returns is not None:
+            getattr(LIBRARY, function_name).restype = _T[returns]
         return getattr(LIBRARY, function_name)(*funargs)
 
+    # add documentation
     fun.__doc__ = f"{function_name}\n\n"
     for arg, c_type in args:
         fun.__doc__ += f':param {arg}:\n'
         fun.__doc__ += f':type {arg}: {c_type}\n'
+    if returns is not None:
+        fun.__doc__ += f':rtype: {returns}\n'
 
     return fun
 
@@ -141,6 +146,25 @@ add_csr_matvec = _interface_function(
         ('mult', 'double'),
     )
 )
+
+dcsrch = _interface_function(
+    function_name='dcsrch',
+    args=(
+        ('stp', 'double*'),
+        ('f', 'double*'),
+        ('g', 'double*'),
+        ('ftol', 'double*'),
+        ('gtol', 'double*'),
+        ('xtol', 'double*'),
+        ('stpmin', 'double*'),
+        ('stpmax', 'double*'),
+        ('isave', 'int*'),
+        ('dsave', 'double*'),
+        ('start', 'bool'),
+    ),
+    returns=('int')
+)
+
 
 ###
 # CVXPY interface

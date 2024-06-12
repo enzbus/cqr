@@ -58,6 +58,26 @@ void dcstep(
     /*Function called inside the line search procedure, see its file for
     documentation from the original FORTRAN. No variable has been changed.*/
 
-
+int dcsrch(
+	double *stp,
+	double *f,
+	double *g, 
+	double *ftol,
+	double *gtol,
+	double *xtol,
+	double *stpmin,
+	double *stpmax,
+	int *isave,
+	double *dsave,
+	bool start
+	);
+	/*Line search function. We modified the signature; here are the differences
+	with the original FORTRAN. The boolean start must be set to true on initial
+	invocation and false afterwards. The return code is negative on input
+	errors (each negative number corresponds to one error message from the
+	original), 0 on successuful convergence, 1 on request to call again with
+	a new evaluation ("FG"), and greater than 1 for warning messages that mean
+	that the search failed and the current point is the best.
+	*/
 
 #endif
