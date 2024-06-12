@@ -28,20 +28,21 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-Header file for select functions translated from MINPACK-2.
+Header file for select functions translated from Lbfgsb3.0, see copyright
+notice therein; it's licensed BSD 3-Clause.
 
-Translation has been done with f2c and edited by hand. Including here
-also some macros defined in f2c.h 
+Translation has been done with f2c and edited by hand. Including here also some
+macros defined in f2c.h.
 */
 
-#ifndef MINPACK_H
-#define MINPACK_H
+#ifndef FORTRAN_H
+#define FORTRAN_H
 
 #define abs(x) ((x) >= 0 ? (x) : -(x))
 #define min(a,b) ((a) <= (b) ? (a) : (b))
 #define max(a,b) ((a) >= (b) ? (a) : (b))
 
- void dcstep(
+void dcstep(
 	double *stx,
 	double *fx,
 	double *dx, 
@@ -54,5 +55,9 @@ also some macros defined in f2c.h
 	bool *brackt,
 	double *stpmin, 
 	double *stpmax);
+    /*Function called inside the line search procedure, see its file for
+    documentation from the original FORTRAN. No variable has been changed.*/
+
+
 
 #endif

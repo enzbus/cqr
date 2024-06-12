@@ -1,3 +1,41 @@
+/*
+BSD 3-Clause License
+
+Copyright (c) 2024-, Enzo Busseti
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived from
+   this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+Some changes by hand to the f2c translation of the original FORTRAN code from
+Lbfgsb3.0. See copyright notice therein.
+
+We remove the task string and replace it with an integer return value:
+positive for valid tasks, negative for errors.
+*/
+
+
 /* dcsrch.f -- translated by f2c (version 20200916).
    You must link the resulting object file with libf2c:
 	on Microsoft Windows system, link with libf2c.lib;
@@ -10,25 +48,36 @@
 		http://www.netlib.org/f2c/libf2c.zip
 */
 
-#include "f2c.h"
+#include <stdbool.h>
 
-/* Subroutine */ int dcsrch_(doublereal *stp, doublereal *f, doublereal *g, 
-	doublereal *ftol, doublereal *gtol, doublereal *xtol, char *task, 
-	doublereal *stpmin, doublereal *stpmax, integer *isave, doublereal *
-	dsave, ftnlen task_len)
+#include "fortran.h"
+
+/* Subroutine */ int dcsrch(
+	double *stp,
+	double *f,
+	double *g, 
+	double *ftol,
+	double *gtol,
+	double *xtol,
+	char *task, 
+	double *stpmin,
+	double *stpmax,
+	int *isave,
+	double *dsave,
+	ftnlen task_len)
 {
     /* System generated locals */
-    doublereal d__1;
+    double d__1;
 
     /* Builtin functions */
     integer s_cmp(char *, char *, ftnlen, ftnlen);
     /* Subroutine */ int s_copy(char *, char *, ftnlen, ftnlen);
 
     /* Local variables */
-    static doublereal fm, gm, fx, fy, gx, gy, fxm, fym, gxm, gym, stx, sty;
-    static integer stage;
-    static doublereal finit, ginit, width, ftest, gtest, stmin, stmax, width1;
-    static logical brackt;
+    double fm, gm, fx, fy, gx, gy, fxm, fym, gxm, gym, stx, sty;
+    int stage;
+    double finit, ginit, width, ftest, gtest, stmin, stmax, width1;
+    bool brackt;
     extern /* Subroutine */ int dcstep_(doublereal *, doublereal *, 
 	    doublereal *, doublereal *, doublereal *, doublereal *, 
 	    doublereal *, doublereal *, doublereal *, logical *, doublereal *,
@@ -177,38 +226,46 @@
     --isave;
 
     /* Function Body */
-    if (s_cmp(task, "START", (ftnlen)5, (ftnlen)5) == 0) {
+    //if (s_cmp(task, "START", (ftnlen)5, (ftnlen)5) == 0) {
 /*        Check the input arguments for errors. */
 	if (*stp < *stpmin) {
-	    s_copy(task, "ERROR: STP .LT. STPMIN", task_len, (ftnlen)22);
+		return -1;
+	    //s_copy(task, "ERROR: STP .LT. STPMIN", task_len, (ftnlen)22);
 	}
 	if (*stp > *stpmax) {
-	    s_copy(task, "ERROR: STP .GT. STPMAX", task_len, (ftnlen)22);
+	    return -2;
+		//s_copy(task, "ERROR: STP .GT. STPMAX", task_len, (ftnlen)22);
 	}
 	if (*g >= 0.) {
-	    s_copy(task, "ERROR: INITIAL G .GE. ZERO", task_len, (ftnlen)26);
+	    return -3;
+		//s_copy(task, "ERROR: INITIAL G .GE. ZERO", task_len, (ftnlen)26);
 	}
 	if (*ftol < 0.) {
-	    s_copy(task, "ERROR: FTOL .LT. ZERO", task_len, (ftnlen)21);
+	    return -4;
+		//s_copy(task, "ERROR: FTOL .LT. ZERO", task_len, (ftnlen)21);
 	}
 	if (*gtol < 0.) {
-	    s_copy(task, "ERROR: GTOL .LT. ZERO", task_len, (ftnlen)21);
+	    return -5;
+		//s_copy(task, "ERROR: GTOL .LT. ZERO", task_len, (ftnlen)21);
 	}
 	if (*xtol < 0.) {
-	    s_copy(task, "ERROR: XTOL .LT. ZERO", task_len, (ftnlen)21);
+	    return -6;
+		//s_copy(task, "ERROR: XTOL .LT. ZERO", task_len, (ftnlen)21);
 	}
 	if (*stpmin < 0.) {
-	    s_copy(task, "ERROR: STPMIN .LT. ZERO", task_len, (ftnlen)23);
+	    return -7;
+		//s_copy(task, "ERROR: STPMIN .LT. ZERO", task_len, (ftnlen)23);
 	}
 	if (*stpmax < *stpmin) {
-	    s_copy(task, "ERROR: STPMAX .LT. STPMIN", task_len, (ftnlen)25);
+	    return -8;
+		//s_copy(task, "ERROR: STPMAX .LT. STPMIN", task_len, (ftnlen)25);
 	}
 /*        Exit if there are errors on input. */
-	if (s_cmp(task, "ERROR", (ftnlen)5, (ftnlen)5) == 0) {
-	    return 0;
-	}
+	//if (s_cmp(task, "ERROR", (ftnlen)5, (ftnlen)5) == 0) {
+	//    return 0;
+	//}
 /*        Initialize local variables. */
-	brackt = FALSE_;
+	brackt = false;
 	stage = 1;
 	finit = *f;
 	ginit = *g;

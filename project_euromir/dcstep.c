@@ -28,8 +28,8 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-Minimal changes by hand to the f2c translation of the original code from
-MINPACK-2. See copyright notices below.
+Minimal changes by hand to the f2c translation of the original FORTRAN code
+from Lbfgsb3.0. See copyright notice therein.
 */
 
 
@@ -48,7 +48,7 @@ MINPACK-2. See copyright notices below.
 #include <math.h>
 #include <stdbool.h>
 
-#include "minpack.h"
+#include "fortran.h"
 
 /* Subroutine */ void dcstep(
 	double *stx,
