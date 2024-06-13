@@ -121,7 +121,7 @@ class Solver(ConicSolver):
             x0=x_0,
             m=10,
             maxfun=1e10,
-            factr=0., pgtol=0.,
+            factr=0., pgtol=1e-12,
             maxiter=1e10)
 
         stats = lbfgs_result[2]

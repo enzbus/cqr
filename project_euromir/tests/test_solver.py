@@ -28,11 +28,11 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """Simple testing of the CVXPY solver interface."""
 
+import time
 from unittest import TestCase, main
 
 import cvxpy as cp
 import numpy as np
-import time
 
 from project_euromir.cvxpy_solver import Solver
 
@@ -54,7 +54,6 @@ class TestSolver(TestCase):
         print('PROTOTYPE SOLVER TOOK', time.time() - s)
         self.assertTrue(np.isclose(np.max(np.abs(x.value)), .5))
         project_euromir_solution = x.value
-
 
         s = time.time()
         cp.Problem(cp.Minimize(objective), constraints).solve(

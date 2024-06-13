@@ -32,6 +32,7 @@ from unittest import main
 
 from .test_equilibrate import TestEquilibrate
 from .test_lbfgs import TestLBFGS
+from .test_line_search import TestLineSearch
 from .test_linear_algebra import TestLinearAlgebra
 from .test_solver import TestSolver
 
