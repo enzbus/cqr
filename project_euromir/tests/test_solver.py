@@ -43,24 +43,25 @@ class TestSolver(TestCase):
     def test_simple(self):
         """Test on simple LP."""
         np.random.seed(0)
-        m, n = 20, 20
+        m, n = 21, 20
         x = cp.Variable(n)
         A = np.random.randn(m, n)
         b = np.random.randn(m)
         objective = cp.norm1(A @ x - b)
-        constraints = [cp.abs(x) <= .5]
+        d = np.random.randn(n)
+        constraints = [cp.abs(x) <= .5, x @ d == 1.,]
         s = time.time()
         cp.Problem(cp.Minimize(objective), constraints).solve(solver=Solver())
         print('PROTOTYPE SOLVER TOOK', time.time() - s)
         self.assertTrue(np.isclose(np.max(np.abs(x.value)), .5))
         project_euromir_solution = x.value
-        print(f'CONSTRAINTS VIOLATION NORM, solver: {np.linalg.norm(constraints[0].violation()):e}')
+        print(f'CONSTRAINTS VIOLATION NORMs, solver: {np.linalg.norm(constraints[0].violation()):e}, {np.linalg.norm(constraints[1].violation()):e}')
 
         s = time.time()
         cp.Problem(cp.Minimize(objective), constraints).solve(
             solver='ECOS', feastol = 1e-16, abstol = 1e-16, reltol = 1e-16, verbose=True)
         print('INTERIOR POINT TOOK', time.time() - s)
-        print(f'CONSTRAINTS VIOLATION NORM, INTERIOR POINT: {np.linalg.norm(constraints[0].violation()):e}')
+        print(f'CONSTRAINTS VIOLATION NORM, INTERIOR POINT: {np.linalg.norm(constraints[0].violation()):e}, {np.linalg.norm(constraints[1].violation()):e}')
 
         ip_solution = x.value
 
@@ -69,6 +70,7 @@ class TestSolver(TestCase):
 
         print(f'Objective value, solver: {pe:e}')
         print(f'Objectve value, INTERIOR POINT: {ip:e}')
+        print(f'ProjEur - IP objective vals {pe-ip:e}')
 
         # breakpoint()
 
