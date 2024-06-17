@@ -41,6 +41,7 @@ NORMALIZE = False # not sure this helps, and complicates
 from project_euromir import dcsrch
 
 from .lbfgs_multiply import lbfgs_multiply
+from .line_search import LineSearchFailed, line_search
 
 # TODO plug in interfaced dcsrch function
 
@@ -191,16 +192,46 @@ def minimize_lbfgs(
             direction[:] = 0.
             direction[current_active_set] = - lbfgs_multiply(
                 current_gradient=current_gradient[current_active_set],
-                past_steps=past_steps[memory-i:, current_active_set],
-                past_grad_diffs=past_grad_diffs[memory-i:, current_active_set],
+                past_steps=past_steps[max(memory-i, 0):, current_active_set],
+                past_grad_diffs=past_grad_diffs[max(memory-i, 0):, current_active_set],
                 scale=scale)
             assert np.all(direction[~current_active_set] == 0.)
         else:
             direction[:] = - lbfgs_multiply(
                 current_gradient=current_gradient,
-                past_steps=past_steps[memory-i:],
-                past_grad_diffs=past_grad_diffs[memory-i:],
+                past_steps=past_steps[max(memory-i, 0):],
+                past_grad_diffs=past_grad_diffs[max(memory-i, 0):],
                 scale=scale)
+
+        current_point_backup = np.copy(current_point)
+        current_gradient_backup = np.copy(current_gradient)
+
+        try:
+
+            current_loss = line_search(
+                current_point = current_point,
+                current_loss = current_loss,
+                current_gradient = current_gradient,
+                direction = direction,
+                loss_gradient_function = loss_and_gradient_function,
+                mini_newton_step = 1e-8,
+            )
+
+        except LineSearchFailed:
+            break
+
+        past_steps[:-1] = past_steps[1:]
+        past_grad_diffs[:-1] = past_grad_diffs[1:]
+        if memory > 0:
+            past_steps[-1] = current_point - current_point_backup
+            past_grad_diffs[-1] = current_gradient - current_gradient_backup
+        if use_active_set:
+            # I don't plan to support AS anyways
+            current_loss, current_gradient[:], current_active_set[:] = loss_and_gradient_function(
+            current_point)
+
+        continue
+        breakpoint()
 
         next_loss = current_loss
         next_gradient[:] = current_gradient
