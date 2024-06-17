@@ -165,6 +165,11 @@ dcsrch = _interface_function(
     returns=('int')
 )
 
+###
+# Main function
+###
+
+from .solver import solve
 
 ###
 # CVXPY interface
