@@ -41,7 +41,11 @@ DEBUG = False
 if DEBUG:
     import matplotlib.pyplot as plt
 
-PYTHON_LBFGS = False
+USE_MY_LBFGS = True
+ACTIVE_SET = False # this doesn't work yet, not sure if worth trying to fix it
+
+if ACTIVE_SET:
+    assert USE_MY_LBFGS
 
 def solve(matrix, b, c, zero, nonneg):
     "Main function."
@@ -84,13 +88,29 @@ def solve(matrix, b, c, zero, nonneg):
     gradient = np.empty(system_matrix.shape[1], dtype=float)
 
     # temporary, just define loss-gradient function for LPs
-    def loss_gradient(variable):
-        residual[:] = system_matrix @ variable
-        error[:] = np.minimum(variable[n+zero:], 0)
-        loss = np.linalg.norm(residual)**2 + np.linalg.norm(error)**2
-        gradient[:] = 2 * (system_matrix.T @ residual)
-        gradient[n+zero:] += 2 * error
-        return loss, gradient
+
+    if ACTIVE_SET:
+        # test using active set instead and internal projection
+        # when extending to other cones we'll have to figure out
+        def loss_gradient(variable):
+            variable[n+zero:] = np.maximum(variable[n+zero:], 0)
+            residual[:] = system_matrix @ variable
+            # error[:] = np.minimum(variable[n+zero:], 0)
+            loss = np.linalg.norm(residual)**2 #+ np.linalg.norm(error)**2
+            gradient[:] = 2 * (system_matrix.T @ residual)
+            active_set = np.ones_like(variable, dtype=bool)
+            active_set[n+zero:] = (variable[n+zero:] > 0) | (gradient[n+zero:] < 0)
+            # gradient[n+zero:] += 2 * error
+            return loss, gradient, active_set
+
+    else:
+        def loss_gradient(variable):
+            residual[:] = system_matrix @ variable
+            error[:] = np.minimum(variable[n+zero:], 0)
+            loss = np.linalg.norm(residual)**2 + np.linalg.norm(error)**2
+            gradient[:] = 2 * (system_matrix.T @ residual)
+            gradient[n+zero:] += 2 * error
+            return loss, gradient
 
     # initialize with all zeros and 1 only on the HSDE feasible flag
     x_0 = np.zeros(system_matrix.shape[1])
@@ -108,7 +128,7 @@ def solve(matrix, b, c, zero, nonneg):
 
     # call LBFGS
     start = time.time()
-    if PYTHON_LBFGS:
+    if not USE_MY_LBFGS:
         lbfgs_result = sp.optimize.fmin_l_bfgs_b(
             loss_gradient,
             x0=x_0,
@@ -129,12 +149,12 @@ def solve(matrix, b, c, zero, nonneg):
             initial_point=x_0,
             callback=_callback if DEBUG else None,
             memory=10,
-            max_iters=100000,
+            max_iters=1e10,
             c_1=1e-3, c_2=.9,
             ls_backtrack=.5,
             ls_forward=1.1,
-            max_ls=100,
-            use_active_set = False)
+            use_active_set=ACTIVE_SET,
+            max_ls=100)
     print('LBFGS took', time.time() - start)
 
     # debug mode, plot history of losses

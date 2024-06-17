@@ -215,7 +215,12 @@ def minimize_lbfgs(
             DCSRCH_COMMUNICATION['g'][0] = next_gradient @ direction
             # breakpoint()
             dcsrch_result = dcsrch(**DCSRCH_COMMUNICATION)
-            assert dcsrch_result >= 0, "Error in line search calling code"
+            if dcsrch_result < 0:
+                logger.warning(
+                    "Error in line search calling code, are you using active set?")
+                print(f'done in iters {i}, tot func calls {func_counter}')
+                return next_point
+                # breakpoint()
 
             # breakpoint()
 
@@ -250,13 +255,13 @@ def minimize_lbfgs(
                 # the function can also modify the next_point (projection)
                 next_loss, next_gradient[:], next_active_set[:] = \
                     loss_and_gradient_function(next_point)
-                # logger.info(
-                #     'next_active_set has %s variables in it that are not'
-                #     ' in current_active_set, and %s variables not in it that'
-                #     ' are in current_active_set',
-                #     np.sum(next_active_set & (~current_active_set)),
-                #     np.sum(~(next_active_set) & current_active_set),
-                # )
+                logger.info(
+                    'next_active_set has %s variables in it that are not'
+                    ' in current_active_set, and %s variables not in it that'
+                    ' are in current_active_set',
+                    np.sum(next_active_set & (~current_active_set)),
+                    np.sum(~(next_active_set) & current_active_set),
+                )
             else:
                 next_loss, next_gradient[:] = loss_and_gradient_function(
                     next_point)
