@@ -173,7 +173,7 @@ def solve(matrix, b, c, zero, nonneg):
     # call LSQR
     start = time.time()
     result = sp.sparse.linalg.lsqr(
-        DR, residual, atol=0., btol=0., iter_lim=Q.shape[0])
+        DR, residual, atol=0., btol=0., iter_lim=Q.shape[0]*2)
     print('LSQR result[1:-1]', result[1:-1])
     print('LSQR took', time.time() - start)
     dz = result[0]
