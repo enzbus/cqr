@@ -28,6 +28,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """Unit tests runner."""
 
+import logging
 from unittest import main
 
 from .test_equilibrate import TestEquilibrate
@@ -37,4 +38,5 @@ from .test_linear_algebra import TestLinearAlgebra
 from .test_solver import TestSolver
 
 if __name__ == '__main__':
+    logging.basicConfig(level='INFO')
     main()

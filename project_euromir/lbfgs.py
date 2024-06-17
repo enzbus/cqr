@@ -38,54 +38,71 @@ logger = logging.getLogger(__name__)
 
 NORMALIZE = False # not sure this helps, and complicates
 
+from project_euromir import dcsrch
+
 from .lbfgs_multiply import lbfgs_multiply
 
 # TODO plug in interfaced dcsrch function
 
-def strong_wolfe(
-        current_loss: float,
-        current_gradient: np.array,
-        direction: np.array,
-        step_size: float,
-        next_loss: float,
-        next_gradient: np.array,
-        c_1: float = 1e-3,
-        c_2: float = 0.9):
-    """Simple line search satisfying Wolfe conditions.
+# input for FORTRAN-to-C-to-Python DCSRCH
+DCSRCH_COMMUNICATION = {
+    'stp': np.array([1.]),
+    'f': np.array([1.]),
+    'g': np.array([-1.]),
+    'ftol': np.array([1e-3]),
+    'gtol': np.array([0.9]),
+    'xtol': np.array([0.1]),
+    'stpmin': np.array([0.]),
+    'stpmax': np.array([1000.]), # in lbfgsb this is set iteratively...
+    'isave': np.zeros(20, dtype=np.int32),
+    'dsave': np.zeros(20, dtype=float),
+    'start': True,
+}
 
-    This is a much simplified approach versus the canonical dcsrch from
-    MINPACK. Hopefully it works!
+# def strong_wolfe(
+#         current_loss: float,
+#         current_gradient: np.array,
+#         direction: np.array,
+#         step_size: float,
+#         next_loss: float,
+#         next_gradient: np.array,
+#         c_1: float = 1e-3,
+#         c_2: float = 0.9):
+#     """Simple line search satisfying Wolfe conditions.
 
-    Idea: start from unit step. If Armijo rule is not satisfied, backtrack.
-    Else if curvature condition is not satisfied, make step longer.
+#     This is a much simplified approach versus the canonical dcsrch from
+#     MINPACK. Hopefully it works!
 
-    Default c_1 and c_2 are the same as in MINPACK-2/vmlm, from my tests they
-    seem like good choices.
-    """
+#     Idea: start from unit step. If Armijo rule is not satisfied, backtrack.
+#     Else if curvature condition is not satisfied, make step longer.
 
-    gradient_dot_direction = current_gradient @ direction
-    assert gradient_dot_direction < 0
+#     Default c_1 and c_2 are the same as in MINPACK-2/vmlm, from my tests they
+#     seem like good choices.
+#     """
 
-    armijo = \
-        next_loss <= current_loss + c_1 * step_size * gradient_dot_direction
+#     gradient_dot_direction = current_gradient @ direction
+#     assert gradient_dot_direction < 0
 
-    next_gradient_dot_direction = next_gradient @ direction
-    curvature = abs(next_gradient_dot_direction) <= c_2 * abs(
-        gradient_dot_direction)
+#     armijo = \
+#         next_loss <= current_loss + c_1 * step_size * gradient_dot_direction
 
-    logger.info(
-        'evaluating strong Wolfe conditions with step_size=%s', step_size)
-    logger.info(
-        '\tArmijo is %s, with next_loss=%.2e, current_loss=%.2e'
-        ' gradient_times_direction=%.2e;',
-        armijo, next_loss, current_loss, gradient_dot_direction,
-    )
-    logger.info(
-        '\tcurvature condition is %s with next_gradient_dot_direction=%.2e;',
-        curvature, next_gradient_dot_direction
-    )
+#     next_gradient_dot_direction = next_gradient @ direction
+#     curvature = abs(next_gradient_dot_direction) <= c_2 * abs(
+#         gradient_dot_direction)
 
-    return armijo, curvature
+#     logger.info(
+#         'evaluating strong Wolfe conditions with step_size=%s', step_size)
+#     logger.info(
+#         '\tArmijo is %s, with next_loss=%.2e, current_loss=%.2e'
+#         ' gradient_times_direction=%.2e;',
+#         armijo, next_loss, current_loss, gradient_dot_direction,
+#     )
+#     logger.info(
+#         '\tcurvature condition is %s with next_gradient_dot_direction=%.2e;',
+#         curvature, next_gradient_dot_direction
+#     )
+
+#     return armijo, curvature
 
 
 def minimize_lbfgs(
@@ -141,8 +158,13 @@ def minimize_lbfgs(
         # print('current_gradient', current_gradient)
         # print('current_gradient norm', np.linalg.norm(current_gradient))
 
+        # if np.linalg.norm(current_gradient) < np.finfo(float).eps:
+        #     print('Converged!')
+        #     break
+
         if i == 0:
             scale = 1/np.linalg.norm(current_gradient)
+
         elif memory > 0:
             if use_active_set:
                 scale = np.dot(past_steps[-1, current_active_set], past_grad_diffs[-1, current_active_set]) / np.dot(
@@ -150,6 +172,10 @@ def minimize_lbfgs(
             else:
                 scale = np.dot(past_steps[-1], past_grad_diffs[-1]) / np.dot(
                     past_grad_diffs[-1], past_grad_diffs[-1])
+
+        if np.isnan(scale):
+            logger.warning('scale calculation resulted in NaN.')
+            break
 
         if use_active_set:
             direction[:] = 0.
@@ -166,55 +192,96 @@ def minimize_lbfgs(
                 past_grad_diffs=past_grad_diffs[memory-i:],
                 base_inverse_diagonal=scale)
 
+        next_loss = current_loss
+        next_gradient[:] = current_gradient
         step_size = 1.
-        for _ in range(max_ls):
+
+        for _ in range(100):
+            logger.info('line search iter %s, step size %s', _, step_size)
+
+            # plug in dcsrch
+            # breakpoint()
+            DCSRCH_COMMUNICATION['start'] = (_ == 0)
+            DCSRCH_COMMUNICATION['stp'][0] = step_size
+            DCSRCH_COMMUNICATION['f'][0] = next_loss
+            DCSRCH_COMMUNICATION['g'][0] = next_gradient @ direction
+            # breakpoint()
+            dcsrch_result = dcsrch(**DCSRCH_COMMUNICATION)
+            assert dcsrch_result >= 0, "Error in line search calling code"
+
+            # breakpoint()
+
+            # line search converged
+            if (dcsrch_result == 0) or (dcsrch_result > 1):
+                if dcsrch_result != 0:
+                    logger.warning("Line search raised warnings, exiting.")
+                    return next_point
+
+                logger.info('line search converged in %s iterations', _+1)
+                past_steps[:-1] = past_steps[1:]
+                past_grad_diffs[:-1] = past_grad_diffs[1:]
+                if memory > 0:
+                    past_steps[-1] = next_point - current_point
+                    past_grad_diffs[-1] = next_gradient - current_gradient
+                current_point[:] = next_point
+                current_loss = next_loss
+                current_gradient[:] = next_gradient
+                if use_active_set:
+                    current_active_set[:] = next_active_set
+
+                break
+
+            step_size =  DCSRCH_COMMUNICATION['stp'][0]
+
             next_point[:] = current_point + step_size * direction
 
             if use_active_set:
                 # the function can also modify the next_point (projection)
                 next_loss, next_gradient[:], next_active_set[:] = \
                     loss_and_gradient_function(next_point)
-                logger.info(
-                    'next_active_set has %s variables in it that are not'
-                    ' in current_active_set, and %s variables not in it that'
-                    ' are in current_active_set',
-                    np.sum(next_active_set & (~current_active_set)),
-                    np.sum(~(next_active_set) & current_active_set),
-                )
+                # logger.info(
+                #     'next_active_set has %s variables in it that are not'
+                #     ' in current_active_set, and %s variables not in it that'
+                #     ' are in current_active_set',
+                #     np.sum(next_active_set & (~current_active_set)),
+                #     np.sum(~(next_active_set) & current_active_set),
+                # )
             else:
                 next_loss, next_gradient[:] = loss_and_gradient_function(
                     next_point)
 
-            armijo, curvature = strong_wolfe(
-                current_loss=current_loss, current_gradient=current_gradient,
-                direction=direction, step_size=step_size, next_loss=next_loss,
-                next_gradient=next_gradient, c_1=c_1, c_2=c_2)
+    return current_point
 
-            # print(
-            #     'step_size', step_size, 'armijo', armijo, 'curvature', curvature)
+        #     armijo, curvature = strong_wolfe(
+        #         current_loss=current_loss, current_gradient=current_gradient,
+        #         direction=direction, step_size=step_size, next_loss=next_loss,
+        #         next_gradient=next_gradient, c_1=c_1, c_2=c_2)
 
-            if not armijo:
-                step_size *= ls_backtrack
-                continue
+        #     # print(
+        #     #     'step_size', step_size, 'armijo', armijo, 'curvature', curvature)
 
-            if not curvature:
-                step_size *= ls_forward
-                continue
+        #     if not armijo:
+        #         step_size *= ls_backtrack
+        #         continue
 
-            # both are satisfied
-            logger.info('line search converged in %s iterations', _+1)
-            past_steps[:-1] = past_steps[1:]
-            past_grad_diffs[:-1] = past_grad_diffs[1:]
-            if memory > 0:
-                past_steps[-1] = next_point - current_point
-                past_grad_diffs[-1] = next_gradient - current_gradient
-            current_point[:] = next_point
-            current_loss = next_loss
-            current_gradient[:] = next_gradient
-            if use_active_set:
-                current_active_set[:] = next_active_set
-            break
+        #     if not curvature:
+        #         step_size *= ls_forward
+        #         continue
 
-        else:
-            print('BACKTRACKING FAILED')
-            return current_point
+        #     # both are satisfied
+        #     logger.info('line search converged in %s iterations', _+1)
+        #     past_steps[:-1] = past_steps[1:]
+        #     past_grad_diffs[:-1] = past_grad_diffs[1:]
+        #     if memory > 0:
+        #         past_steps[-1] = next_point - current_point
+        #         past_grad_diffs[-1] = next_gradient - current_gradient
+        #     current_point[:] = next_point
+        #     current_loss = next_loss
+        #     current_gradient[:] = next_gradient
+        #     if use_active_set:
+        #         current_active_set[:] = next_active_set
+        #     break
+
+        # else:
+        #     print('BACKTRACKING FAILED')
+        #     return current_point
