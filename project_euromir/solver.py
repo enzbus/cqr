@@ -41,13 +41,17 @@ DEBUG = False
 if DEBUG:
     import matplotlib.pyplot as plt
 
-USE_MY_LBFGS = False
+USE_MY_LBFGS = True
 ACTIVE_SET = False # this doesn't work yet, not sure if worth trying to fix it
 
 if ACTIVE_SET:
     assert USE_MY_LBFGS
 
-def solve(matrix, b, c, zero, nonneg):
+PGTOL = 0. # I tried this as a stopping condition for lbfgs, but it can break
+# (meaning that active set is still not robust and when switching to lsqr
+# it breaks); you can try e.g. 1e-12
+
+def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
     "Main function."
 
     # some shape checking
@@ -132,10 +136,10 @@ def solve(matrix, b, c, zero, nonneg):
         lbfgs_result = sp.optimize.fmin_l_bfgs_b(
             loss_gradient,
             x0=x_0,
-            m=10,
+            m=lbfgs_memory,
             maxfun=1e10,
             factr=0.,
-            pgtol=1e-12, # e.g., simply use this for termination
+            pgtol=PGTOL,
             callback=_callback if DEBUG else None,
             maxiter=1e10)
         # print LBFGS stats
@@ -148,12 +152,12 @@ def solve(matrix, b, c, zero, nonneg):
             loss_and_gradient_function=loss_gradient,
             initial_point=x_0,
             callback=_callback if DEBUG else None,
-            memory=10,
+            memory=lbfgs_memory,
             max_iters=int(1e10),
             # c_1=1e-3, c_2=.9,
             # ls_backtrack=.5,
             # ls_forward=1.1,
-            pgtol=1e-12,
+            pgtol=PGTOL,
             use_active_set=ACTIVE_SET,
             max_ls=100)
     print('LBFGS took', time.time() - start)
