@@ -17,7 +17,6 @@
 from unittest import TestCase, main
 
 import numpy as np
-
 from solver.cones import dual_cone_project
 from solver.config import NONUMBA
 from solver.residual import (add_hsde_residual_derivative_matvec,

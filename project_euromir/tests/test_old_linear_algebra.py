@@ -19,7 +19,6 @@ from unittest import TestCase, main
 import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spl
-
 from solver.linear_algebra import (add_csc_matvec, add_csr_matvec,
                                    add_dense_matvec, add_dense_rmatvec,
                                    add_hsde_matvec, conjugate_gradient)

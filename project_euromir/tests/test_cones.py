@@ -16,7 +16,6 @@
 from unittest import TestCase, main
 
 import numpy as np
-
 from solver import cones
 from solver.config import NONUMBA
 

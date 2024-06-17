@@ -132,8 +132,32 @@ class Solver(ConicSolver):
         v = np.zeros(n+m+1)
         v[n+zero:] = lbfgs_result[0][n+m+1:]
 
-        # TODO: LSQR goes here
+        # LSQR loop
+        def project(variable):
+            result = np.copy(variable)
+            result[n+zero:] = np.maximum(result[n+zero:], 0.)
+            return result
 
+        # recompute u and v by projection
+        z = u - v
+        u = project(z)
+        v = u - z
+
+        # for LPs, simply compute DR as sparse matrix
+        mask = np.ones(len(z), dtype=float)
+        mask[n+zero:] = z[n+zero:] > 0
+        DR = (Q - sp.sparse.eye(Q.shape[0])) @ sp.sparse.diags(mask) + sp.sparse.eye(Q.shape[0])
+        residual = Q @ u - v
+        print('residual norm before LSQR', np.linalg.norm(residual))
+        result = sp.sparse.linalg.lsqr(
+            DR, residual, atol=0., btol=0.)#, iter_lim=Q.shape[0])
+        dz = result[0]
+        z1 = z - dz
+        u = project(z1)
+        v = u - z1
+        print("residual norm after LSQR", np.linalg.norm(Q @ u - v))
+
+        # Transform back into problem format
         u1, u2, u3 = u[:n], u[n:n+m], u[-1]
         v2, v3 = v[n:n+m], v[-1]
 

@@ -54,27 +54,31 @@ class TestSolver(TestCase):
         print('PROTOTYPE SOLVER TOOK', time.time() - s)
         self.assertTrue(np.isclose(np.max(np.abs(x.value)), .5))
         project_euromir_solution = x.value
+        print(f'CONSTRAINTS VIOLATION NORM, solver: {np.linalg.norm(constraints[0].violation()):e}')
 
         s = time.time()
         cp.Problem(cp.Minimize(objective), constraints).solve(
-            solver='CLARABEL', verbose=True)
-        print('CLARABEL TOOK', time.time() - s)
+            solver='ECOS', feastol = 1e-16, abstol = 1e-16, reltol = 1e-16, verbose=True)
+        print('INTERIOR POINT TOOK', time.time() - s)
+        print(f'CONSTRAINTS VIOLATION NORM, INTERIOR POINT: {np.linalg.norm(constraints[0].violation()):e}')
 
-        clarabel_solution = x.value
+        ip_solution = x.value
 
         pe = np.sum(np.abs(A @ project_euromir_solution - b))
-        clarabel = np.sum(np.abs(A @ clarabel_solution - b))
+        ip = np.sum(np.abs(A @ ip_solution - b))
 
-        print(pe)
-        print(clarabel)
+        print(f'Objective value, solver: {pe:e}')
+        print(f'Objectve value, INTERIOR POINT: {ip:e}')
 
-        print(project_euromir_solution)
-        print(clarabel_solution)
+        # breakpoint()
+
+        # print(project_euromir_solution)
+        # print(clarabel_solution)
 
         self.assertTrue(
-            np.allclose(project_euromir_solution, clarabel_solution))
+            np.allclose(project_euromir_solution, ip_solution))
 
-        self.assertTrue(np.isclose(pe, clarabel))
+        self.assertTrue(np.isclose(pe, ip))
 
 
 if __name__ == '__main__': # pragma: no cover
