@@ -135,7 +135,7 @@ def solve(matrix, b, c, zero, nonneg):
             m=10,
             maxfun=1e10,
             factr=0.,
-            pgtol=1e-16, # e.g., simply use this for termination
+            pgtol=1e-12, # e.g., simply use this for termination
             callback=_callback if DEBUG else None,
             maxiter=1e10)
         # print LBFGS stats
@@ -150,9 +150,10 @@ def solve(matrix, b, c, zero, nonneg):
             callback=_callback if DEBUG else None,
             memory=10,
             max_iters=int(1e10),
-            c_1=1e-3, c_2=.9,
-            ls_backtrack=.5,
-            ls_forward=1.1,
+            # c_1=1e-3, c_2=.9,
+            # ls_backtrack=.5,
+            # ls_forward=1.1,
+            pgtol=1e-12,
             use_active_set=ACTIVE_SET,
             max_ls=100)
     print('LBFGS took', time.time() - start)

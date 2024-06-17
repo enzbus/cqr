@@ -87,8 +87,9 @@ class TestLBFGS(TestCase):
 
         x = lbfgs.minimize_lbfgs(
             loss_and_gradient_function=loss_and_gradient_function,
-            initial_point=np.zeros(n), memory=10, max_iters=100, c_1=1e-3,
-            c_2=0.9, max_ls=20)
+            initial_point=np.zeros(n), memory=10, max_iters=100, #c_1=1e-3,
+            #c_2=0.9,
+            max_ls=20)
 
         self.assertTrue(np.allclose(A @ x, b))
         self.assertLess(
@@ -124,8 +125,9 @@ class TestLBFGS(TestCase):
 
         x = lbfgs.minimize_lbfgs(
             loss_and_gradient_function=loss_and_gradient_function,
-            initial_point=np.zeros(n), memory=5, max_iters=100, c_1=1e-3,
-            c_2=0.9, max_ls=20, use_active_set=True)
+            initial_point=np.zeros(n), memory=5, max_iters=100, #c_1=1e-3,
+            #c_2=0.9,
+            max_ls=20, use_active_set=True)
 
         self.assertGreaterEqual(np.min(x), 0.)
         self.assertLess(
