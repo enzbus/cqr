@@ -81,7 +81,8 @@ class TestLBFGS(TestCase):
             return loss, gradient
 
         result = sp.optimize.fmin_l_bfgs_b(
-            loss_and_gradient_function, x0=np.zeros(n), iprint=99)
+            loss_and_gradient_function, x0=np.zeros(n), #iprint=99
+            )
         print(result)
 
         x = lbfgs.minimize_lbfgs(
@@ -117,7 +118,8 @@ class TestLBFGS(TestCase):
 
         result = sp.optimize.fmin_l_bfgs_b(
             loss_and_gradient_function, x0=np.zeros(n), bounds=[[0, None]]*n,
-            iprint=99)
+            #iprint=99
+            )
         print(result)
 
         x = lbfgs.minimize_lbfgs(

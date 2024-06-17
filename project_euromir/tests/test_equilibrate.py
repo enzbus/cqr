@@ -37,7 +37,7 @@ import scipy as sp
 import project_euromir as lib
 from project_euromir import equilibrate
 
-logging.basicConfig(level='INFO')
+# logging.basicConfig(level='INFO')
 
 
 def _make_Q(matrix, b, c):

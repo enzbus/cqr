@@ -114,7 +114,7 @@ def solve(matrix, b, c, zero, nonneg):
             m=10,
             maxfun=1e10,
             factr=0.,
-            pgtol=1e-14, # e.g., simply use this for termination
+            pgtol=1e-16, # e.g., simply use this for termination
             callback=_callback if DEBUG else None,
             maxiter=1e10)
         # print LBFGS stats
@@ -168,7 +168,7 @@ def solve(matrix, b, c, zero, nonneg):
 
     # obtain initial (pre-LSQR) residual
     residual = Q @ u - v
-    print('residual norm before LSQR', np.linalg.norm(residual))
+    print('residual norm sq before LSQR', np.linalg.norm(residual)**2)
 
     # call LSQR
     start = time.time()
@@ -182,7 +182,7 @@ def solve(matrix, b, c, zero, nonneg):
     z1 = z - dz
     u = project(z1)
     v = u - z1
-    print("residual norm after LSQR", np.linalg.norm(Q @ u - v))
+    print("residual norm sq after LSQR", np.linalg.norm(Q @ u - v)**2)
 
     # Transform back into problem format
     u1, u2, u3 = u[:n], u[n:n+m], u[-1]

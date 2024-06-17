@@ -29,6 +29,7 @@
 """Simple testing of the CVXPY solver interface."""
 
 import time
+import warnings
 from unittest import TestCase, main
 
 import cvxpy as cp
@@ -42,45 +43,59 @@ class TestSolver(TestCase):
 
     def test_simple(self):
         """Test on simple LP."""
-        np.random.seed(0)
-        m, n = 21, 20
-        x = cp.Variable(n)
-        A = np.random.randn(m, n)
-        b = np.random.randn(m)
-        objective = cp.norm1(A @ x - b)
-        d = np.random.randn(n)
-        constraints = [cp.abs(x) <= .5, x @ d == 1.,]
-        s = time.time()
-        cp.Problem(cp.Minimize(objective), constraints).solve(solver=Solver())
-        print('PROTOTYPE SOLVER TOOK', time.time() - s)
-        self.assertTrue(np.isclose(np.max(np.abs(x.value)), .5))
-        project_euromir_solution = x.value
-        print(f'CONSTRAINTS VIOLATION NORMs, solver: {np.linalg.norm(constraints[0].violation()):e}, {np.linalg.norm(constraints[1].violation()):e}')
+        for seed in range(10):
+            print('\n\nEXPERIMENT', seed+1)
+            np.random.seed(seed)
+            m, n = 21, 20
+            x = cp.Variable(n)
+            A = np.random.randn(m, n)
+            b = np.random.randn(m)
+            objective = cp.norm1(A @ x - b)
+            d = np.random.randn(n)
+            constraints = [cp.abs(x) <= .5, x @ d == 1.,]
 
-        s = time.time()
-        cp.Problem(cp.Minimize(objective), constraints).solve(
-            solver='ECOS', feastol = 1e-16, abstol = 1e-16, reltol = 1e-16, verbose=True)
-        print('INTERIOR POINT TOOK', time.time() - s)
-        print(f'CONSTRAINTS VIOLATION NORM, INTERIOR POINT: {np.linalg.norm(constraints[0].violation()):e}, {np.linalg.norm(constraints[1].violation()):e}')
+            def _get_stats():
+                constr_err_1 = np.linalg.norm(constraints[0].violation())
+                constr_err_2 = np.linalg.norm(constraints[1].violation())
+                return constr_err_1, constr_err_2, objective.value
 
-        ip_solution = x.value
+            s = time.time()
+            cp.Problem(
+                cp.Minimize(objective), constraints).solve(solver=Solver())
+            print('PROTOTYPE SOLVER TOOK', time.time() - s)
+            my_solver_solution = x.value
+            my_solver_stats = _get_stats()
+            print(
+                'PROTOTYPE SOLVER STATS; constr violation norms: '
+                f'({my_solver_stats[0]:.2e}, {my_solver_stats[1]:.2e}). '
+                f'objective: {my_solver_stats[2]:.2e}')
 
-        pe = np.sum(np.abs(A @ project_euromir_solution - b))
-        ip = np.sum(np.abs(A @ ip_solution - b))
+            s = time.time()
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                cp.Problem(cp.Minimize(objective), constraints).solve(
+                    solver='ECOS', feastol = 1e-32, abstol = 1e-32,
+                    reltol = 1e-32, max_iters=1000)#, verbose=True)
+            print('INTERIOR POINT TOOK', time.time() - s)
+            ip_solver_solution = x.value
+            ip_solver_stats = _get_stats()
+            print(
+                'PROTOTYPE SOLVER STATS; constr violation norms: '
+                f'({ip_solver_stats[0]:.2e}, {ip_solver_stats[1]:.2e}), '
+                f'objective: {ip_solver_stats[2]:.2e}')
 
-        print(f'Objective value, solver: {pe:e}')
-        print(f'Objectve value, INTERIOR POINT: {ip:e}')
-        print(f'ProjEur - IP objective vals {pe-ip:e}')
+            print('Prototype objective - IP objective: '
+                f'{my_solver_stats[2]-ip_solver_stats[2]:e}')
 
-        # breakpoint()
+            self.assertLessEqual( # we add float epsilon with some scraps
+                my_solver_stats[0], ip_solver_stats[0]+1.1*np.finfo(float).eps)
+            self.assertLessEqual(
+                my_solver_stats[1], ip_solver_stats[1]+1.1*np.finfo(float).eps)
 
-        # print(project_euromir_solution)
-        # print(clarabel_solution)
+            self.assertTrue(
+                np.allclose(my_solver_solution, ip_solver_solution))
 
-        self.assertTrue(
-            np.allclose(project_euromir_solution, ip_solution))
-
-        self.assertTrue(np.isclose(pe, ip))
+            self.assertTrue(np.isclose(my_solver_stats[2], ip_solver_stats[2]))
 
 
 if __name__ == '__main__': # pragma: no cover
