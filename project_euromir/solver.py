@@ -34,10 +34,13 @@ import numpy as np
 import scipy as sp
 
 from project_euromir import equilibrate
+from project_euromir.lbfgs import minimize_lbfgs
 
-DEBUG = False
+DEBUG = True
 if DEBUG:
     import matplotlib.pyplot as plt
+
+PYTHON_LBFGS = False
 
 def solve(matrix, b, c, zero, nonneg):
     "Main function."
@@ -104,15 +107,33 @@ def solve(matrix, b, c, zero, nonneg):
 
     # call LBFGS
     start = time.time()
-    lbfgs_result = sp.optimize.fmin_l_bfgs_b(
-        loss_gradient,
-        x0=x_0,
-        m=10,
-        maxfun=1e10,
-        factr=0.,
-        pgtol=1e-14, # e.g., simply use this for termination
-        callback=_callback if DEBUG else None,
-        maxiter=1e10)
+    if PYTHON_LBFGS:
+        lbfgs_result = sp.optimize.fmin_l_bfgs_b(
+            loss_gradient,
+            x0=x_0,
+            m=10,
+            maxfun=1e10,
+            factr=0.,
+            pgtol=1e-14, # e.g., simply use this for termination
+            callback=_callback if DEBUG else None,
+            maxiter=1e10)
+        # print LBFGS stats
+        stats = lbfgs_result[2]
+        stats.pop('grad')
+        print('LBFGS stats', stats)
+        result_variable = lbfgs_result[0]
+    else:
+        result_variable = minimize_lbfgs(
+            loss_and_gradient_function=loss_gradient,
+            initial_point=x_0,
+            callback=_callback if DEBUG else None,
+            memory=10,
+            max_iters=100000,
+            c_1=1e-3, c_2=.9,
+            ls_backtrack=.5,
+            ls_forward=1.1,
+            max_ls=20,
+            use_active_set = False)
     print('LBFGS took', time.time() - start)
 
     # debug mode, plot history of losses
@@ -123,15 +144,10 @@ def solve(matrix, b, c, zero, nonneg):
         plt.legend()
         plt.show()
 
-    # print LBFGS stats
-    stats = lbfgs_result[2]
-    stats.pop('grad')
-    print('LBFGS stats', stats)
-
     # extract result
-    u = lbfgs_result[0][:n+m+1]
+    u = result_variable[:n+m+1]
     v = np.zeros(n+m+1)
-    v[n+zero:] = lbfgs_result[0][n+m+1:]
+    v[n+zero:] = result_variable[n+m+1:]
 
     # LSQR loop, define convenience function
     def project(variable):

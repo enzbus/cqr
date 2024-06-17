@@ -216,7 +216,7 @@ def strong_wolfe(
 def minimize_lbfgs(
         loss_and_gradient_function, initial_point, memory=5, max_iters=100,
         c_1=1e-3, c_2=.9, ls_backtrack=.5, ls_forward=1.1, max_ls=20,
-        use_active_set = False):
+        callback=None, use_active_set = False):
     """Minimize function using back-tracked L-BFGS."""
 
     n = len(initial_point)
@@ -244,6 +244,9 @@ def minimize_lbfgs(
             current_point)
 
     for i in range(max_iters):
+
+        if (callback is not None) and i > 0:
+            callback(current_point)
 
         if np.linalg.norm(current_gradient) < 1e-16:
             print('CONVERGED')
