@@ -35,6 +35,7 @@ import scipy as sp
 
 from project_euromir import equilibrate
 from project_euromir.lbfgs import minimize_lbfgs
+from project_euromir.refinement import refine
 
 DEBUG = False
 if DEBUG:
@@ -149,40 +150,9 @@ def solve(matrix, b, c, zero, nonneg):
     v = np.zeros(n+m+1)
     v[n+zero:] = result_variable[n+m+1:]
 
-    # LSQR loop, define convenience function
-    def project(variable):
-        result = np.copy(variable)
-        result[n+zero:] = np.maximum(result[n+zero:], 0.)
-        return result
-
-    # recompute u and v by projection
-    z = u - v
-    u = project(z)
-    v = u - z
-
-    # very basic, for LPs just compute DR as sparse matrix
-    mask = np.ones(len(z), dtype=float)
-    mask[n+zero:] = z[n+zero:] > 0
-    DR = (Q - sp.sparse.eye(Q.shape[0])) @ sp.sparse.diags(mask
-        ) + sp.sparse.eye(Q.shape[0])
-
-    # obtain initial (pre-LSQR) residual
-    residual = Q @ u - v
-    print('residual norm sq before LSQR', np.linalg.norm(residual)**2)
-
-    # call LSQR
-    start = time.time()
-    result = sp.sparse.linalg.lsqr(
-        DR, residual, atol=0., btol=0., iter_lim=Q.shape[0]*2)
-    print('LSQR result[1:-1]', result[1:-1])
-    print('LSQR took', time.time() - start)
-    dz = result[0]
-
-    # recompute problem variables
-    z1 = z - dz
-    u = project(z1)
-    v = u - z1
-    print("residual norm sq after LSQR", np.linalg.norm(Q @ u - v)**2)
+    u, v = refine(
+        z=u-v, matrix=matrix_transf, b=b_transf, c=c_transf, zero=zero,
+        nonneg=nonneg)
 
     # Transform back into problem format
     u1, u2, u3 = u[:n], u[n:n+m], u[-1]

@@ -87,9 +87,12 @@ class TestSolver(TestCase):
             print('Prototype objective - IP objective: '
                 f'{my_solver_stats[2]-ip_solver_stats[2]:e}')
 
+            # we just add float epsilon for the LP constraint
             self.assertLessEqual(
-                # we add float epsilon with multiplier b/c fails on other platforms
-                my_solver_stats[0], ip_solver_stats[0]+5*np.finfo(float).eps)
+                my_solver_stats[0], ip_solver_stats[0]+np.finfo(float).eps)
+
+            # this is the equality constraint, seems more sensitive to scaling
+            # we add float epsilon with multiplier b/c fails on other platforms
             self.assertLessEqual(
                 my_solver_stats[1], ip_solver_stats[1]+5*np.finfo(float).eps)
 
