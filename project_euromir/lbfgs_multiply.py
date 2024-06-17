@@ -62,7 +62,8 @@ def lbfgs_multiply(
     current_gradient: np.array,
     past_steps: np.array,
     past_grad_diffs: np.array,
-    base_inverse_diagonal: float | np.array = 1.
+    scale: float | np.array = 1.,
+    hessian_approximator = None
 ):
     r"""Multiply current gradient by the approximate inverse second derivative.
 
@@ -74,10 +75,10 @@ def lbfgs_multiply(
     :param past_grad_diffs: First dimension is L-BFGS memory. Most recent
         gradient difference is last row.
     :type past_grad_diffs: np.array (2-dimensional)
-    :param base_inverse_diagonal: Diagonal of :math:`H_0`, the base inverse
+    :param scale: Diagonal of :math:`H_0`, the base inverse
         Hessian, before the L-BFGS corrections. By default 1, meaning we
         take the identity as base.
-    :type base_inverse_diagonal: float or np.array (1-dimensional)
+    :type scale: float or np.array (1-dimensional)
     """
 
     memory = past_steps.shape[0]
@@ -87,7 +88,7 @@ def lbfgs_multiply(
 
     logger.info(
         'calling lbfgs_multiply with scale %.2e and memory %s',
-        base_inverse_diagonal, memory)
+        scale, memory)
 
     if NORMALIZE:
         norms_steps = np.linalg.norm(past_steps, axis=1)
@@ -123,13 +124,16 @@ def lbfgs_multiply(
             q -= alphas[i] * (past_grad_diffs[i])
 
     # center part
-    r = base_inverse_diagonal * q
+    if hessian_approximator is not None:
+        r = hessian_approximator(scale * q)
+    else:
+        r = scale * q
 
     # scale correction, see MINPACK-2/vmlm
     # gamma_correction = np.dot(
     #     past_steps[-1], past_grad_diffs[-1]) / np.dot(
     #         past_grad_diffs[-1], past_grad_diffs[-1])
-    # r = gamma_correction * (base_inverse_diagonal * q)
+    # r = gamma_correction * (scale * q)
 
     # left part, forward iteration
     betas = np.empty(memory, dtype=float)
@@ -150,7 +154,7 @@ def _lbfgs_multiply_dense(
     current_gradient: np.array,
     past_steps: np.array,
     past_grad_diffs: np.array,
-    base_inverse_diagonal: float | np.array = 1.
+    scale: float | np.array = 1.
 ):
     """Same as above using dense matrix."""
 
@@ -161,11 +165,11 @@ def _lbfgs_multiply_dense(
 
     logger.info(
         'calling lbfgs_multiply_dense with scale %.2e and memory %s',
-        base_inverse_diagonal, memory)
+        scale, memory)
 
     H = np.diag(
-        np.ones(len(current_gradient)) * base_inverse_diagonal
-        if np.isscalar(base_inverse_diagonal) else base_inverse_diagonal)
+        np.ones(len(current_gradient)) * scale
+        if np.isscalar(scale) else scale)
 
     for i in range(memory):
         rho = 1. / np.dot(past_steps[i], past_grad_diffs[i])

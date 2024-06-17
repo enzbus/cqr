@@ -193,14 +193,14 @@ def minimize_lbfgs(
                 current_gradient=current_gradient[current_active_set],
                 past_steps=past_steps[memory-i:, current_active_set],
                 past_grad_diffs=past_grad_diffs[memory-i:, current_active_set],
-                base_inverse_diagonal=scale)
+                scale=scale)
             assert np.all(direction[~current_active_set] == 0.)
         else:
             direction[:] = - lbfgs_multiply(
                 current_gradient=current_gradient,
                 past_steps=past_steps[memory-i:],
                 past_grad_diffs=past_grad_diffs[memory-i:],
-                base_inverse_diagonal=scale)
+                scale=scale)
 
         next_loss = current_loss
         next_gradient[:] = current_gradient
