@@ -36,7 +36,7 @@ import scipy as sp
 from project_euromir import equilibrate
 from project_euromir.lbfgs import minimize_lbfgs
 
-DEBUG = True
+DEBUG = False
 if DEBUG:
     import matplotlib.pyplot as plt
 
