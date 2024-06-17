@@ -51,13 +51,20 @@ DCSRCH_COMMUNICATION = {
     'g': np.array([-1.]),
     'ftol': np.array([1e-3]),
     'gtol': np.array([0.9]),
-    'xtol': np.array([0.1]),
+    'xtol': np.array([1e-5]), # TODO: figure out if this depends on scale
     'stpmin': np.array([0.]),
     'stpmax': np.array([1000.]), # in lbfgsb this is set iteratively...
     'isave': np.zeros(20, dtype=np.int32),
     'dsave': np.zeros(20, dtype=float),
     'start': True,
 }
+
+DCSRS_WARNINGS = {
+    2: "WARNING: ROUNDING ERRORS PREVENT PROGRESS",
+    3: "WARNING: XTOL TEST SATISFIED",
+    4: "WARNING: STP = STPMAX",
+    5: "WARNING: STP = STPMIN",
+    }
 
 # def strong_wolfe(
 #         current_loss: float,
@@ -111,6 +118,7 @@ def minimize_lbfgs(
         callback=None, use_active_set = False):
     """Minimize function using back-tracked L-BFGS."""
 
+    func_counter = 0
     n = len(initial_point)
 
     past_steps = np.empty((memory, n), dtype=float)
@@ -130,10 +138,10 @@ def minimize_lbfgs(
         # the function can also modify the current_point (projection)
         current_loss, current_gradient[:], current_active_set[:] = loss_and_gradient_function(
             current_point)
-
     else:
         current_loss, current_gradient[:] = loss_and_gradient_function(
             current_point)
+    func_counter += 1
 
     for i in range(max_iters):
 
@@ -196,7 +204,7 @@ def minimize_lbfgs(
         next_gradient[:] = current_gradient
         step_size = 1.
 
-        for _ in range(100):
+        for _ in range(max_ls):
             logger.info('line search iter %s, step size %s', _, step_size)
 
             # plug in dcsrch
@@ -214,7 +222,10 @@ def minimize_lbfgs(
             # line search converged
             if (dcsrch_result == 0) or (dcsrch_result > 1):
                 if dcsrch_result != 0:
-                    logger.warning("Line search raised warnings, exiting.")
+                    logger.warning(
+                        "Line search raised warning %s, exiting.",
+                        DCSRS_WARNINGS[dcsrch_result])
+                    print(f'done in iters {i}, tot func calls {func_counter}')
                     return next_point
 
                 logger.info('line search converged in %s iterations', _+1)
@@ -249,7 +260,12 @@ def minimize_lbfgs(
             else:
                 next_loss, next_gradient[:] = loss_and_gradient_function(
                     next_point)
+            func_counter += 1
+        else:
+            logger.warning('line search did not converge')
+            break
 
+    print(f'done in iters {i}, tot func calls {func_counter}')
     return current_point
 
         #     armijo, curvature = strong_wolfe(

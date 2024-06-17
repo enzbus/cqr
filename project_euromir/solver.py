@@ -41,7 +41,7 @@ DEBUG = False
 if DEBUG:
     import matplotlib.pyplot as plt
 
-PYTHON_LBFGS = True
+PYTHON_LBFGS = False
 
 def solve(matrix, b, c, zero, nonneg):
     "Main function."
@@ -133,7 +133,7 @@ def solve(matrix, b, c, zero, nonneg):
             c_1=1e-3, c_2=.9,
             ls_backtrack=.5,
             ls_forward=1.1,
-            max_ls=20,
+            max_ls=100,
             use_active_set = False)
     print('LBFGS took', time.time() - start)
 
