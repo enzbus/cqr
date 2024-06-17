@@ -80,7 +80,7 @@ class TestSolver(TestCase):
             ip_solver_solution = x.value
             ip_solver_stats = _get_stats()
             print(
-                'PROTOTYPE SOLVER STATS; constr violation norms: '
+                'INTERIOR POINT SOLVER STATS; constr violation norms: '
                 f'({ip_solver_stats[0]:.2e}, {ip_solver_stats[1]:.2e}), '
                 f'objective: {ip_solver_stats[2]:.2e}')
 

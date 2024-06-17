@@ -149,7 +149,7 @@ def solve(matrix, b, c, zero, nonneg):
             initial_point=x_0,
             callback=_callback if DEBUG else None,
             memory=10,
-            max_iters=1e10,
+            max_iters=int(1e10),
             c_1=1e-3, c_2=.9,
             ls_backtrack=.5,
             ls_forward=1.1,
