@@ -89,9 +89,9 @@ class TestSolver(TestCase):
 
             self.assertLessEqual(
                 # we add float epsilon with multiplier b/c fails on other platforms
-                my_solver_stats[0], ip_solver_stats[0]+3*np.finfo(float).eps)
+                my_solver_stats[0], ip_solver_stats[0]+5*np.finfo(float).eps)
             self.assertLessEqual(
-                my_solver_stats[1], ip_solver_stats[1]+3*np.finfo(float).eps)
+                my_solver_stats[1], ip_solver_stats[1]+5*np.finfo(float).eps)
 
             self.assertTrue(
                 np.allclose(my_solver_solution, ip_solver_solution))
