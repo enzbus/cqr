@@ -5,15 +5,17 @@ readme = 'README.md'
 requires-python = '>=3.8'
 license = {file = 'LICENSE'}
 authors = [{name = 'Enzo Busseti', email = 'enzo.busseti@gmail.com'}]
-dependencies = ['numpy', 'scipy']
+dependencies = [
+    'numpy<2.0.0', # ABI issues in CVXPY used in tests, temporary
+    'scipy']
 
 [project.optional-dependencies]
 docs = ["sphinx"]
 dev = [
-    "build", "twine", "pylint", "isort", "autopep8", "docformatter", "cvxpy",
+    "build", "twine", "pylint", "isort", "autopep8", "docformatter", "cvxpy-base",
     "diff_cover"]
 test = [
-    "cvxpy", 'coverage[toml]']
+    "cvxpy-base", 'coverage[toml]', 'ecos']
 
 [build-system]
 requires = ["setuptools"]#, "cmake"]
