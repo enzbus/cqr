@@ -1,7 +1,7 @@
 [project]
 name = 'project_euromir'
 version = '0.0.1'
-readme = 'README.md'
+readme = 'README.rst'
 requires-python = '>=3.8'
 license = {file = 'LICENSE'}
 authors = [{name = 'Enzo Busseti', email = 'enzo.busseti@gmail.com'}]

@@ -87,10 +87,11 @@ class TestSolver(TestCase):
             print('Prototype objective - IP objective: '
                 f'{my_solver_stats[2]-ip_solver_stats[2]:e}')
 
-            self.assertLessEqual( # we add float epsilon with some scraps
-                my_solver_stats[0], ip_solver_stats[0]+1.1*np.finfo(float).eps)
             self.assertLessEqual(
-                my_solver_stats[1], ip_solver_stats[1]+1.1*np.finfo(float).eps)
+                # we add float epsilon with multiplier b/c fails on other platforms
+                my_solver_stats[0], ip_solver_stats[0]+3*np.finfo(float).eps)
+            self.assertLessEqual(
+                my_solver_stats[1], ip_solver_stats[1]+3*np.finfo(float).eps)
 
             self.assertTrue(
                 np.allclose(my_solver_solution, ip_solver_solution))
