@@ -40,7 +40,7 @@ DEBUG = False
 if DEBUG:
     import matplotlib.pyplot as plt
 
-PYTHON_LBFGS = False
+PYTHON_LBFGS = True
 
 def solve(matrix, b, c, zero, nonneg):
     "Main function."
