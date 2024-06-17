@@ -51,7 +51,7 @@ class TestSolver(TestCase):
             A = np.random.randn(m, n)
             b = np.random.randn(m)
             objective = cp.norm1(A @ x - b)
-            d = np.random.randn(n)
+            d = np.random.randn(n, 2)
             constraints = [cp.abs(x) <= .5, x @ d == 1.,]
 
             def _get_stats():

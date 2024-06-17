@@ -34,7 +34,7 @@ import numpy as np
 import scipy as sp
 
 import project_euromir as lib
-from project_euromir import lbfgs
+from project_euromir import lbfgs, lbfgs_multiply
 
 
 class TestLBFGS(TestCase):
@@ -52,11 +52,11 @@ class TestLBFGS(TestCase):
             past_grad_diffs = np.random.randn(m, n)
             past_steps = np.random.randn(m, n)
 
-            dense_direction = lbfgs._lbfgs_multiply_dense(
+            dense_direction = lbfgs_multiply._lbfgs_multiply_dense(
                 current_gradient=current_gradient, past_steps=past_steps,
                 past_grad_diffs=past_grad_diffs)
 
-            sparse_direction = lbfgs.lbfgs_multiply(
+            sparse_direction = lbfgs_multiply.lbfgs_multiply(
                 current_gradient=current_gradient, past_steps=past_steps,
                 past_grad_diffs=past_grad_diffs)
 
