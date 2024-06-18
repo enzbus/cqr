@@ -5,14 +5,14 @@ set(SRC
   project_euromir/linear_algebra.c
   project_euromir/dcsrch.c
   project_euromir/dcstep.c
-  # trying to plug in lbfgsb
-  project_euromir/Lbfgsb.3.0/blas.f
-  project_euromir/Lbfgsb.3.0/linpack.f
-  project_euromir/Lbfgsb.3.0/lbfgsb.f
-  project_euromir/Lbfgsb.3.0/timer.f
+  # trying to plug in lbfgsb, can't get to compile on github non-Linux, works locally
+  # project_euromir/Lbfgsb.3.0/blas.f
+  # project_euromir/Lbfgsb.3.0/linpack.f
+  # project_euromir/Lbfgsb.3.0/lbfgsb.f
+  # project_euromir/Lbfgsb.3.0/timer.f
 )
 
-enable_language(Fortran)
+# enable_language(Fortran)
 
 SET(
   MOVE_SHLIB_TO ${CMAKE_SOURCE_DIR}/project_euromir
@@ -25,14 +25,13 @@ add_library(project_euromir SHARED ${SRC})
 set(CMAKE_C_FLAGS "-O3 -Wall -fbounds-check -Wextra")
 
 # copied from Lbfgsb Makefile
-set(CMAKE_Fortran_FLAGS "-O -Wall -fbounds-check -g -Wno-uninitialized")
+# set(CMAKE_Fortran_FLAGS "-O -Wall -fbounds-check -g -Wno-uninitialized")
 
 set(CMAKE_VERBOSE_MAKEFILE 1)
 
-# flags for f2c, temporary
 target_link_libraries(
   project_euromir
-  #PUBLIC f2c
+  #PUBLIC f2c # f2c, works locally but breaks on github non-Linux
   PUBLIC m)
 
 install(TARGETS project_euromir

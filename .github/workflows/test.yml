@@ -34,13 +34,15 @@ jobs:
         with:
             python-version: '3.11'
 
+      # has issues, breaks compiler toolchain for C on mac, hangs on windows
       # https://github.com/fortran-lang/setup-fortran
-      - name: Install Fortran compiler
-        uses: fortran-lang/setup-fortran@v1
-        with:
-            compiler: 'gcc'
-            version: 13
+      # - name: Install Fortran compiler
+      #   uses: fortran-lang/setup-fortran@v1
+      #   with:
+      #       compiler: 'gcc'
+      #       version: 13
 
+      # this didn't work, if we go the f2c route we'll have to include f2c
       # - name: Install libraries # f2c, temporary
       #   run:  |
       #         if [ "$RUNNER_OS" == "Linux" ]; then
