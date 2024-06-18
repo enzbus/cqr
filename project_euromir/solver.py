@@ -127,7 +127,27 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
 
                 return loss, grad
 
-                # TODO: hessian
+            def hessian(u):
+                def _matvec(myvar):
+                    result = np.zeros_like(u)
+
+                    #resu
+                    result[n+zero:][u[n+zero:] < 0] += myvar[n+zero:][u[n+zero:] < 0]
+
+                    #resv1
+                    resv1_nonproj = Q[n+zero:] @ u
+                    tmp = Q[n+zero:] @ myvar
+                    tmp[resv1_nonproj > 0] = 0.
+                    result += Q[n+zero:].T @ tmp
+
+                    #resv2
+                    result += Q[:n+zero].T @ (Q[:n+zero] @ myvar)
+
+                    return 2 * result
+                return sp.sparse.linalg.LinearOperator(
+                    shape=(len(u), len(u)),
+                    matvec=_matvec
+                )
 
         else:
             def loss_gradient(variable):
@@ -195,7 +215,7 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
             # ls_backtrack=.5,
             # ls_forward=1.1,
             pgtol=PGTOL,
-            # hessian_approximator=hessian,
+            hessian_approximator=hessian,
             use_active_set=ACTIVE_SET,
             max_ls=100)
     print('LBFGS took', time.time() - start)
