@@ -17,6 +17,11 @@ of the 2018 algorithm only for the final polishing.
 Algorithm (draft)
 =================
 
+.. note::
+
+    `Visit the webpage <https://project-euromir.readthedocs.io/en/latest/>`_ to
+    see correct Latex rendering. 
+
 The algorithm is under development. This is the current model, see the
 `scs <https://web.stanford.edu/~boyd/papers/pdf/scs.pdf>`_ and
 `conic refinement
@@ -29,7 +34,7 @@ a conic program, which is, in turn, the standard formulation of a convex program
 
     \begin{array}{ll}
 
-        \text{find} & u, \ \ v \\
+        \text{find} & \ u, \ \ v \\
         \text{s. t.} & Q u = v \\
             & u \in \mathcal{K} \\
             & v \in \mathcal{K}^*
@@ -51,7 +56,7 @@ the 2018 conic refinement paper.
 
     \begin{array}{ll}
 
-        \text{minimize} & \|Q u - v \|_2^2 + \| u - \Pi_\mathcal{K} u \|_2^2  + \| v - \Pi\mathcal{K^\star} v \|_2^2
+        \text{minimize} & \|Q u - v \|_2^2 + \| u - \Pi_\mathcal{K} u \|_2^2  + \| v - \Pi_{\mathcal{K}^\star} v \|_2^2
 
     \end{array}
 
@@ -76,7 +81,7 @@ exhibits even better numerical properties)
 
     \begin{array}{ll}
 
-        \text{minimize} & \| u - \Pi u \|_2^2  + \| Q u - \Pi^\star Q u\|_2^2,
+        \text{minimize} & \| u - \Pi_\mathcal{K} u \|_2^2  + \| Q u - \Pi_{\mathcal{K}^\star} Q u\|_2^2,
 
     \end{array}
 
@@ -140,7 +145,7 @@ on Mac ``brew install llvm cmake`` should do it, on Windows you need the
 ``MinGW`` Linux subsystem. We already successfully test in Github CI on all
 three platforms. Then:
 
-.. code-block:: console
+.. code-block:: bash
 
     pip install -U https://github.com/enzbus/project_euromir
 
