@@ -116,6 +116,16 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
             gradient[n+zero:] += 2 * error
             return loss, gradient
 
+        def hessian(variable):
+            def _matvec(myvar):
+                result = system_matrix.T @ (system_matrix @ myvar)
+                result[n+zero:][variable[n+zero:] < 0] += myvar[n+zero:][variable[n+zero:] < 0]
+                return 2 * result
+            return sp.sparse.linalg.LinearOperator(
+                shape=(len(variable), len(variable)),
+                matvec=_matvec
+            )
+
     # initialize with all zeros and 1 only on the HSDE feasible flag
     x_0 = np.zeros(system_matrix.shape[1])
     x_0[n+m] = 1.
@@ -158,6 +168,7 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
             # ls_backtrack=.5,
             # ls_forward=1.1,
             pgtol=PGTOL,
+            hessian_approximator=hessian,
             use_active_set=ACTIVE_SET,
             max_ls=100)
     print('LBFGS took', time.time() - start)

@@ -52,6 +52,7 @@ from __future__ import annotations
 import logging
 
 import numpy as np
+import scipy as sp
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +126,7 @@ def lbfgs_multiply(
 
     # center part
     if hessian_approximator is not None:
-        r = hessian_approximator(scale * q)
+        r = sp.sparse.linalg.cg(hessian_approximator, q, maxiter=20)[0]
     else:
         r = scale * q
 
