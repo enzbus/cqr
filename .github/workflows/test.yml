@@ -34,6 +34,13 @@ jobs:
         with:
             python-version: '3.11'
 
+      # https://github.com/fortran-lang/setup-fortran
+      - name: Install Fortran compiler
+        uses: fortran-lang/setup-fortran@v1
+        with:
+            compiler: 'gcc'
+            version: 13
+
       # - name: Install libraries # f2c, temporary
       #   run:  |
       #         if [ "$RUNNER_OS" == "Linux" ]; then
