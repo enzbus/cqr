@@ -20,14 +20,38 @@ Algorithm (draft)
 The algorithm is under development. This is the current model, see the
 `scs <https://web.stanford.edu/~boyd/papers/pdf/scs.pdf>`_ and
 `conic refinement
-<https://stanford.edu/~boyd/papers/pdf/cone_prog_refine.pdf>`_ papers to
-better understand the notation:
+<https://stanford.edu/~boyd/papers/pdf/cone_prog_refine.pdf>`_ for the notation.
+We just remind to the reader the standard homogeneous self-dual embedding of
+a conic program, which is, in turn, the standard formulation of a convex program:
+
 
 .. math::
 
     \begin{array}{ll}
 
-        \text{minimize} & \|Q u - v \|_2^2 + \| u - \Pi u \|_2^2  + \| v - \Pi^\star v \|_2^2
+        \text{find} & u, \ \ v \\
+        \text{s. t.} & Q u = v \\
+            & u \in \mathcal{K} \\
+            & v \in \mathcal{K}^*
+
+    \end{array}
+
+Where :math:`Q` is a skew-symmetric matrix that includes all problem data,
+:math:`\mathcal{K}` and :math:`\mathcal{K}^*` are dual cones encoding the
+constraints of the program.
+
+We propose to solve the following quadratic relaxation of the above, which
+to our knowledge is a novel formulation (as of early 2024). We use the projection
+operators on the primal and dual cones (note that some authors may define the
+latter with a change in sign). These are differentiable operators on the whole
+space minus a set of measure 0, of little practical interest, as we showed in
+the 2018 conic refinement paper.
+
+.. math::
+
+    \begin{array}{ll}
+
+        \text{minimize} & \|Q u - v \|_2^2 + \| u - \Pi_\mathcal{K} u \|_2^2  + \| v - \Pi\mathcal{K^\star} v \|_2^2
 
     \end{array}
 
@@ -39,15 +63,30 @@ guaranteed that :math:`u` and :math:`v` are orthogonal, and hence no other
 requirements are needed on the formulation above to recover an optimal solution
 (or certificate) for the original program.
 
-The objective function is clearly convex and has continuous derivative. The
+The objective function is clearly convex and has continuous derivative. It has
+continuous second derivative almost everywhere. The
 conditioning depends on the conditioning of :math:`Q`, we apply by default
 standard `Ruiz diagonal pre-conditioning
 <https://web.stanford.edu/~takapoui/preconditioning.pdf>`_.
 
-We use `limited-memory BFGS
-<https://doi.org/10.1090/S0025-5718-1980-0572855-7>`_, as it's implemented in
-the `variable-metric limited memory module of MINPACK-2
-<https://ftp.mcs.anl.gov/pub/MINPACK-2/vmlm>`_, for the minimization routine.
+In fact, an even simpler formulation can be implemented (which, from our tests,
+exhibits even better numerical properties)
+
+.. math::
+
+    \begin{array}{ll}
+
+        \text{minimize} & \| u - \Pi u \|_2^2  + \| Q u - \Pi^\star Q u\|_2^2,
+
+    \end{array}
+
+here we simply made the linear system implicit in the conic penalizations.
+
+We propose to use a combination of approximate Newton steps and L-BFGS; it is
+well known that in the double-loop formulation of the L-BFGS iteration any
+arbitrary Hessian approximator can be used as basis, and it's easy to obtain
+an approximate Hessian from the above by dropping the second derivatives of
+the conic projection operators. (The approximation is exact on LPs.)
 
 We then use the 2018 conic refinement algorithm (simplified, without the
 normalization step), using `LSQR
@@ -89,14 +128,45 @@ like 5 or 10.
 In layman terms, this is the least memory any conic solver needs, and
 dramatically less than interior-point solvers.
 
+Installation
+============
+
+Pre-built wheels will be available on PyPi soon. You can already install the
+development version, which is at a very early stage, but can already solve
+simple linear programs to higher numerical accuracy than state-of-the-art
+interior point solvers. You need `cmake` and a C compiler. This is easy on
+Linux, on Debian and derivatives it's ``sudo apt install build-essential cmake``;
+on Mac ``brew install llvm cmake`` should do it, on Windows you need the
+``MinGW`` Linux subsystem. We already successfully test in Github CI on all
+three platforms. Then:
+
+.. code-block:: console
+
+    pip install -U https://github.com/enzbus/project_euromir
+
+
 Usage
 =====
 
 We will provide a CVXPY and raw Python interface as part of our packages. The
 single C function the user interacts with will be also documented, for usage
-from other runtime environments.
+from other runtime environments. In fact, our preview interface already works,
+and that's what we're using in our testsuite. If you installed as described
+above you can use the solver on *simple* LPs like this. From our tests you
+should already observe higher numerical accuracy on the solution than with any
+other solver.
 
-Installation
-============
+.. code-block:: python
 
-Pre-built wheels will be available on PyPi soon.
+    import numpy as np
+    import cvxpy as cp
+    from project_euromir import Solver
+
+    A = np.random.randn(20, 10)
+    b = np.random.randn(20)
+    x = cp.Variable(10)
+    objective = cp.Minimize(cp.norm1(A @ x - b))
+    constraints = [cp.abs(x) <= .25]
+    cp.Problem(objective, constraints).solve(solver=Solver())
+
+
