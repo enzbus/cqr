@@ -43,7 +43,7 @@ if DEBUG:
 
 USE_MY_LBFGS = True
 ACTIVE_SET = False # this doesn't work yet, not sure if worth trying to fix it
-IMPLICIT_FORMULATION = True # this does help!!!
+IMPLICIT_FORMULATION = False # this does help!!! some minor issues on hessian
 
 if ACTIVE_SET:
     assert USE_MY_LBFGS
@@ -127,7 +127,7 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
 
                 return loss, grad
 
-            def hessian(u):
+            def hessian(u): # TODO: this is not correct yet, need to check_grad it (it's close)
                 def _matvec(myvar):
                     result = np.zeros_like(u)
 
@@ -231,6 +231,8 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
     # extract result
     if IMPLICIT_FORMULATION:
         u = result_variable
+        assert u[-1] > 0, 'Certificates not yet implemented'
+        u /= u[-1]
         v = Q @ u
     else:
         u = result_variable[:n+m+1]
