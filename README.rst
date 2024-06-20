@@ -75,7 +75,7 @@ conditioning depends on the conditioning of :math:`Q`, we apply by default
 standard `Ruiz diagonal pre-conditioning
 <https://web.stanford.edu/~takapoui/preconditioning.pdf>`_.
 
-In fact, an even simpler formulation can be obtained
+In fact, an even simpler formulation can be obtained:
 
 .. math::
 
@@ -92,7 +92,7 @@ We can further simplify, with another minimal usage of convex analysis
 
     \begin{array}{ll}
 
-        \text{minimize} & \| \Pi_\mathcal{K^\star} -u \|_2^2  + \| \Pi_{\mathcal{K}} -Q u\|_2^2,
+        \text{minimize} & \| \Pi_\mathcal{K^\star} (-u) \|_2^2  + \| \Pi_{\mathcal{K}} (-Q u) \|_2^2,
 
     \end{array}
 
