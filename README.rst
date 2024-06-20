@@ -43,14 +43,15 @@ a conic program, which is, in turn, the standard formulation of a convex program
 
 Where :math:`Q` is a skew-symmetric matrix that includes all problem data,
 :math:`\mathcal{K}` and :math:`\mathcal{K}^*` are dual cones encoding the
-constraints of the program.
+constraints of the program. Most elementary cones of practical interest (linear,
+second-order, semi-definite) are self-dual; notable exceptions are the zero
+and real cone, which are the duals of each other.
 
 We propose to solve the following quadratic relaxation of the above, which
 to our knowledge is a novel formulation (as of early 2024). We use the projection
-operators on the primal and dual cones (note that some authors may define the
-latter with a change in sign). These are differentiable operators on the whole
-space minus a set of measure 0, of little practical interest, as we showed in
-the 2018 conic refinement paper.
+operators on the primal and dual cones. These are differentiable operators on
+the whole space minus a set of measure 0, of little practical interest, as we
+showed in the 2018 conic refinement paper.
 
 .. math::
 
@@ -74,8 +75,7 @@ conditioning depends on the conditioning of :math:`Q`, we apply by default
 standard `Ruiz diagonal pre-conditioning
 <https://web.stanford.edu/~takapoui/preconditioning.pdf>`_.
 
-In fact, an even simpler formulation can be implemented (which, from our tests,
-exhibits even better numerical properties)
+In fact, an even simpler formulation can be obtained
 
 .. math::
 
@@ -86,12 +86,26 @@ exhibits even better numerical properties)
     \end{array}
 
 here we simply made the linear system implicit in the conic penalizations.
+We can further simplify, with another minimal usage of convex analysis
 
-We propose to use a combination of approximate Newton steps and L-BFGS; it is
-well known that in the double-loop formulation of the L-BFGS iteration any
-arbitrary Hessian approximator can be used as basis, and it's easy to obtain
-an approximate Hessian from the above by dropping the second derivatives of
-the conic projection operators. (The approximation is exact on LPs.)
+.. math::
+
+    \begin{array}{ll}
+
+        \text{minimize} & \| \Pi_\mathcal{K^\star} -u \|_2^2  + \| \Pi_{\mathcal{K}} -Q u\|_2^2,
+
+    \end{array}
+
+where we used the properties of dual cones, as summarized in the `conic
+refinement paper <https://stanford.edu/~boyd/papers/pdf/cone_prog_refine.pdf>`_.
+
+This is what we feed to a generic unconstrained minimization algorithm;
+We propose to use a combination of approximate Newton (via truncated conjugate
+gradient method) and limited-memory BFGS; it is well known that in the
+double-loop formulation of the L-BFGS iteration, any arbitrary Hessian
+approximator can be used as basis, and it's easy to obtain an approximate
+Hessian of our objective function by dropping the second derivatives of the
+conic projection operators. The approximation is exact on linear programs.
 
 We then use the 2018 conic refinement algorithm (simplified, without the
 normalization step), using `LSQR
