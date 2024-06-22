@@ -52,12 +52,13 @@ class TestSolver(TestCase):
             b = np.random.randn(m)
             objective = cp.norm1(A @ x - b)
             d = np.random.randn(n, 2)
-            constraints = [cp.abs(x) <= .5, x @ d == 1.,]
+            constraints = [x <= .25, x >= -.25, x @ d == 1.,]
 
             def _get_stats():
-                constr_err_1 = np.linalg.norm(constraints[0].violation())
-                constr_err_2 = np.linalg.norm(constraints[1].violation())
-                return constr_err_1, constr_err_2, objective.value
+                constr_errs = [
+                    np.linalg.norm(constraint.violation())
+                        for constraint in constraints]
+                return constr_errs, objective.value
 
             s = time.time()
             cp.Problem(
@@ -66,9 +67,10 @@ class TestSolver(TestCase):
             my_solver_solution = x.value
             my_solver_stats = _get_stats()
             print(
-                'PROTOTYPE SOLVER STATS; constr violation norms: '
-                f'({my_solver_stats[0]:.2e}, {my_solver_stats[1]:.2e}). '
-                f'objective: {my_solver_stats[2]:.2e}')
+                'PROTOTYPE SOLVER STATS; constr violation norms: ',
+                my_solver_stats[0],
+                #f'({my_solver_stats[0]:.2e}, {my_solver_stats[1]:.2e}). '
+                f'objective: {my_solver_stats[1]:.2e}')
 
             s = time.time()
             with warnings.catch_warnings():
@@ -80,26 +82,29 @@ class TestSolver(TestCase):
             ip_solver_solution = x.value
             ip_solver_stats = _get_stats()
             print(
-                'INTERIOR POINT SOLVER STATS; constr violation norms: '
-                f'({ip_solver_stats[0]:.2e}, {ip_solver_stats[1]:.2e}), '
-                f'objective: {ip_solver_stats[2]:.2e}')
+                'INTERIOR POINT SOLVER STATS; constr violation norms: ',
+                ip_solver_stats[0],
+                # f'({ip_solver_stats[0]:.2e}, {ip_solver_stats[1]:.2e}), '
+                f'objective: {ip_solver_stats[1]:.2e}')
 
             print('Prototype objective - IP objective: '
-                f'{my_solver_stats[2]-ip_solver_stats[2]:e}')
+                f'{my_solver_stats[1]-ip_solver_stats[1]:e}')
 
-            # we just add float epsilon for the LP constraint
+            # we just add float epsilon for the LP constraints
             self.assertLessEqual(
-                my_solver_stats[0], ip_solver_stats[0]+np.finfo(float).eps)
+                my_solver_stats[0][0], ip_solver_stats[0][0]+np.finfo(float).eps)
+            self.assertLessEqual(
+                my_solver_stats[0][1], ip_solver_stats[0][1]+np.finfo(float).eps)
 
             # this is the equality constraint, seems more sensitive to scaling
             # we add float epsilon with multiplier b/c fails on other platforms
             self.assertLessEqual(
-                my_solver_stats[1], ip_solver_stats[1]+5*np.finfo(float).eps)
+                my_solver_stats[0][2], ip_solver_stats[0][2]+5*np.finfo(float).eps)
 
             self.assertTrue(
                 np.allclose(my_solver_solution, ip_solver_solution))
 
-            self.assertTrue(np.isclose(my_solver_stats[2], ip_solver_stats[2]))
+            self.assertTrue(np.isclose(my_solver_stats[1], ip_solver_stats[1]))
 
 
 if __name__ == '__main__': # pragma: no cover
