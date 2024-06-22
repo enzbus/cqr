@@ -52,7 +52,7 @@ PGTOL = 0. # I tried this as a stopping condition for lbfgs, but it can break
 # (meaning that active set is still not robust and when switching to lsqr
 # it breaks); you can try e.g. 1e-12
 
-def solve(matrix, b, c, zero, nonneg, lbfgs_memory=20):
+def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
     "Main function."
 
     # some shape checking
@@ -74,6 +74,8 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=20):
         [-matrix_transf, None, b_transf.reshape(m, 1)],
         [-c_transf.reshape(1, n), -b_transf.reshape(1, m), None],
         ]).tocsc()
+
+    # breakpoint()
 
     # temporary, [Q, -I]
     QI = sp.sparse.hstack([Q, -sp.sparse.eye(n+m+1, format='csc')])
