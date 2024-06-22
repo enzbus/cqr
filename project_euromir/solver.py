@@ -41,7 +41,7 @@ DEBUG = False
 if DEBUG:
     import matplotlib.pyplot as plt
 
-USE_MY_LBFGS = True
+USE_MY_LBFGS = False
 ACTIVE_SET = False # this doesn't work yet, not sure if worth trying to fix it
 IMPLICIT_FORMULATION = True # this does help!!! some minor issues on hessian
 
@@ -52,7 +52,7 @@ PGTOL = 0. # I tried this as a stopping condition for lbfgs, but it can break
 # (meaning that active set is still not robust and when switching to lsqr
 # it breaks); you can try e.g. 1e-12
 
-def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
+def solve(matrix, b, c, zero, nonneg, lbfgs_memory=20):
     "Main function."
 
     # some shape checking
@@ -141,7 +141,21 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
                 return loss, newgradient
 
             def hessian(u): # TODO: this is not correct yet, need to check_grad it (it's close)
+
+                v = Q @ u
+                mask_u_cone = np.zeros_like(u, dtype=float)
+                mask_v_cone = np.ones_like(u, dtype=float)
+                mask_u_cone[n+zero:] = u[n+zero:] < 0.
+                mask_v_cone[n+zero:] = v[n+zero:] < 0.
+
                 def _matvec(myvar):
+
+                    tmp = Q @ myvar
+                    tmp *= mask_v_cone
+                    tmp = Q.T @ tmp
+                    tmp += mask_u_cone * myvar
+                    return 2 * tmp
+
                     result = np.zeros_like(u)
 
                     #resu
