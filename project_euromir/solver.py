@@ -43,7 +43,7 @@ if DEBUG:
 
 USE_MY_LBFGS = True
 ACTIVE_SET = False # this doesn't work yet, not sure if worth trying to fix it
-IMPLICIT_FORMULATION = False # this does help!!! some minor issues on hessian
+IMPLICIT_FORMULATION = True # this does help!!! some minor issues on hessian
 
 if ACTIVE_SET:
     assert USE_MY_LBFGS
@@ -111,21 +111,34 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
 
     else:
         if IMPLICIT_FORMULATION:
+
+            # pre-allocate vars used below
+            u_prealloc_err = np.empty(nonneg+1, dtype=float)
+            v_prealloc_err = np.empty(m+n+1, dtype=float)
+            # error = np.empty(system_matrix.shape[1]-n-zero, dtype=float)
+            newgradient = np.empty(m+n+1, dtype=float)
+
             # variable is only u
             def loss_gradient(u):
-                resu = np.minimum(u[n+zero:], 0.)
-                resv1 = np.minimum(Q[n+zero:] @ u, 0.)
-                resv2 = Q[:n+zero] @ u
-                loss = np.linalg.norm(resu)**2
-                loss += np.linalg.norm(resv1)**2
-                loss += np.linalg.norm(resv2)**2
+                u_prealloc_err = np.minimum(u[n+zero:], 0.)
+                v_prealloc_err[:] = Q @ u
+                v_prealloc_err[n+zero:] = np.minimum(
+                    v_prealloc_err[n+zero:], 0.)
+                # resv1 = np.minimum(Q[n+zero:] @ u, 0.)
+                # resv2 = Q[:n+zero] @ u
+                loss = np.linalg.norm(u_prealloc_err)**2
+                loss += np.linalg.norm(v_prealloc_err)**2
+                # loss += np.linalg.norm(resv2)**2
 
-                grad = np.zeros_like(u)
-                grad[n+zero:] += 2 * resu
-                grad += 2 * Q[n+zero:].T @ resv1
-                grad += 2 * Q[:n+zero].T @ resv2
+                newgradient[:] = 2 * Q.T @ v_prealloc_err
+                newgradient[n+zero:] += 2 * u_prealloc_err
 
-                return loss, grad
+                # grad = np.zeros_like(u)
+                # grad[n+zero:] += 2 * resu
+                # grad += 2 * Q[n+zero:].T @ resv1
+                # grad += 2 * Q[:n+zero].T @ resv2
+
+                return loss, newgradient
 
             def hessian(u): # TODO: this is not correct yet, need to check_grad it (it's close)
                 def _matvec(myvar):
@@ -215,7 +228,7 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
             # ls_backtrack=.5,
             # ls_forward=1.1,
             pgtol=PGTOL,
-            hessian_approximator=hessian,
+            # hessian_approximator=hessian,
             use_active_set=ACTIVE_SET,
             max_ls=100)
     print('LBFGS took', time.time() - start)
@@ -232,7 +245,7 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
     if IMPLICIT_FORMULATION:
         u = result_variable
         assert u[-1] > 0, 'Certificates not yet implemented'
-        u /= u[-1]
+        # u /= u[-1]
         v = Q @ u
     else:
         u = result_variable[:n+m+1]
@@ -242,6 +255,10 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
     u, v = refine(
         z=u-v, matrix=matrix_transf, b=b_transf, c=c_transf, zero=zero,
         nonneg=nonneg)
+
+    # u, v = refine(
+    #     z=u-v, matrix=matrix_transf, b=b_transf, c=c_transf, zero=zero,
+    #     nonneg=nonneg)
 
     # Transform back into problem format
     u1, u2, u3 = u[:n], u[n:n+m], u[-1]

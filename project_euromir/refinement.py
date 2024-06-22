@@ -71,7 +71,9 @@ def refine(z, matrix, b, c, zero, nonneg):
 
     # obtain initial (pre-LSQR) residual
     residual = Q @ u - v
-    print('residual norm sq before LSQR', np.linalg.norm(residual)**2)
+    oldnormsq = np.linalg.norm(residual)**2
+    print('residual norm sq before LSQR', oldnormsq)
+    print(f'kappa = {u[-1]:.1e}, tau = {v[-1]:.1e}')
 
     # call LSQR
     start = time.time()
@@ -82,8 +84,16 @@ def refine(z, matrix, b, c, zero, nonneg):
     dz = result[0]
 
     # recompute problem variables
-    z1 = z - dz
-    u = project(z1)
-    v = u - z1
-    print("residual norm sq after LSQR", np.linalg.norm(Q @ u - v)**2)
+    for i in range(20):
+        z1 = z - dz * (0.5) ** i
+        u = project(z1)
+        v = u - z1
+        newnormsq = np.linalg.norm(Q @ u - v)**2
+        if newnormsq < oldnormsq:
+            break
+    else:
+        print('REFINEMENT FAILED!')
+
+    print("residual norm sq after LSQR", newnormsq)
+    print(f'kappa = {u[-1]:.1e}, tau = {v[-1]:.1e}')
     return u, v
