@@ -415,3 +415,94 @@ def _minimize_newtoncg(fun, x0, args=(), jac=None, hess=None, hessp=None,
 
         msg = _status_message['success']
         return terminate(0, msg)
+
+if __name__ == '__main__':
+    import scipy as sp
+    from scipy.optimize import fmin_ncg as fmin_ncg_orig
+
+    from .loss import (common_computation_main, create_workspace_main,
+                       gradient, hessian, loss)
+
+    np.random.seed(0)
+    m = 20
+    n = 10
+    zero = 5
+    nonneg = 15
+    A = np.random.randn(m, n)
+    b = np.random.randn(m)
+    c = np.random.randn(n)
+    Q = sp.sparse.bmat([
+        [None, A.T, c.reshape(n, 1)],
+        [-A, None, b.reshape(m, 1)],
+        [-c.reshape(1, n), -b.reshape(1, m), None],
+        ]).tocsc()
+
+    workspace = create_workspace_main(n, zero, nonneg)
+    u = np.random.randn(m+n+1)
+    common_computation_main(u, Q, n, zero, nonneg, workspace)
+
+    def my_loss(u):
+        common_computation_main(u, Q, n, zero, nonneg, workspace)
+        return loss(u, Q, n, zero, nonneg, workspace)
+
+    def my_grad(u):
+        common_computation_main(u, Q, n, zero, nonneg, workspace)
+        return np.copy(gradient(u, Q, n, zero, nonneg, workspace))
+
+    def my_hessian(u):
+        common_computation_main(u, Q, n, zero, nonneg, workspace)
+        return hessian(u, Q, n, zero, nonneg, workspace)
+
+    print('ORIGINAL')
+
+    # original
+    u_0 = np.zeros(m+n+1)
+    u_0[-1] = 1.
+    result_orig = fmin_ncg_orig(
+        f = my_loss,
+        x0 = u_0,
+        fprime = my_grad,
+        fhess_p=None,
+        fhess=my_hessian,
+        args=(),
+        avextol=1e-05,
+        epsilon=1.4901161193847656e-08,
+        maxiter=None,
+        full_output=0,
+        disp=1,
+        retall=0,
+        callback=None,
+        c1=0.0001,
+        c2=0.9)
+
+    u = result_orig
+    v = Q @ u
+    print(f'kappa {u[-1]:.2e}')
+    print(f'tau {v[-1]:.2e}')
+    print(f'loss {my_loss(u):.2e}')
+
+    print('OURS')
+
+    # ours
+    u_0 = np.zeros(m+n+1)
+    u_0[-1] = 1.
+    result_ours = _minimize_newtoncg(
+        fun=my_loss,
+        x0=u_0,
+        args=(),
+        jac=my_grad,
+        hess=my_hessian,
+        hessp=None,
+        callback=None,
+        xtol=1e-5,
+        eps=_epsilon,
+        maxiter=None,
+        disp=1,
+        return_all=False,
+        c1=1e-4, c2=0.9)
+
+    u = result_ours['x']
+    v = Q @ u
+    print(f'kappa {u[-1]:.2e}')
+    print(f'tau {v[-1]:.2e}')
+    print(f'loss {my_loss(u):.2e}')
