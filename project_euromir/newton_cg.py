@@ -350,6 +350,8 @@ def _minimize_newtoncg(fun, x0, args=(), jac=None, hess=None, hessp=None,
 
         for k2 in range(cg_maxiter):
             if np.add.reduce(np.abs(ri)) <= termcond:
+                print(f'iter {k}, breaking CG loop at cgiter {k2} with termcond {termcond:.2e}')
+                # breakpoint()
                 break
             if fhess is None:
                 if fhess_p is None:
@@ -364,7 +366,8 @@ def _minimize_newtoncg(fun, x0, args=(), jac=None, hess=None, hessp=None,
             # check curvature
             Ap = asarray(Ap).squeeze()  # get rid of matrices...
             curv = np.dot(psupi, Ap)
-            if 0 <= curv <= 3 * float64eps:
+            if 0 <= curv <= 0. * float64eps:
+                print(f'iter {k}, breaking CG loop at cgiter {k2} with curv {curv:.2e}')
                 break
             elif curv < 0:
                 if (i > 0):
@@ -408,6 +411,8 @@ def _minimize_newtoncg(fun, x0, args=(), jac=None, hess=None, hessp=None,
         if _call_callback_maybe_halt(callback, intermediate_result):
             return terminate(5, "")
         update_l1norm = np.linalg.norm(update, ord=1)
+
+        print(f'update_l1norm, {update_l1norm:.2e}')
 
     else:
         if np.isnan(old_fval) or np.isnan(update_l1norm):
@@ -455,7 +460,7 @@ if __name__ == '__main__':
 
     print('ORIGINAL')
 
-    # original
+    # original; defaults copied from scipy docs page
     u_0 = np.zeros(m+n+1)
     u_0[-1] = 1.
     result_orig = fmin_ncg_orig(
@@ -494,7 +499,7 @@ if __name__ == '__main__':
         hess=my_hessian,
         hessp=None,
         callback=None,
-        xtol=1e-5,
+        xtol=0., #1e-5,
         eps=_epsilon,
         maxiter=None,
         disp=1,
