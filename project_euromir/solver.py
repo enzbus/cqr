@@ -41,9 +41,11 @@ DEBUG = False
 if DEBUG:
     import matplotlib.pyplot as plt
 
-USE_MY_LBFGS = False
+USE_MY_LBFGS = True
 ACTIVE_SET = False # this doesn't work yet, not sure if worth trying to fix it
 IMPLICIT_FORMULATION = True # this does help!!! some minor issues on hessian
+
+QR_PRESOLVE = False
 
 if ACTIVE_SET:
     assert USE_MY_LBFGS
@@ -61,12 +63,20 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
     assert matrix.shape == (m, n)
     assert zero + nonneg == m
 
-    # equilibration
-    d, e, sigma, rho, matrix_transf, b_transf, c_transf = \
-    equilibrate.hsde_ruiz_equilibration(
-            matrix, b, c, dimensions={
-                'zero': zero, 'nonneg': nonneg, 'second_order': ()},
-            max_iters=25)
+    if QR_PRESOLVE:
+        q, r = np.linalg.qr(np.vstack([matrix.todense(), c.reshape((1, n))]))
+        matrix_transf = q[:-1]
+        c_transf = q[-1].A1
+        sigma = np.linalg.norm(b)
+        b_transf = b/sigma
+
+    else:
+        # equilibration
+        d, e, sigma, rho, matrix_transf, b_transf, c_transf = \
+        equilibrate.hsde_ruiz_equilibration(
+                matrix, b, c, dimensions={
+                    'zero': zero, 'nonneg': nonneg, 'second_order': ()},
+                max_iters=25)
 
     # temporary, build sparse Q
     Q = sp.sparse.bmat([
@@ -288,9 +298,15 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
     y = u2 / u3
     s = v2 / u3
 
-    # invert Ruiz scaling, copied from other repo
-    x_orig =  e * x / sigma
-    y_orig = d * y / rho
-    s_orig = (s/d) / sigma
+    if QR_PRESOLVE:
+        x_orig = np.linalg.solve(r, x) * sigma
+        y_orig = y
+        s_orig = s * sigma
+
+    else:
+        # invert Ruiz scaling, copied from other repo
+        x_orig =  e * x / sigma
+        y_orig = d * y / rho
+        s_orig = (s/d) / sigma
 
     return x_orig, y_orig, s_orig
