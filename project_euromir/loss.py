@@ -185,7 +185,7 @@ def derivative_residual(z, Q, n, zero, nonneg, workspace):
         # multiply by DR
         result[n+zero:] *= (workspace['u_cone'] > 0)
 
-        # add external derivative
+        # add external identity
         result[n+zero:] += myvar[n+zero:]
 
         return result
