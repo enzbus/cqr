@@ -87,6 +87,14 @@ def _densify(linear_operator):
         result[:, i] = linear_operator.matvec(identity[:, i])
     return result
 
+def _rdensify(linear_operator):
+    assert linear_operator.shape[0] == linear_operator.shape[1]
+    result = np.empty(linear_operator.shape)
+    identity = np.eye(result.shape[0])
+    for i in range(len(identity)):
+        result[:, i] = linear_operator.rmatvec(identity[:, i])
+    return result.T
+
 
 ###
 # The residual and linear operator used in refinement
@@ -124,13 +132,26 @@ def residual(z, Q, n, zero, nonneg, workspace):
 
     return workspace['residual']
 
-def derivative_residual(z, Q, n, zero, nonneg, workspace):
-    """Derivative of the residual operator, basic implementation."""
+def _project(variable, n, zero):
+    result = np.copy(variable)
+    result[n+zero:] = np.maximum(result[n+zero:], 0.)
+    return result
+
+def _residual_basic(z, Q, n, zero, nonneg, **kwargs):
+    # compute u and v by projection
+    u = _project(z, n, zero)
+    v = u - z
+    return Q @ u - v
+
+def _derivative_residual_basic(z, Q, n, zero, nonneg, **kwargs):
     # very basic, for LPs just compute DR as sparse matrix
     mask = np.ones(len(z), dtype=float)
     mask[n+zero:] = z[n+zero:] > 0
-    DR = (Q - sp.sparse.eye(Q.shape[0])) @ sp.sparse.diags(mask
+    return (Q - sp.sparse.eye(Q.shape[0])) @ sp.sparse.diags(mask
         ) + sp.sparse.eye(Q.shape[0])
+
+def derivative_residual(z, Q, n, zero, nonneg, workspace):
+    """Derivative of the residual operator."""
 
     def _matvec(myvar):
         result = np.empty_like(myvar)
@@ -153,7 +174,21 @@ def derivative_residual(z, Q, n, zero, nonneg, workspace):
         return result
 
     def _rmatvec(myvar):
-        return DR.T @ myvar
+        result = np.empty_like(myvar)
+
+        # we can multiply by Q all together
+        result[:] = myvar @ Q
+
+        # nonzero conic part, subtract internal identity
+        result[n+zero:] -= myvar[n+zero:]
+
+        # multiply by DR
+        result[n+zero:] *= (workspace['u_cone'] > 0)
+
+        # add external derivative
+        result[n+zero:] += myvar[n+zero:]
+
+        return result
 
     return sp.sparse.linalg.LinearOperator(
         shape=(len(z), len(z)), matvec=_matvec, rmatvec=_rmatvec)
@@ -214,7 +249,22 @@ if __name__ == '__main__':
         return _densify(derivative_residual(
             z, Q, n, zero, nonneg, workspace_residual))
 
+    def my_derivative_residual_right(z):
+        common_computation_refinement(
+            z, Q, n, zero, nonneg, workspace_residual)
+        return _rdensify(derivative_residual(
+            z, Q, n, zero, nonneg, workspace_residual))
+
     print('\nCHECKING RESIDUAL')
     for i in range(10):
-        print(check_grad(
-            my_residual, my_derivative_residual, np.random.randn(n+m+1)))
+        z = np.random.randn(n+m+1)
+        assert np.allclose(
+            my_residual(z), _residual_basic(z, Q, n, zero, nonneg))
+        assert np.allclose(
+            my_derivative_residual(z),
+            _derivative_residual_basic(z, Q, n, zero, nonneg).todense())
+        print('left:\t', end='')
+        print(check_grad(my_residual, my_derivative_residual, z))
+        print('right:\t', end='')
+        print(check_grad(my_residual, my_derivative_residual_right, z))
+        assert np.allclose(my_derivative_residual_right(z), my_derivative_residual(z))
