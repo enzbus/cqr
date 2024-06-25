@@ -12,6 +12,8 @@ from scipy.optimize._linesearch import (LineSearchWarning, line_search_wolfe1,
                                         line_search_wolfe2)
 from scipy.sparse.linalg import LinearOperator
 
+ENZO_MODIFIED_MULTIPLIER = 0. # in original it was 3.
+
 _epsilon = sqrt(np.finfo(float).eps)
 
 class _LineSearchError(RuntimeError):
@@ -233,7 +235,7 @@ def approx_fhess_p(x0, p, fprime, epsilon, *args):
 def _minimize_newtoncg(fun, x0, args=(), jac=None, hess=None, hessp=None,
                        callback=None, xtol=1e-5, eps=_epsilon, maxiter=None,
                        disp=False, return_all=False, c1=1e-4, c2=0.9,
-                       **unknown_options):
+                       max_cg_iters=None, **unknown_options):
     """Minimization of scalar function of one or more variables using the
     Newton-CG algorithm.
 
@@ -315,7 +317,7 @@ def _minimize_newtoncg(fun, x0, args=(), jac=None, hess=None, hessp=None,
     hcalls = 0
     if maxiter is None:
         maxiter = len(x0)*200
-    cg_maxiter = 20*len(x0)
+    cg_maxiter = 20*len(x0) if max_cg_iters is None else max_cg_iters
 
     xtol = len(x0) * avextol
     # Make sure we enter the while loop.
@@ -366,7 +368,7 @@ def _minimize_newtoncg(fun, x0, args=(), jac=None, hess=None, hessp=None,
             # check curvature
             Ap = asarray(Ap).squeeze()  # get rid of matrices...
             curv = np.dot(psupi, Ap)
-            if 0 <= curv <= 0. * float64eps:
+            if 0 <= curv <= ENZO_MODIFIED_MULTIPLIER * float64eps:
                 print(f'iter {k}, breaking CG loop at cgiter {k2} with curv {curv:.2e}')
                 break
             elif curv < 0:
@@ -386,9 +388,10 @@ def _minimize_newtoncg(fun, x0, args=(), jac=None, hess=None, hessp=None,
             dri0 = dri1          # update np.dot(ri,ri) for next time.
         else:
             # curvature keeps increasing, bail out
-            msg = ("Warning: CG iterations didn't converge. The Hessian is not "
-                   "positive definite.")
-            return terminate(3, msg)
+            pass
+            #msg = ("Warning: CG iterations didn't converge. The Hessian is not "
+            #       "positive definite.")
+            #return terminate(3, msg)
 
         pk = xsupi  # search direction is solution to system.
         gfk = -b    # gradient at xk
@@ -470,7 +473,7 @@ if __name__ == '__main__':
         fhess_p=None,
         fhess=my_hessian,
         args=(),
-        avextol=1e-05,
+        avextol=0.,
         epsilon=1.4901161193847656e-08,
         maxiter=None,
         full_output=0,

@@ -52,7 +52,7 @@ class TestSolver(TestCase):
             b = np.random.randn(m)
             objective = cp.norm1(A @ x - b)
             d = np.random.randn(n, 2)
-            constraints = [x <= .25, x >= -.25, x @ d == 1.,]
+            constraints = [cp.abs(x) <= .25, x @ d == 1.,]
 
             def _get_stats():
                 constr_errs = [
@@ -93,13 +93,13 @@ class TestSolver(TestCase):
             # we just add float epsilon for the LP constraints
             self.assertLessEqual(
                 my_solver_stats[0][0], ip_solver_stats[0][0]+np.finfo(float).eps)
-            self.assertLessEqual(
-                my_solver_stats[0][1], ip_solver_stats[0][1]+np.finfo(float).eps)
+            #self.assertLessEqual(
+            #    my_solver_stats[0][1], ip_solver_stats[0][1]+np.finfo(float).eps)
 
             # this is the equality constraint, seems more sensitive to scaling
             # we add float epsilon with multiplier b/c fails on other platforms
             self.assertLessEqual(
-                my_solver_stats[0][2], ip_solver_stats[0][2]+5*np.finfo(float).eps)
+                my_solver_stats[0][-1], ip_solver_stats[0][-1]+5*np.finfo(float).eps)
 
             self.assertTrue(
                 np.allclose(my_solver_solution, ip_solver_solution))

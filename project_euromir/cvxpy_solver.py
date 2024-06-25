@@ -52,7 +52,10 @@ except ImportError as exc: # pragma: no cover
     raise ImportError(
         "Can't use CVXPY interface if CVXPY is not installed!") from exc
 
-from project_euromir import solve
+from project_euromir import solve as solve_lbfgs
+from project_euromir.solver_cg import solve as solve_ncg
+
+NCG = False
 
 
 class Solver(ConicSolver):
@@ -74,7 +77,7 @@ class Solver(ConicSolver):
             solver_cache=None):
         """Main method."""
 
-        x_orig, y_orig, s_orig = solve(
+        x_orig, y_orig, s_orig = (solve_ncg if NCG else solve_lbfgs)(
             matrix=data['A'], b=data['b'], c=data['c'], zero=data['dims'].zero,
             nonneg=data['dims'].nonneg)
 
