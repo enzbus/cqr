@@ -114,13 +114,16 @@ DCSRS_WARNINGS = {
 
 def minimize_lbfgs(
         loss_and_gradient_function, initial_point, memory=5, max_iters=100,
-        #c_1=1e-3, c_2=.9, ls_backtrack=.5, ls_forward=1.1,
+        c_1=1e-3, c_2=.9, # ls_backtrack=.5, ls_forward=1.1,
         pgtol=1e-6, # same termination as l-bfgs-b
         hessian_approximator=None,
         hessian_cg_iters=20,
         max_ls=20,
         callback=None, use_active_set = False):
     """Minimize function using back-tracked L-BFGS."""
+
+    DCSRCH_COMMUNICATION['ftol'][0] = c_1
+    DCSRCH_COMMUNICATION['gtol'][0] = c_2
 
     func_counter = 0
     n = len(initial_point)

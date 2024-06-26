@@ -61,7 +61,6 @@ from project_euromir.solver_nohsde import solve
 # from project_euromir.solver_cg import solve
 
 
-
 class Solver(ConicSolver):
     """CVXPY solver interface.
 

@@ -198,12 +198,13 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
             # callback=_callback if DEBUG else None,
             memory=lbfgs_memory,
             max_iters=int(1e10),
-            # c_1=1e-3, c_2=.9,
+            c_1=1e-3,
+            c_2=.1,
             # ls_backtrack=.5,
             # ls_forward=1.1,
             pgtol=0., #PGTOL,
             hessian_approximator=hessian,
-            hessian_cg_iters=10,
+            hessian_cg_iters=20,
             # use_active_set=ACTIVE_SET,
             max_ls=100)
 
