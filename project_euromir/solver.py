@@ -41,7 +41,7 @@ DEBUG = False
 if DEBUG:
     import matplotlib.pyplot as plt
 
-USE_MY_LBFGS = True
+USE_MY_LBFGS = False
 ACTIVE_SET = False # this doesn't work yet, not sure if worth trying to fix it
 IMPLICIT_FORMULATION = True # this does help!!! some minor issues on hessian
 

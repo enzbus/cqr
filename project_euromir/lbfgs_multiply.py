@@ -64,7 +64,8 @@ def lbfgs_multiply(
     past_steps: np.array,
     past_grad_diffs: np.array,
     scale: float | np.array = 1.,
-    hessian_approximator = None
+    hessian_approximator = None,
+    hessian_cg_iters = None,
 ):
     r"""Multiply current gradient by the approximate inverse second derivative.
 
@@ -126,7 +127,10 @@ def lbfgs_multiply(
 
     # center part
     if hessian_approximator is not None:
-        r = sp.sparse.linalg.cg(hessian_approximator, q, maxiter=20)[0]
+        r = sp.sparse.linalg.cg(
+            hessian_approximator, q,
+            maxiter=hessian_cg_iters if hessian_cg_iters is not None else 20
+            )[0]
     else:
         r = scale * q
 

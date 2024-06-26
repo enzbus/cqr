@@ -117,6 +117,7 @@ def minimize_lbfgs(
         #c_1=1e-3, c_2=.9, ls_backtrack=.5, ls_forward=1.1,
         pgtol=1e-6, # same termination as l-bfgs-b
         hessian_approximator=None,
+        hessian_cg_iters=20,
         max_ls=20,
         callback=None, use_active_set = False):
     """Minimize function using back-tracked L-BFGS."""
@@ -203,6 +204,7 @@ def minimize_lbfgs(
                 past_grad_diffs=past_grad_diffs[max(memory-i, 0):],
                 hessian_approximator=hessian_approximator(current_point)
                     if hessian_approximator is not None else None,
+                hessian_cg_iters=hessian_cg_iters,
                 scale=scale)
 
         next_loss = current_loss

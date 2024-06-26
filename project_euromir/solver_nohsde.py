@@ -38,6 +38,7 @@ from project_euromir.lbfgs import minimize_lbfgs
 from project_euromir.refinement import refine
 
 DEBUG = False
+SCIPY_LBFGS = False
 if DEBUG:
     import matplotlib.pyplot as plt
 
@@ -96,8 +97,6 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
         loss += np.linalg.norm(s_error)**2
         loss += gap**2
 
-        # return loss
-
         # dual residual sqnorm
         gradient[n:] = 2 * (matrix_transf @ dual_residual)
 
@@ -113,6 +112,54 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
 
         return loss, gradient
 
+    def hessian(xy):
+        """Hessian to use inside LBFGS loop."""
+
+        x = xy[:n]
+        y = xy[n:]
+
+        # zero cone dual variable is unconstrained
+        y_error[:] = np.minimum(y[zero:], 0.)
+
+        # this must be all zeros
+        dual_residual[:] = matrix_transf.T @ y + c_transf
+
+        # slacks
+        s[:] = -matrix_transf @ x + b_transf
+
+        # slacks for zero cone must be zero
+        s_error[:zero] = s[:zero]
+        s_error[zero:] = np.minimum(s[zero:], 0.)
+
+        def _matvec(dxdy):
+            result = np.empty_like(dxdy)
+            dx = dxdy[:n]
+            dy = dxdy[n:]
+
+            # dual residual sqnorm
+            result[n:] = 2 * (matrix_transf @ (matrix_transf.T @ dy))
+
+            # s_error sqnorm
+            s_mask = np.ones(m, dtype=float)
+            s_mask[zero:] = s_error[zero:] < 0.
+            result[:n] = 2 * (matrix_transf.T @ (s_mask * (matrix_transf @ dx)))
+
+            # y_error sqnorm
+            y_mask = np.ones(m-zero, dtype=float)
+            y_mask[:] = y_error < 0.
+            result[n+zero:] += 2 * y_mask * dy[zero:]
+
+            # gap
+            constants = np.concatenate([c_transf, b_transf])
+            result[:] += constants * (2 * (constants @ dxdy))
+
+            return result
+
+        return sp.sparse.linalg.LinearOperator(
+            shape=(len(xy), len(xy)),
+            matvec=_matvec
+        )
+
     def callback(xy):
         loss, _ = loss_gradient(xy)
         # loss = loss_gradient(xy)
@@ -123,23 +170,42 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
 
     # call LBFGS
     start = time.time()
-    lbfgs_result = sp.optimize.fmin_l_bfgs_b(
-        loss_gradient,
-        x0=x_0,
-        m=lbfgs_memory,
-        # approx_grad=True,
-        maxfun=1e10,
-        factr=0.,
-        pgtol=0.,
-        callback=callback if DEBUG else None,
-        maxiter=1e10)
-    # print LBFGS stats
-    function_value = lbfgs_result[1]
-    print('LOSS AT THE END OF LBFGS', function_value)
-    stats = lbfgs_result[2]
-    stats.pop('grad')
-    print('LBFGS stats', stats)
-    result_variable = lbfgs_result[0]
+
+    if SCIPY_LBFGS:
+        lbfgs_result = sp.optimize.fmin_l_bfgs_b(
+            loss_gradient,
+            x0=x_0,
+            m=lbfgs_memory,
+            # approx_grad=True,
+            maxfun=1e10,
+            factr=0.,
+            pgtol=0.,
+            callback=callback if DEBUG else None,
+            maxiter=1e10)
+
+        # print LBFGS stats
+        function_value = lbfgs_result[1]
+        print('LOSS AT THE END OF LBFGS', function_value)
+        stats = lbfgs_result[2]
+        stats.pop('grad')
+        print('LBFGS stats', stats)
+        result_variable = lbfgs_result[0]
+
+    else:
+        result_variable = minimize_lbfgs(
+            loss_and_gradient_function=loss_gradient,
+            initial_point=x_0,
+            # callback=_callback if DEBUG else None,
+            memory=lbfgs_memory,
+            max_iters=int(1e10),
+            # c_1=1e-3, c_2=.9,
+            # ls_backtrack=.5,
+            # ls_forward=1.1,
+            pgtol=0., #PGTOL,
+            hessian_approximator=hessian,
+            hessian_cg_iters=10,
+            # use_active_set=ACTIVE_SET,
+            max_ls=100)
 
     print('LBFGS took', time.time() - start)
 
