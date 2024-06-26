@@ -31,30 +31,42 @@
 import numpy as np
 import scipy as sp
 
+HSDE_SCALING_PENALTY = False
+
 ###
 # The loss function used in the main loop
 ###
 
-def create_workspace_main(n, zero, nonneg):
+def create_workspace_main(Q, n, zero, nonneg):
     """Create workspace used in main loop."""
     workspace = {}
     len_var = n + zero + nonneg + 1
     workspace['u_conic_error'] = np.empty(nonneg+1, dtype=float)
     workspace['v_conic_error'] = np.empty(len_var, dtype=float)
     workspace['gradient'] = np.empty(len_var, dtype=float)
+    if HSDE_SCALING_PENALTY:
+        workspace['scaler_loss'] = None
+        workspace['scaler'] = Q[-1].todense().A1
+        workspace['scaler'][-1] = 1.
     return workspace
 
 def common_computation_main(u, Q, n, zero, nonneg, workspace):
     """Do common computation, in workspace, for input u."""
     workspace['u_conic_error'][:] = np.minimum(u[n+zero:], 0.)
     workspace['v_conic_error'][:] = Q @ u
+    if HSDE_SCALING_PENALTY:
+        workspace['v_m_1'] = workspace['v_conic_error'][-1]
     workspace['v_conic_error'][n+zero:] = np.minimum(
         workspace['v_conic_error'][n+zero:], 0.)
 
 def loss(u, Q, n, zero, nonneg, workspace):
     """Compute loss from workspace."""
-    return (np.linalg.norm(workspace['u_conic_error'])**2
+    result = (np.linalg.norm(workspace['u_conic_error'])**2
         + np.linalg.norm(workspace['v_conic_error'])**2)
+    if HSDE_SCALING_PENALTY:
+        workspace['scaler_loss'] = (workspace['scaler'] @ u - 1)**2
+        result += workspace['scaler_loss']
+    return result
 
 def gradient(u, Q, n, zero, nonneg, workspace):
     """Compute gradient from workspace.
@@ -63,6 +75,8 @@ def gradient(u, Q, n, zero, nonneg, workspace):
     """
     workspace['gradient'][:] = 2 * (Q.T @ workspace['v_conic_error'])
     workspace['gradient'][n+zero:] += 2 * workspace['u_conic_error']
+    if HSDE_SCALING_PENALTY:
+        workspace['gradient'][:] += 2 * workspace['scaler'] * workspace['scaler_loss']
     return workspace['gradient']
 
 def hessian(u, Q, n, zero, nonneg, workspace):
@@ -74,6 +88,8 @@ def hessian(u, Q, n, zero, nonneg, workspace):
         tmp[n+zero:] *= (workspace['v_conic_error'][n+zero:] < 0)
         tmp = Q.T @ tmp
         tmp[n+zero:] += (workspace['u_conic_error'] < 0) * myvar[n+zero:]
+        if HSDE_SCALING_PENALTY:
+            tmp[:] += workspace['scaler'] * (workspace['scaler'] @ myvar)
         return 2 * tmp
 
     return sp.sparse.linalg.LinearOperator(
@@ -212,7 +228,7 @@ if __name__ == '__main__':
         [-c.reshape(1, n), -b.reshape(1, m), None],
         ]).tocsc()
 
-    workspace = create_workspace_main(n, zero, nonneg)
+    workspace = create_workspace_main(Q, n, zero, nonneg)
     u = np.random.randn(m+n+1)
     common_computation_main(u, Q, n, zero, nonneg, workspace)
 

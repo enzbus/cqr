@@ -388,10 +388,9 @@ def _minimize_newtoncg(fun, x0, args=(), jac=None, hess=None, hessp=None,
             dri0 = dri1          # update np.dot(ri,ri) for next time.
         else:
             # curvature keeps increasing, bail out
-            pass
-            #msg = ("Warning: CG iterations didn't converge. The Hessian is not "
-            #       "positive definite.")
-            #return terminate(3, msg)
+            msg = ("Warning: CG iterations didn't converge. The Hessian is not "
+                  "positive definite.")
+            return terminate(3, msg)
 
         pk = xsupi  # search direction is solution to system.
         gfk = -b    # gradient at xk

@@ -15,7 +15,9 @@
 
 import numpy as np
 
-from .config import NONUMBA
+# from .config import NONUMBA
+
+NONUMBA = True
 
 if not NONUMBA: # pragma: no cover
     import numba as nb

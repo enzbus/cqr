@@ -34,7 +34,7 @@ import numpy as np
 import scipy as sp
 
 
-def refine(z, matrix, b, c, zero, nonneg):
+def refine(z, matrix, b, c, zero, nonneg, max_iters=None):
     """All Python for now, will call all the rest.
 
     Equilibration is not done here, data must be already transformed.
@@ -78,7 +78,8 @@ def refine(z, matrix, b, c, zero, nonneg):
     # call LSQR
     start = time.time()
     result = sp.sparse.linalg.lsqr(
-        DR, residual, atol=0., btol=0., iter_lim=Q.shape[0]*2)
+        DR, residual, atol=0., btol=0.,
+        iter_lim=(Q.shape[0]*2) if max_iters is None else max_iters)
     print('LSQR result[1:-1]', result[1:-1])
     print('LSQR took', time.time() - start)
     dz = result[0]
