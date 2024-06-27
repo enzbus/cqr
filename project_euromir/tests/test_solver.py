@@ -46,13 +46,13 @@ class TestSolver(TestCase):
         for seed in range(10):
             print('\n\nEXPERIMENT', seed+1)
             np.random.seed(seed)
-            m, n = 21, 20
+            m, n = 41, 40
             x = cp.Variable(n)
             A = np.random.randn(m, n)
             b = np.random.randn(m)
             objective = cp.norm1(A @ x - b)
             d = np.random.randn(n, 2)
-            constraints = [cp.abs(x) <= .25, x @ d == 1.,]
+            constraints = [cp.abs(x) <= .15, x @ d == 2.,]
 
             def _get_stats():
                 constr_errs = [

@@ -352,7 +352,7 @@ def _minimize_newtoncg(fun, x0, args=(), jac=None, hess=None, hessp=None,
 
         for k2 in range(cg_maxiter):
             if np.add.reduce(np.abs(ri)) <= termcond:
-                print(f'iter {k}, breaking CG loop at cgiter {k2} with termcond {termcond:.2e}')
+                # print(f'iter {k}, breaking CG loop at cgiter {k2} with termcond {termcond:.2e}')
                 # breakpoint()
                 break
             if fhess is None:
@@ -369,7 +369,7 @@ def _minimize_newtoncg(fun, x0, args=(), jac=None, hess=None, hessp=None,
             Ap = asarray(Ap).squeeze()  # get rid of matrices...
             curv = np.dot(psupi, Ap)
             if 0 <= curv <= ENZO_MODIFIED_MULTIPLIER * float64eps:
-                print(f'iter {k}, breaking CG loop at cgiter {k2} with curv {curv:.2e}')
+                # print(f'iter {k}, breaking CG loop at cgiter {k2} with curv {curv:.2e}')
                 break
             elif curv < 0:
                 if (i > 0):
@@ -414,7 +414,7 @@ def _minimize_newtoncg(fun, x0, args=(), jac=None, hess=None, hessp=None,
             return terminate(5, "")
         update_l1norm = np.linalg.norm(update, ord=1)
 
-        print(f'update_l1norm, {update_l1norm:.2e}')
+        # print(f'update_l1norm, {update_l1norm:.2e}')
 
     else:
         if np.isnan(old_fval) or np.isnan(update_l1norm):

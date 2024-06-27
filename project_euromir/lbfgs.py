@@ -51,7 +51,7 @@ DCSRCH_COMMUNICATION = {
     'g': np.array([-1.]),
     'ftol': np.array([1e-3]),
     'gtol': np.array([0.9]),
-    'xtol': np.array([1e-5]), # TODO: figure out if this depends on scale
+    'xtol': np.array([1e-8]), # TODO: figure out if this depends on scale
     'stpmin': np.array([0.]),
     'stpmax': np.array([1000.]), # in lbfgsb this is set iteratively...
     'isave': np.zeros(20, dtype=np.int32),

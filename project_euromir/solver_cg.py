@@ -33,11 +33,18 @@ import time
 import numpy as np
 import scipy as sp
 
+NOHSDE = True
+
 from project_euromir import equilibrate
 from project_euromir.lbfgs import minimize_lbfgs
-from project_euromir.loss import (common_computation_main,
-                                  create_workspace_main, gradient, hessian,
-                                  loss)
+
+if not NOHSDE:
+    from project_euromir.loss import (common_computation_main,
+                                      create_workspace_main, gradient, hessian,
+                                      loss)
+else:
+    from project_euromir.loss_no_hsde import (create_workspace,  loss_gradient, hessian)
+
 from project_euromir.newton_cg import _epsilon, _minimize_newtoncg
 from project_euromir.refinement import refine
 
@@ -69,30 +76,51 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
         [-c_transf.reshape(1, n), -b_transf.reshape(1, m), None],
         ]).tocsc()
 
-    # prepare workspace
-    workspace = create_workspace_main(Q, n, zero, nonneg)
+    if not NOHSDE:
 
-    # these functions should be unpacked inside newton-cg
-    def separated_loss(u):
-        common_computation_main(u, Q, n, zero, nonneg, workspace)
-        return loss(u, Q, n, zero, nonneg, workspace)
+        # prepare workspace
+        workspace = create_workspace_main(Q, n, zero, nonneg)
 
-    def separated_grad(u):
-        common_computation_main(u, Q, n, zero, nonneg, workspace)
-        return np.copy(gradient(u, Q, n, zero, nonneg, workspace))
+        # these functions should be unpacked inside newton-cg
+        def separated_loss(u):
+            common_computation_main(u, Q, n, zero, nonneg, workspace)
+            return loss(u, Q, n, zero, nonneg, workspace)
 
-    def separated_hessian(u):
-        common_computation_main(u, Q, n, zero, nonneg, workspace)
-        return hessian(u, Q, n, zero, nonneg, workspace)
+        def separated_grad(u):
+            common_computation_main(u, Q, n, zero, nonneg, workspace)
+            return np.copy(gradient(u, Q, n, zero, nonneg, workspace))
 
-    x_0 = np.zeros(n+m+1)
-    x_0[-1] = 1.
+        def separated_hessian(u):
+            common_computation_main(u, Q, n, zero, nonneg, workspace)
+            return hessian(u, Q, n, zero, nonneg, workspace)
+
+        x_0 = np.zeros(n+m+1)
+        x_0[-1] = 1.
+
+    else:
+
+        workspace = create_workspace(m, n, zero)
+
+        # these functions should be unpacked inside newton-cg
+        def separated_loss(xy):
+            return loss_gradient(
+                xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf, c=c_transf, workspace=workspace)[0]
+
+        def separated_grad(xy):
+            return np.copy(loss_gradient(
+                xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf, c=c_transf, workspace=workspace)[1])
+
+        def separated_hessian(xy):
+            return hessian(
+                xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf, c=c_transf, workspace=workspace)
+
+        x_0 = np.zeros(n+m)
 
     old_x = np.empty_like(x_0)
 
     def callback(current):
         print('current loss', current.fun)
-        print('current kappa', current.x[-1])
+        # print('current kappa', current.x[-1])
         # if current.fun < np.finfo(float).eps**2:
         #     raise StopIteration
         # if current.x[-1] < 1e-2:
@@ -110,7 +138,7 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
         jac=separated_grad,
         hess=separated_hessian,
         hessp=None,
-        callback=callback,
+        # callback=callback,
         xtol=0., #1e-5,
         eps=_epsilon, # unused
         maxiter=10000,
@@ -118,12 +146,19 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
         disp=1,
         return_all=False,
         c1=1e-4, c2=0.9)
-    breakpoint()
+    # breakpoint()
     print(f'NEWTON-CG took {time.time() - start:.3f} seconds')
 
+    if not NOHSDE:
     # extract result
-    u = result['x']
-    assert u[-1] > 0, 'Certificates not yet implemented'
+        u = result['x']
+        assert u[-1] > 0, 'Certificates not yet implemented'
+    else:
+        xy = result['x']
+        u = np.empty(n+m+1, dtype=float)
+        u[:-1] = xy
+        u[-1] = 1.
+
     # u /= u[-1]
     v = Q @ u
 

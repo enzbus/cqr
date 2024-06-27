@@ -42,8 +42,11 @@ SCIPY_LBFGS = False
 if DEBUG:
     import matplotlib.pyplot as plt
 
+QR_PRESOLVE = False
 
-def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
+def solve(
+    matrix, b, c, zero, nonneg, lbfgs_memory=10, refinement_iters=50,
+    refinement_lsqr_iters=100):
     "Main function."
 
     # some shape checking
@@ -52,12 +55,20 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
     assert matrix.shape == (m, n)
     assert zero + nonneg == m
 
-    # equilibration
-    d, e, sigma, rho, matrix_transf, b_transf, c_transf = \
-    equilibrate.hsde_ruiz_equilibration(
-            matrix, b, c, dimensions={
-                'zero': zero, 'nonneg': nonneg, 'second_order': ()},
-            max_iters=25)
+    if QR_PRESOLVE:
+        q, r = np.linalg.qr(np.vstack([matrix.todense(), c.reshape((1, n))]))
+        matrix_transf = q[:-1].A
+        c_transf = q[-1].A1
+        sigma = np.linalg.norm(b)
+        b_transf = b/sigma
+
+    else:
+        # equilibration
+        d, e, sigma, rho, matrix_transf, b_transf, c_transf = \
+        equilibrate.hsde_ruiz_equilibration(
+                matrix, b, c, dimensions={
+                    'zero': zero, 'nonneg': nonneg, 'second_order': ()},
+                max_iters=25)
 
     # define (loss, gradient) function; this is for LPs only
 
@@ -198,13 +209,13 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
             # callback=_callback if DEBUG else None,
             memory=lbfgs_memory,
             max_iters=int(1e10),
-            c_1=1e-3,
-            c_2=.1,
+            #c_1=1e-3,
+            #c_2=.1,
             # ls_backtrack=.5,
             # ls_forward=1.1,
             pgtol=0., #PGTOL,
-            hessian_approximator=hessian,
-            hessian_cg_iters=20,
+            # hessian_approximator=hessian,
+            #hessian_cg_iters=20,
             # use_active_set=ACTIVE_SET,
             max_ls=100)
 
@@ -224,10 +235,10 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
     v = Q @ u
 
     # refine
-    for i in range(5):
+    for i in range(refinement_iters):
         u, v = refine(
             z=u-v, matrix=matrix_transf, b=b_transf, c=c_transf, zero=zero,
-            nonneg=nonneg, max_iters=100)
+            nonneg=nonneg, max_iters=refinement_lsqr_iters)
 
     # Transform back into problem format
     u1, u2, u3 = u[:n], u[n:n+m], u[-1]
@@ -241,9 +252,15 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
     y = u2 / u3
     s = v2 / u3
 
-    # invert Ruiz scaling, copied from other repo
-    x_orig =  e * x / sigma
-    y_orig = d * y / rho
-    s_orig = (s/d) / sigma
+    if QR_PRESOLVE:
+        x_orig = np.linalg.solve(r, x) * sigma
+        y_orig = y
+        s_orig = s * sigma
+
+    else:
+        # invert Ruiz scaling, copied from other repo
+        x_orig =  e * x / sigma
+        y_orig = d * y / rho
+        s_orig = (s/d) / sigma
 
     return x_orig, y_orig, s_orig
