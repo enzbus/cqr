@@ -157,7 +157,7 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
         # max_cg_iters=100,
         disp=99,
         return_all=False,
-        c1=1e-4, c2=0.1)
+        c1=1e-4, c2=0.9)
     # breakpoint()
     print(f'NEWTON-CG took {time.time() - start:.3f} seconds')
     print(f'LOSS {separated_loss(result["x"]):.2e}')
