@@ -53,6 +53,8 @@ if DEBUG:
     import matplotlib.pyplot as plt
 
 QR_PRESOLVE = False
+QR_PRESOLVE_AFTER = False
+REFINE = True
 
 
 def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
@@ -78,6 +80,11 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
                 matrix, b, c, dimensions={
                     'zero': zero, 'nonneg': nonneg, 'second_order': ()},
                 max_iters=25)
+        if QR_PRESOLVE_AFTER:
+            q, r = np.linalg.qr(np.vstack(
+                [matrix_transf.todense(), c_transf.reshape((1, n))]))
+            matrix_transf = q[:-1].A
+            c_transf = q[-1].A1
 
     # temporary, build sparse Q
     Q = sp.sparse.bmat([
@@ -143,24 +150,33 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
 
     start = time.time()
     # call newton-CG, implementation from scipy with modified termination
-    result = _minimize_newtoncg(
-        fun=separated_loss,
-        x0=x_0,
-        args=(),
-        jac=separated_grad,
-        hess=separated_hessian,
-        hessp=None,
-        # callback=callback,
-        xtol=0., #1e-5,
-        eps=_epsilon, # unused
-        maxiter=10000,
-        # max_cg_iters=100,
-        disp=99,
-        return_all=False,
-        c1=1e-4, c2=0.9)
-    # breakpoint()
-    print(f'NEWTON-CG took {time.time() - start:.3f} seconds')
-    print(f'LOSS {separated_loss(result["x"]):.2e}')
+    c_2 = 0.1
+    for i in range(5):
+        result = _minimize_newtoncg(
+            fun=separated_loss,
+            x0=x_0,
+            args=(),
+            jac=separated_grad,
+            hess=separated_hessian,
+            hessp=None,
+            # callback=callback,
+            xtol=0., #1e-5,
+            eps=_epsilon, # unused
+            maxiter=10000,
+            # max_cg_iters=100,
+            disp=99,
+            return_all=False,
+            c1=1e-4, c2=c_2)
+        # breakpoint()
+        print(f'NEWTON-CG took {time.time() - start:.3f} seconds')
+        loss_after_cg = separated_loss(result["x"])
+        print(f'LOSS {loss_after_cg:.2e}')
+        if loss_after_cg < 1e-20:
+            break
+        x_0 = result['x']
+        # breakpoint()
+        while separated_loss(x_0 - separated_grad(x_0)) < separated_loss(x_0):
+            x_0 -= separated_grad(x_0)
 
     if not NOHSDE:
     # extract result
@@ -175,10 +191,11 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
     # u /= u[-1]
     v = Q @ u
 
-    for _ in range(5): #n + m):
-        u, v = refine(
-            z=u-v, matrix=matrix_transf, b=b_transf, c=c_transf, zero=zero,
-            nonneg=nonneg)#, max_iters=30)
+    if REFINE:
+        for _ in range(5): #n + m):
+            u, v = refine(
+                z=u-v, matrix=matrix_transf, b=b_transf, c=c_transf, zero=zero,
+                nonneg=nonneg)#, max_iters=30)
 
     # Transform back into problem format
     u1, u2, u3 = u[:n], u[n:n+m], u[-1]
@@ -198,6 +215,8 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
         s_orig = s * sigma
 
     else:
+        if QR_PRESOLVE_AFTER:
+            x = np.linalg.solve(r, x)
         # invert Ruiz scaling, copied from other repo
         x_orig =  e * x / sigma
         y_orig = d * y / rho

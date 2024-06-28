@@ -12,7 +12,7 @@ from scipy.optimize._linesearch import (LineSearchWarning, line_search_wolfe1,
                                         line_search_wolfe2)
 from scipy.sparse.linalg import LinearOperator
 
-ENZO_MODIFIED_MULTIPLIER = 0. # in original it was 3.
+ENZO_MODIFIED_MULTIPLIER = 1e-16 # in original it was 3.
 
 _epsilon = sqrt(np.finfo(float).eps)
 
@@ -396,13 +396,24 @@ def _minimize_newtoncg(fun, x0, args=(), jac=None, hess=None, hessp=None,
         gfk = -b    # gradient at xk
 
         try:
-            alphak, fc, gc, old_fval, old_old_fval, gfkp1 = \
+            alphak, _, _, old_fval, old_old_fval, _ = \
                      _line_search_wolfe12(f, fprime, xk, pk, gfk,
                                           old_fval, old_old_fval, c1=c1, c2=c2)
         except _LineSearchError:
-            # Line search failed to find a better solution.
-            msg = "Warning: " + _status_message['pr_loss']
-            return terminate(2, msg)
+            print('ENTERING FALL-BACK BACKTRACKING')
+            # ENZO: fallback to back-tracking
+            for bktrit in range(50):
+                if f(xk) < 1e-20:
+                    continue # we want to go to the else clause
+                if f(xk + pk * 0.5**(-bktrit)) < f(xk):
+                    alphak = 0.5**(-bktrit)
+                    old_old_fval = old_fval
+                    old_fval = f(xk + pk * 0.5**(-bktrit))
+                break
+            else:
+                # Line search failed to find a better solution.
+                msg = "Warning: " + _status_message['pr_loss']
+                return terminate(2, msg)
 
         update = alphak * pk
         xk += update        # upcast if necessary

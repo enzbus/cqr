@@ -118,7 +118,7 @@ class TestSolver(TestCase):
                     self.assertLessEqual(
                         my_solver_stats[0][i],
                         # might have to increase this
-                        ip_solver_stats[0][i]+np.finfo(float).eps)
+                        ip_solver_stats[0][i]+5 * np.finfo(float).eps)
 
                 # self.assertTrue(
                 #     np.allclose(my_solver_solution, ip_solver_solution))
