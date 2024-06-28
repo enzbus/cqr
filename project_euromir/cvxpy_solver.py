@@ -67,6 +67,8 @@ if NEWTON_CG:
     # newton cg
     from project_euromir.solver_cg import solve
 
+# from project_euromir.solver_dense_solve import solve
+
 
 class Solver(ConicSolver):
     """CVXPY solver interface.
@@ -90,6 +92,8 @@ class Solver(ConicSolver):
         x_orig, y_orig, s_orig = solve(
             matrix=data['A'], b=data['b'], c=data['c'], zero=data['dims'].zero,
             nonneg=data['dims'].nonneg)
+
+        # breakpoint()
 
         return {
             'primal_val': np.dot(x_orig, data['c']), 'x': x_orig, 'y': y_orig,

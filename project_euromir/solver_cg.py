@@ -52,6 +52,8 @@ DEBUG = False
 if DEBUG:
     import matplotlib.pyplot as plt
 
+QR_PRESOLVE = False
+
 
 def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
     "Main function."
@@ -62,12 +64,20 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
     assert matrix.shape == (m, n)
     assert zero + nonneg == m
 
-    # equilibration
-    d, e, sigma, rho, matrix_transf, b_transf, c_transf = \
-    equilibrate.hsde_ruiz_equilibration(
-            matrix, b, c, dimensions={
-                'zero': zero, 'nonneg': nonneg, 'second_order': ()},
-            max_iters=25)
+    if QR_PRESOLVE:
+        q, r = np.linalg.qr(np.vstack([matrix.todense(), c.reshape((1, n))]))
+        matrix_transf = q[:-1].A
+        c_transf = q[-1].A1
+        sigma = np.linalg.norm(b) / np.mean(np.linalg.norm(matrix_transf, axis=1))
+        b_transf = b/sigma
+
+    else:
+        # equilibration
+        d, e, sigma, rho, matrix_transf, b_transf, c_transf = \
+        equilibrate.hsde_ruiz_equilibration(
+                matrix, b, c, dimensions={
+                    'zero': zero, 'nonneg': nonneg, 'second_order': ()},
+                max_iters=25)
 
     # temporary, build sparse Q
     Q = sp.sparse.bmat([
@@ -75,6 +85,8 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
         [-matrix_transf, None, b_transf.reshape(m, 1)],
         [-c_transf.reshape(1, n), -b_transf.reshape(1, m), None],
         ]).tocsc()
+
+    # breakpoint()
 
     if not NOHSDE:
 
@@ -143,11 +155,12 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
         eps=_epsilon, # unused
         maxiter=10000,
         # max_cg_iters=100,
-        disp=1,
+        disp=99,
         return_all=False,
-        c1=1e-4, c2=0.9)
+        c1=1e-4, c2=0.1)
     # breakpoint()
     print(f'NEWTON-CG took {time.time() - start:.3f} seconds')
+    print(f'LOSS {separated_loss(result["x"]):.2e}')
 
     if not NOHSDE:
     # extract result
@@ -162,13 +175,10 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
     # u /= u[-1]
     v = Q @ u
 
-    u, v = refine(
-        z=u-v, matrix=matrix_transf, b=b_transf, c=c_transf, zero=zero,
-        nonneg=nonneg)
-
-    # u, v = refine(
-    #     z=u-v, matrix=matrix_transf, b=b_transf, c=c_transf, zero=zero,
-    #     nonneg=nonneg)
+    for _ in range(5): #n + m):
+        u, v = refine(
+            z=u-v, matrix=matrix_transf, b=b_transf, c=c_transf, zero=zero,
+            nonneg=nonneg)#, max_iters=30)
 
     # Transform back into problem format
     u1, u2, u3 = u[:n], u[n:n+m], u[-1]
@@ -182,9 +192,29 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
     y = u2 / u3
     s = v2 / u3
 
-    # invert Ruiz scaling, copied from other repo
-    x_orig =  e * x / sigma
-    y_orig = d * y / rho
-    s_orig = (s/d) / sigma
+    if QR_PRESOLVE:
+        x_orig = np.linalg.solve(r, x) * sigma
+        y_orig = y
+        s_orig = s * sigma
+
+    else:
+        # invert Ruiz scaling, copied from other repo
+        x_orig =  e * x / sigma
+        y_orig = d * y / rho
+        s_orig = (s/d) / sigma
+
+    u = np.concatenate([x_orig, y_orig, [1.]])
+    v = np.zeros_like(u)
+    v[n:-1] = s_orig
+
+    # for _ in range(5):#n + m):
+    #     u, v = refine(
+    #         z=u-v, matrix=matrix, b=b, c=c, zero=zero,
+    #         nonneg=nonneg)#, max_iters=30)
+
+    # # Apply HSDE scaling
+    # x = u1 / u3
+    # y = u2 / u3
+    # s = v2 / u3
 
     return x_orig, y_orig, s_orig
