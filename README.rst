@@ -171,9 +171,11 @@ We will provide a CVXPY and raw Python interface as part of our packages. The
 single C function the user interacts with will be also documented, for usage
 from other runtime environments. In fact, our preview interface already works,
 and that's what we're using in our testsuite. If you installed as described
-above you can use the solver on *simple* LPs like this. From our tests you
-should already observe higher numerical accuracy on the solution than with any
-other solver.
+above you can already test the solver on linear programs of moderate size,
+we're testing so far up to a 2 or 3 hundreds variables. From our tests you
+should already observe higher numerical accuracy on the constraints,
+which are smaller or close to the machine precision of double arithmetics (2.2e-16),
+and/or lower objective value on the solution, than with any other numerical solver
 
 .. code-block:: python
 
@@ -181,11 +183,12 @@ other solver.
     import cvxpy as cp
     from project_euromir import Solver
 
-    A = np.random.randn(20, 10)
-    b = np.random.randn(20)
-    x = cp.Variable(10)
+    m, n = 100, 50
+    A = np.random.randn(m, n)
+    b = np.random.randn(m)
+    x = cp.Variable(n)
     objective = cp.Minimize(cp.norm1(A @ x - b))
-    constraints = [cp.abs(x) <= .25]
+    constraints = [cp.abs(x) <= .05]
     cp.Problem(objective, constraints).solve(solver=Solver())
 
 
