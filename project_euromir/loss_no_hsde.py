@@ -93,7 +93,7 @@ def loss_gradient(xy, m, n, zero, matrix, b, c, workspace):
 
     return loss, workspace['gradient']
 
-def hessian(xy, m, n, zero, matrix, b, c, workspace):
+def hessian(xy, m, n, zero, matrix, b, c, workspace, regularizer = 0.):
     """Hessian to use inside LBFGS loop."""
 
     locals().update(workspace)
@@ -136,7 +136,7 @@ def hessian(xy, m, n, zero, matrix, b, c, workspace):
         constants = np.concatenate([c, b])
         result[:] += constants * (2 * (constants @ dxdy))
 
-        return result
+        return result + regularizer * dxdy
 
     return sp.sparse.linalg.LinearOperator(
         shape=(len(xy), len(xy)),

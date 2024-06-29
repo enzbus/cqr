@@ -39,11 +39,11 @@ from project_euromir import equilibrate
 from project_euromir.lbfgs import minimize_lbfgs
 
 if not NOHSDE:
-    from project_euromir.loss import (common_computation_main,
+    from project_euromir.loss import (_densify, common_computation_main,
                                       create_workspace_main, gradient, hessian,
                                       loss)
 else:
-    from project_euromir.loss_no_hsde import (create_workspace,  loss_gradient, hessian)
+    from project_euromir.loss_no_hsde import (create_workspace,  loss_gradient, hessian, _densify)
 
 from project_euromir.newton_cg import _epsilon, _minimize_newtoncg
 from project_euromir.refinement import refine
@@ -52,13 +52,22 @@ DEBUG = False
 if DEBUG:
     import matplotlib.pyplot as plt
 
-QR_PRESOLVE = False
+QR_PRESOLVE = True
 QR_PRESOLVE_AFTER = False
 REFINE = True
 
+CG_REGULARIZER = 0.
+
+SCIPY_EXPERIMENTS = False
+
+HESSIAN_COUNTER = {'ba': 0}
 
 def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
     "Main function."
+
+    print(
+        f'PROBLEM SIZE: m={len(b)}, n={len(c)}, zero={zero},'
+        f' nonneg={nonneg}, nnz(matrix)={matrix.nnz}')
 
     # some shape checking
     n = len(c)
@@ -131,7 +140,17 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
 
         def separated_hessian(xy):
             return hessian(
-                xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf, c=c_transf, workspace=workspace)
+                xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf, c=c_transf, workspace=workspace, regularizer=CG_REGULARIZER)
+
+        def dense_hessian(xy):
+            return _densify(hessian(
+                xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf, c=c_transf, workspace=workspace, regularizer=1e-10))
+
+        def hessp(xy, var):
+            # breakpoint()
+            HESSIAN_COUNTER['ba'] += 1
+            H = separated_hessian(xy)
+            return H @ var
 
         x_0 = np.zeros(n+m)
 
@@ -148,30 +167,71 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
         #     # current['x'] /= current.x[-1]
         # old_x[:] = current.x
 
+    # import matplotlib.pyplot as plt
+    # all_losses = []
+    # def callback_plot(x):
+    #     all_losses.append(separated_loss(x))
+
     start = time.time()
     # call newton-CG, implementation from scipy with modified termination
     c_2 = 0.1
     for i in range(5):
-        result = _minimize_newtoncg(
-            fun=separated_loss,
-            x0=x_0,
-            args=(),
-            jac=separated_grad,
-            hess=separated_hessian,
-            hessp=None,
-            # callback=callback,
-            xtol=0., #1e-5,
-            eps=_epsilon, # unused
-            maxiter=10000,
-            # max_cg_iters=100,
-            disp=99,
-            return_all=False,
-            c1=1e-4, c2=c_2)
+        if not SCIPY_EXPERIMENTS:
+            result = _minimize_newtoncg(
+                fun=separated_loss,
+                x0=x_0,
+                args=(),
+                jac=separated_grad,
+                hess=separated_hessian,
+                hessp=None,
+                # callback=callback,
+                xtol=0., #1e-5,
+                eps=_epsilon, # unused
+                maxiter=10000,
+                # max_cg_iters=100,
+                disp=99,
+                return_all=False,
+                c1=1e-4, c2=c_2)
+            print(result)
+        else:
+            # NO, trust region (at least scipy implementations) don't work as
+            # well, I tried a bunch, only realistic competitor is l-bfgs
+            #global HESSIAN_COUNTER
+            HESSIAN_COUNTER['ba'] = 0
+            result = sp.optimize.minimize(
+                fun=separated_loss,
+                x0=x_0,
+                args=(),
+                jac=separated_grad,
+                # hess=dense_hessian, # for dogleg
+                #callback=lambda x: print(separated_loss(x)),
+                callback=callback_plot,
+                hessp=hessp, # for trust-ncg
+                options = {
+                'initial_trust_radius': .01,
+                'max_trust_radius': .1,
+                'eta': 0., 'gtol': 1e-16,
+                'ftol': 0.,
+                'gtol': 0.,
+                'maxfun': 1e10,
+                'maxiter': 1e10,
+                'maxls': 100,
+                'maxcor': 20,
+                },
+                # method='dogleg',
+                # method='trust-ncg',
+                method='l-bfgs-b',
+                )
+            print("NUMBER HESSIAN MATMULS", HESSIAN_COUNTER['ba'])
+            print(result)
+        # plt.plot(all_losses)
+        # plt.yscale('log')
+        # plt.show()
         # breakpoint()
         print(f'NEWTON-CG took {time.time() - start:.3f} seconds')
         loss_after_cg = separated_loss(result["x"])
         print(f'LOSS {loss_after_cg:.2e}')
-        if loss_after_cg < 1e-20:
+        if loss_after_cg < 1e-25:
             break
         x_0 = result['x']
         # breakpoint()

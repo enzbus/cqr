@@ -12,7 +12,7 @@ from scipy.optimize._linesearch import (LineSearchWarning, line_search_wolfe1,
                                         line_search_wolfe2)
 from scipy.sparse.linalg import LinearOperator
 
-ENZO_MODIFIED_MULTIPLIER = 1e-16 # in original it was 3.
+ENZO_MODIFIED_MULTIPLIER = 1e-8 # in original it was 3.
 
 _epsilon = sqrt(np.finfo(float).eps)
 
@@ -368,10 +368,12 @@ def _minimize_newtoncg(fun, x0, args=(), jac=None, hess=None, hessp=None,
             # check curvature
             Ap = asarray(Ap).squeeze()  # get rid of matrices...
             curv = np.dot(psupi, Ap)
-            if 0 <= curv <= ENZO_MODIFIED_MULTIPLIER * float64eps:
+            if 0 <= curv <= ENZO_MODIFIED_MULTIPLIER * dri0:
                 # print(f'iter {k}, breaking CG loop at cgiter {k2} with curv {curv:.2e}')
                 break
             elif curv < 0:
+                print('NEGATIVE CURVATURE CLAUSE TRIGGERED!!!!')
+                breakpoint()
                 if (i > 0):
                     break
                 else:
@@ -402,8 +404,8 @@ def _minimize_newtoncg(fun, x0, args=(), jac=None, hess=None, hessp=None,
         except _LineSearchError:
             print('ENTERING FALL-BACK BACKTRACKING')
             # ENZO: fallback to back-tracking
-            for bktrit in range(50):
-                if f(xk) < 1e-20:
+            for bktrit in range(100):
+                if f(xk) < 1e-25:
                     continue # we want to go to the else clause
                 if f(xk + pk * 0.5**(-bktrit)) < f(xk):
                     alphak = 0.5**(-bktrit)
