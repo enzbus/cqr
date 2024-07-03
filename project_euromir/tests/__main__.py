@@ -31,6 +31,7 @@
 import logging
 from unittest import main
 
+from .test_direction_calculator import TestDirectionCalculator
 from .test_equilibrate import TestEquilibrate
 from .test_lbfgs import TestLBFGS
 from .test_line_search import TestLineSearch
