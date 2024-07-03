@@ -235,7 +235,7 @@ def approx_fhess_p(x0, p, fprime, epsilon, *args):
 def _minimize_newtoncg(fun, x0, args=(), jac=None, hess=None, hessp=None,
                        callback=None, xtol=1e-5, eps=_epsilon, maxiter=None,
                        disp=False, return_all=False, c1=1e-4, c2=0.9,
-                       max_cg_iters=None, **unknown_options):
+                       max_cg_iters=None, scaler_function = None, **unknown_options):
     """Minimization of scalar function of one or more variables using the
     Newton-CG algorithm.
 
@@ -337,9 +337,19 @@ def _minimize_newtoncg(fun, x0, args=(), jac=None, hess=None, hessp=None,
         # Compute a search direction pk by applying the CG method to
         #  del2 f(xk) p = - grad f(xk) starting from 0.
         b = -fprime(xk)
+
+        ###
+        # Enzo: plug scaler here, cicle below only uses local variables
+        ###
+        scaler = scaler_function(xk) if scaler_function is not None else None
+        b_orig = np.copy(b)
+        if scaler is not None:
+            b = scaler.T @ b
+
         maggrad = np.linalg.norm(b, ord=1)
         eta = min(0.5, math.sqrt(maggrad))
         termcond = eta * maggrad
+
         xsupi = zeros(len(x0), dtype=x0.dtype)
         ri = -b
         psupi = -ri
@@ -358,13 +368,18 @@ def _minimize_newtoncg(fun, x0, args=(), jac=None, hess=None, hessp=None,
             if fhess is None:
                 if fhess_p is None:
                     Ap = approx_fhess_p(xk, psupi, fprime, epsilon)
+                    raise Exception
                 else:
-                    Ap = fhess_p(xk, psupi, *args)
+                    if scaler is not None:
+                        Ap = scaler.T @ fhess_p(xk, scaler @ psupi, *args)
+                    else:
+                        Ap = fhess_p(xk, psupi, *args)
                     hcalls += 1
             else:
                 # hess was supplied as a callable or hessian update strategy, so
                 # A is a dense numpy array or sparse matrix
                 Ap = A.dot(psupi)
+                raise Exception
             # check curvature
             Ap = asarray(Ap).squeeze()  # get rid of matrices...
             curv = np.dot(psupi, Ap)
@@ -394,8 +409,14 @@ def _minimize_newtoncg(fun, x0, args=(), jac=None, hess=None, hessp=None,
                   "positive definite.")
             return terminate(3, msg)
 
+        ###
+        # Last part of scaling correction
+        ###
+        if scaler is not None:
+            xsupi = scaler @ xsupi
+
         pk = xsupi  # search direction is solution to system.
-        gfk = -b    # gradient at xk
+        gfk = -b_orig    # gradient at xk
 
         try:
             alphak, _, _, old_fval, old_old_fval, _ = \

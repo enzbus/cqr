@@ -52,13 +52,18 @@ DEBUG = False
 if DEBUG:
     import matplotlib.pyplot as plt
 
-QR_PRESOLVE = True
+QR_PRESOLVE = False
 QR_PRESOLVE_AFTER = False
 REFINE = True
 
 CG_REGULARIZER = 0.
 
 SCIPY_EXPERIMENTS = False
+
+DO_DIAGONAL_SCALING = True # can reduce number of iters, even with constant scaling!
+# it's slower however overall but I think it's not realistic, scaling is blas level 2 with simd
+# even if we do diag plus rank 1, matmuls by csc are less efficient; also can
+# do scaling update during iters...
 
 HESSIAN_COUNTER = {'ba': 0}
 
@@ -172,6 +177,34 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
     # def callback_plot(x):
     #     all_losses.append(separated_loss(x))
 
+    if DO_DIAGONAL_SCALING: # next step is diag plus rank one :)
+        # assert not QR_PRESOLVE
+        assert NOHSDE
+        # assert not QR_PRESOLVE_AFTER
+
+        scaler = np.concatenate([c_transf**2, b_transf**2])
+        scaler[n+zero:] += 0.5
+        if hasattr(matrix_transf, 'todense'):
+            scaler[n:] += sp.sparse.linalg.norm(matrix_transf, axis=1)**2
+        else:
+            scaler[n:] += np.linalg.norm(matrix_transf, axis=1)**2
+        s_mask = np.ones(m)
+        s_mask[zero:] = 0.5
+
+        # can be made much more efficient... could even update at each iter with active set
+        if hasattr(matrix_transf, 'todense'):
+            scaler[:n] += sp.sparse.linalg.norm(
+                matrix_transf.T @ sp.sparse.diags(s_mask) @ matrix_transf, axis=1)**2
+        else:
+            scaler[:n] += np.linalg.norm(
+                matrix_transf.T @ np.diag(s_mask) @ matrix_transf, axis=1)**2
+        scaler *= 2
+        scaler += 1e-8
+
+        scaler_function = lambda x: sp.sparse.diags(1. / np.sqrt(scaler))
+    else:
+        scaler_function = None
+
     start = time.time()
     # call newton-CG, implementation from scipy with modified termination
     c_2 = 0.1
@@ -191,6 +224,7 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
                 # max_cg_iters=100,
                 disp=99,
                 return_all=False,
+                scaler_function =  scaler_function,
                 c1=1e-4, c2=c_2)
             print(result)
         else:
