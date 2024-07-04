@@ -35,7 +35,7 @@ import scipy as sp
 
 logger = logging.getLogger(__name__)
 
-def _densify(linear_operator):
+def _densify(linear_operator):  # TODO: move in utils.py
     """Create Numpy 2-d array from a sparse LinearOperator."""
     assert linear_operator.shape[0] == linear_operator.shape[1]
     result = np.eye(linear_operator.shape[0], dtype=float)

@@ -31,8 +31,6 @@
 import numpy as np
 import scipy as sp
 
-HSDE_SCALING_PENALTY = False
-
 ###
 # The loss function used in the main loop
 ###

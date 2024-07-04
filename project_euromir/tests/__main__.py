@@ -28,6 +28,8 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """Unit tests runner."""
 
+# pylint: disable=unused-import
+
 import logging
 from unittest import main
 
@@ -37,6 +39,7 @@ from .test_lbfgs import TestLBFGS
 from .test_line_search import TestLineSearch
 from .test_line_searcher import TestLineSearcher
 from .test_linear_algebra import TestLinearAlgebra
+from .test_loss import TestLoss
 from .test_solver import TestSolver
 
 if __name__ == '__main__':

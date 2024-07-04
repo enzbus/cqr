@@ -91,7 +91,7 @@ class TestLineSearcher(TestCase):
                             direction=direction(point, gradient))
                         self.assertLessEqual(loss, oldloss)
 
-if __name__ == '__main__':
+if __name__ == '__main__': # pragma: no cover
     from unittest import main
     logging.basicConfig(level='INFO')
     main()

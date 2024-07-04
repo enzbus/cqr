@@ -73,7 +73,7 @@ class TestDirectionCalculator(TestCase):
                     current_point=current_point,
                     current_gradient=current_gradient)
                 # since function is non cvx
-                if current_gradient @ direction >= 0:
+                if current_gradient @ direction >= 0: # pragma: no cover
                     logger.info('Bad direction, fallback to steepest descent.')
                     direction = -current_gradient
                 current_point, current_loss, current_gradient = \
@@ -81,6 +81,6 @@ class TestDirectionCalculator(TestCase):
                     current_loss=current_loss,
                     current_gradient=current_gradient, direction=direction)
 
-if __name__ == '__main__':
+if __name__ == '__main__': # pragma: no cover
     logging.basicConfig(level='INFO')
     main()
