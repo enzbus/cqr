@@ -56,7 +56,9 @@ except ImportError as exc: # pragma: no cover
 # from project_euromir import solve
 
 BFGS = False
-NEWTON_CG = not BFGS
+NEWTON_CG = False
+NEW = True
+assert (BFGS + NEWTON_CG + NEW) == 1
 
 if BFGS:
     # without hsde
@@ -66,6 +68,11 @@ if NEWTON_CG:
 
     # newton cg
     from project_euromir.solver_cg import solve
+
+if NEW:
+
+    # reimplementation of newton_cg outside of scipy
+    from project_euromir.solver_new import solve
 
 # from project_euromir.solver_dense_solve import solve
 
