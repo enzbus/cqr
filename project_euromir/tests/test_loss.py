@@ -38,8 +38,9 @@ import scipy as sp
 from scipy.optimize import check_grad
 
 from project_euromir.direction_calculator import _densify
-from project_euromir.loss_no_hsde import (create_workspace, hessian,
-                                          loss_gradient)
+from project_euromir.loss_no_hsde import (Dresidual, _densify_also_nonsquare,
+                                          create_workspace, hessian,
+                                          loss_gradient, residual)
 
 
 class TestLoss(TestCase):
@@ -85,6 +86,25 @@ class TestLoss(TestCase):
                 xy, m=cls.m, n=cls.n, zero=cls.zero, matrix=cls.matrix,
                 b=cls.b, c=cls.c, workspace=cls.workspace))
 
+    @classmethod
+    def _residual(cls, xy):
+        """Wrapped call to the residual function."""
+        return np.copy(residual(
+            xy, cls.m, cls.n, cls.zero, cls.matrix, cls.b, cls.c))
+
+    @classmethod
+    def _dresidual_linop(cls, xy):
+        """Wrapped call to the dresidual function, as LinearOperator."""
+        return Dresidual(
+            xy, cls.m, cls.n, cls.zero, cls.matrix, cls.b, cls.c)
+
+    @classmethod
+    def _hessian_from_dresidual(cls, xy):
+        dres = cls._dresidual_linop(xy)
+        return sp.sparse.linalg.LinearOperator(
+            shape=(cls.n+cls.m, cls.n+cls.m),
+            matvec=lambda dxy: dres.T @ (dres @ (dxy * 2.)))
+
     def test_gradient(self):
         """Test that the gradient is numerically accurate."""
         for seed in range(100):
@@ -94,13 +114,50 @@ class TestLoss(TestCase):
             self.assertLessEqual(err, 6e-5)
 
     def test_hessian(self):
-        """Test that the hessian is numerically accurate."""
+        """Test that the Hessian is numerically accurate."""
         for seed in range(100):
             np.random.seed(seed)
             err = check_grad(
                 self._grad, self._dense_hessian,
                 np.random.randn(self.n+self.m))
             self.assertLessEqual(err, 6e-5)
+
+    def test_loss_residual(self):
+        """Test that loss and residual functions are consistent."""
+        for seed in range(100):
+            np.random.seed(seed)
+            xy = np.random.randn(self.n+self.m)
+            self.assertTrue(
+                np.isclose(self._loss(xy),
+                    np.linalg.norm(self._residual(xy))**2))
+
+    def test_dr_drt(self):
+        """Test that DR and DR^T are consistent."""
+        for seed in range(100):
+            np.random.seed(seed)
+            xy = np.random.randn(self.n+self.m)
+            dres = _densify_also_nonsquare(self._dresidual_linop(xy))
+            dres_t = _densify_also_nonsquare(self._dresidual_linop(xy).T)
+            self.assertTrue(np.allclose(dres.T, dres_t))
+
+    def test_dresidual_gradient(self):
+        """Test that (D)residual and gradient are consistent."""
+        for seed in range(100):
+            np.random.seed(seed)
+            xy = np.random.randn(self.n+self.m)
+            grad = self._grad(xy)
+            newgrad = 2 * (self._dresidual_linop(xy).T @ self._residual(xy))
+            self.assertTrue(np.allclose(grad, newgrad))
+
+    def test_dresidual_hessian(self):
+        """Test that Dresidual and Hessian are consistent."""
+        for seed in range(100):
+            np.random.seed(seed)
+            xy = np.random.randn(self.n+self.m)
+            hess = self._dense_hessian(xy)
+            hess_rebuilt = _densify_also_nonsquare(
+                self._hessian_from_dresidual(xy))
+            self.assertTrue(np.allclose(hess, hess_rebuilt))
 
 
 if __name__ == '__main__': # pragma: no cover

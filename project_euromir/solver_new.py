@@ -38,13 +38,15 @@ NOHSDE = True
 
 from project_euromir import equilibrate
 from project_euromir.direction_calculator import (CGNewton, DenseNewton,
+                                                  LSMRLevenbergMarquardt,
+                                                  LSQRLevenbergMarquardt,
                                                   WarmStartedCGNewton,
                                                   nocedal_wright_termination)
 from project_euromir.line_searcher import (BacktrackingLineSearcher,
                                            LogSpaceLineSearcher,
                                            ScipyLineSearcher)
-from project_euromir.loss_no_hsde import (create_workspace, hessian,
-                                          loss_gradient)
+from project_euromir.loss_no_hsde import (Dresidual, create_workspace, hessian,
+                                          loss_gradient, residual)
 from project_euromir.refinement import refine
 
 logger = logging.getLogger(__name__)
@@ -92,18 +94,28 @@ def solve(matrix, b, c, zero, nonneg,
             xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf,
             c=c_transf, workspace=workspace)
 
+    def _local_residual(xy):
+        return residual(
+            xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf,
+            c=c_transf)
+
+    def _local_derivative_residual(xy):
+        return Dresidual(
+            xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf,
+            c=c_transf)
+
     xy = np.zeros(n+m)
     loss_xy = _local_loss(xy)
     grad_xy = _local_grad(xy)
 
-    line_searcher = LogSpaceLineSearcher(
-        loss_function=_local_loss,
-        min_step=1e-12,
-        #gradient_function=_local_grad,
-        #c_1=1e-4,
-        #c_2=0.9,
-        #maxiter=100,
-        )
+    # line_searcher = LogSpaceLineSearcher(
+    #     loss_function=_local_loss,
+    #     min_step=1e-12,
+    #     #gradient_function=_local_grad,
+    #     #c_1=1e-4,
+    #     #c_2=0.9,
+    #     #maxiter=100,
+    #     )
 
     line_searcher = BacktrackingLineSearcher(
         # Scipy searcher is not stable enough, breaks on numerical errors
@@ -111,11 +123,23 @@ def solve(matrix, b, c, zero, nonneg,
         loss_function=_local_loss,
         max_iters=1000)
 
-    direction_calculator = CGNewton(
-        # warm start causes issues if null space changes b/w iterations
-        hessian_function=_local_hessian,
-        rtol_termination=lambda x, g: min(0.5, np.linalg.norm(g)),
-        max_cg_iters=None,
+    # direction_calculator = CGNewton(
+    #     # warm start causes issues if null space changes b/w iterations
+    #     hessian_function=_local_hessian,
+    #     rtol_termination=lambda x, g: min(0.5, np.linalg.norm(g)),
+    #     max_cg_iters=None,
+    #     )
+
+    # direction_calculator = LSQRLevenbergMarquardt(
+    #     residual_function=_local_residual,
+    #     derivative_residual_function=_local_derivative_residual,
+    #     )
+
+    # LSMR seems better than LSQR and CG, however need to count matrix evals
+    direction_calculator = LSMRLevenbergMarquardt(
+        residual_function=_local_residual,
+        derivative_residual_function=_local_derivative_residual,
+        # warm_start=True, # also doesn't work with warm start
         )
 
     # direction_calculator = DenseNewton( #WarmStartedCGNewton(
@@ -157,7 +181,7 @@ def solve(matrix, b, c, zero, nonneg,
             'Perhaps the program is not primal or dual feasible. '
             'Certificates not yet implemented.')
 
-    print('Newton-CG loop took %.2e seconds', time.time() - _start )
+    print('Newton-CG loop took %.2e seconds' % (time.time() - _start ))
 
     # create HSDE variables for refinement
     u = np.empty(n+m+1, dtype=float)

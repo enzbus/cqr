@@ -217,3 +217,67 @@ class WarmStartedCGNewton(CGNewton):
             current_point=current_point, current_gradient=current_gradient)
         self._x0 = direction
         return direction
+
+class LSQRLevenbergMarquardt(DirectionCalculator):
+    """Calculate descent direction using LSQR-LM."""
+
+    _x0 = None # overwritten in derived class(es)
+
+    def __init__(
+            self, residual_function, derivative_residual_function,
+            warm_start=False):
+        """Initialize with functions to calculate residual and derivative.
+
+        :param residual_function:
+        :type residual_function: callable
+        :param derivative_residual_function:
+        :type derivative_residual_function: callable
+        """
+        self._residual_function = residual_function
+        self._derivative_residual_function = derivative_residual_function
+        self._warm_start = warm_start
+
+    def _inner_function(self, derivative_residual, residual, current_gradient):
+        """In order to replace with LSMR below."""
+        result = sp.sparse.linalg.lsqr(
+            derivative_residual, -residual, x0=self._x0, calc_var=False,
+            atol=min(0.5, np.linalg.norm(current_gradient)), btol=0.)
+        return result[0], result[2] # solution, number of iterations
+
+    def get_direction(
+        self, current_point: np.array, current_gradient: np.array) -> np.array:
+        """Calculate descent direction at current point.
+
+        :param current_point: Current point.
+        :type current_point: np.array
+        :param current_gradient: Current gradient.
+        :type current_gradient: np.array
+
+        :returns: Descent direction.
+        :rtype: np.array
+        """
+        residual = self._residual_function(current_point)
+        derivative_residual = self._derivative_residual_function(current_point)
+        solution, n_iters = self._inner_function(
+            derivative_residual, residual, current_gradient)
+        logger.info(
+            '%s calculated direction with error norm %.2e, while the input'
+            ' gradient had norm %.2e, in %d iterations',
+            self.__class__.__name__,
+            np.linalg.norm(derivative_residual @ solution + residual),
+            np.linalg.norm(current_gradient), n_iters)
+        if self._warm_start:
+            # LSQR fails with warm-start, somehow gets stuck
+            # on directions of very small norm but not good descent
+            self._x0 = solution
+        return solution
+
+class LSMRLevenbergMarquardt(LSQRLevenbergMarquardt):
+    """Calculate descent direction using LSMR-LM."""
+
+    def _inner_function(self, derivative_residual, residual, current_gradient):
+        """Just the call to the iterative solver."""
+        result = sp.sparse.linalg.lsmr(
+            derivative_residual, -residual, x0=self._x0,
+            atol=min(0.5, np.linalg.norm(current_gradient)), btol=0.)
+        return result[0], result[2] # solution, number of iterations

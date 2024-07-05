@@ -161,7 +161,7 @@ three platforms. Then:
 
 .. code-block:: bash
 
-    pip install -U https://github.com/enzbus/project_euromir
+    pip install --update --force-reinstall git+https://github.com/enzbus/project_euromir
 
 
 Usage
@@ -172,10 +172,22 @@ single C function the user interacts with will be also documented, for usage
 from other runtime environments. In fact, our preview interface already works,
 and that's what we're using in our testsuite. If you installed as described
 above you can already test the solver on linear programs of moderate size,
-we're testing so far up to a 2 or 3 hundreds variables. From our tests you
+we're testing so far up to a few hundreds variables. From our tests you
 should already observe higher numerical accuracy on the constraints,
 which are smaller or close to the machine precision of double arithmetics (2.2e-16),
-and/or lower objective value on the solution, than with any other numerical solver
+and/or lower objective value on the solution, than with any other numerical solver.
+
+For example, on this :math:`\ell_1` regression linear program you can see better
+constraints satisfaction than with a state-of-the-art interior point solver. If
+you run with a solver with exact theoretical satisfaction of the optimality
+conditions, like ``GLPK`` for linear programs, you will see about
+the same numerical error on the constraints, but better objective value at
+optimality, with our prototype. Keep in mind that our solver is **factorization
+free**; it uses only iterative linear algebra methods, with linear algorithmic
+complexity and linear memory usage. As such, it is fully parallelizable without
+loss of accuracy. Most of the logic used is currently implemented in Python, as
+we finalize the algorithmic details, so it will run slower than fully compiled
+codes.
 
 .. code-block:: python
 
@@ -183,12 +195,28 @@ and/or lower objective value on the solution, than with any other numerical solv
     import cvxpy as cp
     from project_euromir import Solver
 
-    m, n = 100, 50
+    m, n = 200, 100
+    np.random.seed(0)
     A = np.random.randn(m, n)
     b = np.random.randn(m)
     x = cp.Variable(n)
     objective = cp.Minimize(cp.norm1(A @ x - b))
     constraints = [cp.abs(x) <= .05]
+
     cp.Problem(objective, constraints).solve(solver=Solver())
+    print('Project EuroMir')
+    print(
+        'constraints violation infinity norm: %.2e' %
+        np.max(np.abs(constraints[0].violation())))
+    print('Objective value: %.16e' % objective.value)
 
+    cp.Problem(objective, constraints).solve(
+        solver='CLARABEL', max_iter=1000, tol_gap_abs=1e-64, tol_gap_rel=1e-64,
+        tol_feas=1e-64, tol_infeas_abs=1e-64, tol_infeas_rel=1e-64,
+        tol_ktratio=1e-64)
 
+    print('State-of-the-art interior point solver, maxing out accuracy:')
+    print(
+        'constraints violation infinity norm: %.2e' %
+        np.max(np.abs(constraints[0].violation())))
+    print('Objective value: %.16e' % objective.value)

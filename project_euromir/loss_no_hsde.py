@@ -94,8 +94,6 @@ def loss_gradient(xy, m, n, zero, matrix, b, c, workspace):
 def hessian(xy, m, n, zero, matrix, b, c, workspace, regularizer = 0.):
     """Hessian to use inside LBFGS loop."""
 
-    locals().update(workspace)
-
     x = xy[:n]
     y = xy[n:]
 
@@ -141,16 +139,103 @@ def hessian(xy, m, n, zero, matrix, b, c, workspace, regularizer = 0.):
         matvec=_matvec
     )
 
-def _densify(linear_operator):
-    assert linear_operator.shape[0] == linear_operator.shape[1]
+def residual(xy, m, n, zero, matrix, b, c):
+    """Residual function to use L-M approach instead."""
+
+    x = xy[:n]
+    y = xy[n:]
+
+    # zero cone dual variable is unconstrained
+    y_error = np.minimum(y[zero:], 0.)
+
+    # this must be all zeros
+    dual_residual = matrix.T @ y + c
+
+    # slacks
+    s = -matrix @ x + b
+
+    # slacks for zero cone must be zero
+    s_error = np.copy(s)
+    s_error[zero:] = np.minimum(s[zero:], 0.)
+
+    # duality gap
+    gap = c.T @ x + b.T @ y
+
+    # build the full residual by concatenating residuals
+    res = np.empty(n + 2 * m - zero + 1, dtype=float)
+    res[:m-zero] = y_error
+    res[m-zero:m+n-zero] = dual_residual
+    res[-1-m:-1] = s_error
+    res[-1] = gap
+
+    return res
+
+def Dresidual(xy, m, n, zero, matrix, b, c):
+    """Linear operator to matrix multiply the residual derivative."""
+
+    x = xy[:n]
+    y = xy[n:]
+
+    # zero cone dual variable is unconstrained
+    y_mask = (y[zero:] <= 0.) * 1.
+
+    # slacks
+    s = -matrix @ x + b
+
+    # slacks for zero cone must be zero
+    s_mask = np.ones_like(s)
+    s_mask[zero:] = s[zero:] <= 0.
+
+    # concatenation of primal and dual costs
+    pridua = np.concatenate([c, b])
+
+    def _matvec(dxy):
+
+        # decompose direction
+        dx = dxy[:n]
+        dy = dxy[n:]
+
+        # compose result
+        dr = np.empty(n + 2 * m - zero + 1, dtype=float)
+        dr[:m-zero] = y_mask * dy[zero:]
+        dr[m-zero:m+n-zero] = matrix.T @ dy
+        dr[-1-m:-1] = s_mask * (-(matrix @ dx))
+        dr[-1] = pridua @ dxy
+
+        return dr
+
+    def _rmatvec(dr):
+
+        # decompose direction
+        dy_err = dr[:m-zero]
+        ddua_res = dr[m-zero:m+n-zero]
+        ds_err = dr[-1-m:-1]
+        dgap = dr[-1]
+
+        # compose result
+        dxy = np.zeros(n + m, dtype=float)
+        dxy[-(m-zero):] += y_mask * dy_err
+        dxy[-m:] += matrix @ ddua_res
+        dxy[:n] -= matrix.T @ (s_mask * ds_err)
+        dxy += dgap * pridua
+
+        return dxy
+
+    return sp.sparse.linalg.LinearOperator(
+        shape=(n + 2 * m - zero + 1, n+m),
+        matvec = _matvec,
+        rmatvec = _rmatvec)
+
+def _densify_also_nonsquare(linear_operator):
     result = np.empty(linear_operator.shape)
-    identity = np.eye(result.shape[0])
-    for i in range(len(identity)):
-        result[:, i] = linear_operator.matvec(identity[:, i])
+    for j in range(linear_operator.shape[1]):
+        e_j = np.zeros(linear_operator.shape[1])
+        e_j[j] = 1.
+        result[:, j] = linear_operator.matvec(e_j)
     return result
 
 
-if __name__ == '__main__':
+if __name__ == '__main__': # pragma: no cover
 
     from scipy.optimize import check_grad
 
@@ -173,7 +258,20 @@ if __name__ == '__main__':
         return np.copy(loss_gradient(xy, m, n, zero, matrix, b, c, wks)[1])
 
     def my_hessian(xy):
-        return _densify(hessian(xy, m, n, zero, matrix, b, c, wks))
+        return _densify_also_nonsquare(
+            hessian(xy, m, n, zero, matrix, b, c, wks))
+
+    def my_residual(xy):
+        return residual(xy, m, n, zero, matrix, b, c)
+
+    def my_Dresidual(xy):
+        return Dresidual(xy, m, n, zero, matrix, b, c)
+
+    def my_hessian_from_dresidual(xy):
+        DR = Dresidual(xy, m, n, zero, matrix, b, c)
+        return sp.sparse.linalg.LinearOperator(
+            (n+m, n+m),
+            matvec = lambda dxy: DR.T @ (DR @ (dxy * 2.)))
 
     print('\nCHECKING GRADIENT')
     for i in range(10):
@@ -182,3 +280,33 @@ if __name__ == '__main__':
     print('\nCHECKING HESSIAN')
     for i in range(10):
         print(check_grad(my_grad, my_hessian, np.random.randn(n+m)))
+
+    print('\nCHECKING LOSS AND RESIDUAL CONSISTENT')
+    for i in range(10):
+        xy = np.random.randn(n+m)
+        assert np.isclose(my_loss(xy), np.linalg.norm(my_residual(xy))**2)
+    print('\tOK!')
+
+    print('\nCHECKING DR and DR^T CONSISTENT')
+    for i in range(10):
+        xy = np.random.randn(n+m)
+        DR = _densify_also_nonsquare(my_Dresidual(xy))
+        DRT = _densify_also_nonsquare(my_Dresidual(xy).T)
+        assert np.allclose(DR.T, DRT)
+    print('\tOK!')
+
+    print('\nCHECKING (D)RESIDUAL AND GRADIENT CONSISTENT')
+    for i in range(10):
+        xy = np.random.randn(n+m)
+        grad = my_grad(xy)
+        newgrad = 2 * (my_Dresidual(xy).T @ my_residual(xy))
+        assert np.allclose(grad, newgrad)
+    print('\tOK!')
+
+    print('\nCHECKING DRESIDUAL AND HESSIAN CONSISTENT')
+    for i in range(10):
+        xy = np.random.randn(n+m)
+        hess = my_hessian(xy)
+        hess_rebuilt = _densify_also_nonsquare(my_hessian_from_dresidual(xy))
+        assert np.allclose(hess, hess_rebuilt)
+    print('\tOK!')
