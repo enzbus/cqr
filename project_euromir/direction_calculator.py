@@ -136,7 +136,8 @@ class CGNewton(DenseNewton):
 
     def __init__(
             self, hessian_function,
-            rtol_termination=nocedal_wright_termination, max_cg_iters=None):
+            rtol_termination=nocedal_wright_termination, max_cg_iters=None,
+            regularizer=0.):
         """Initialize with function to calculate Hessian.
 
         :param hessian_function: Function that returns the Hessian. We support
@@ -155,6 +156,7 @@ class CGNewton(DenseNewton):
         self._hessian_function = hessian_function
         self._rtol_termination = rtol_termination
         self._max_cg_iters = max_cg_iters
+        self._regularizer = regularizer
         super().__init__(hessian_function=hessian_function)
 
     def get_direction(
@@ -175,6 +177,12 @@ class CGNewton(DenseNewton):
             nonlocal iteration_counter
             iteration_counter += 1
         current_hessian = self._hessian_function(current_point)
+        if self._regularizer > 0.:
+            orig_hessian = current_hessian
+            current_hessian = sp.sparse.linalg.LinearOperator(
+                shape = current_hessian.shape,
+                matvec = lambda x: orig_hessian @ x + self._regularizer * x
+            )
         result = sp.sparse.linalg.cg(
             A=current_hessian,
             b=-current_gradient,
@@ -278,6 +286,7 @@ class LSMRLevenbergMarquardt(LSQRLevenbergMarquardt):
     def _inner_function(self, derivative_residual, residual, current_gradient):
         """Just the call to the iterative solver."""
         result = sp.sparse.linalg.lsmr(
-            derivative_residual, -residual, x0=self._x0,
+            derivative_residual, -residual, x0=self._x0, # damp=1e-06, # seems
+            # that up to about 1e-6 performance is not affected
             atol=min(0.5, np.linalg.norm(current_gradient)), btol=0.)
         return result[0], result[2] # solution, number of iterations

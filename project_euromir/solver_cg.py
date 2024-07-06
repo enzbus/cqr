@@ -52,7 +52,7 @@ DEBUG = False
 if DEBUG:
     import matplotlib.pyplot as plt
 
-QR_PRESOLVE = True
+QR_PRESOLVE = False
 QR_PRESOLVE_AFTER = False
 REFINE = True
 
@@ -94,6 +94,58 @@ def solve(matrix, b, c, zero, nonneg, lbfgs_memory=10):
                 [matrix_transf.todense(), c_transf.reshape((1, n))]))
             matrix_transf = q[:-1].A
             c_transf = q[-1].A1
+
+    if False: # test for woodbury approach
+        breakpoint()
+        import matplotlib.pyplot as plt
+        y_part_base = matrix_transf @ matrix_transf.T
+        # y_part = y_part.todense()
+        mask = (np.random.uniform(size=m) > 0 ) * 1.
+        mask[:zero] = 0.
+        y_part = y_part_base + np.diag(mask)
+        rand = np.random.randn(m)
+        nors = []
+        nors1 = []
+        nors2 = []
+        for i in range(100):
+            sol = sp.sparse.linalg.cg(y_part, rand, rtol=0., maxiter=i)[0]
+            sol1 = sp.sparse.linalg.lsqr(y_part, rand, atol=0., btol=0., iter_lim=i)[0]
+            sol2 = sp.sparse.linalg.lsmr(y_part, rand, atol=0., btol=0., maxiter=i)[0]
+            nors.append(np.linalg.norm(y_part @ sol - rand)**2)
+            nors1.append(np.linalg.norm(y_part @ sol1 - rand)**2)
+            nors2.append(np.linalg.norm(y_part @ sol2 - rand)**2)
+        sol1 = np.linalg.lstsq(y_part, rand, rcond=None)[0]
+        nors.append(np.linalg.norm(y_part @ sol1 - rand)**2)
+        plt.plot(nors)
+        plt.plot(nors1)
+        plt.plot(nors2)
+        print(nors[-1], nors[-2])
+        plt.yscale('log')
+
+        rand += np.random.randn(m) * 1e-8
+        # mask[7:8] = 1 - mask[7:8]
+        y_part = y_part_base + np.diag(mask)
+        start_point = np.copy(sol)
+        nors = []
+        nors1 = []
+        nors2 = []
+        for i in range(50):
+            sol = sp.sparse.linalg.cg(y_part, rand, x0=np.copy(start_point), rtol=0., maxiter=i)[0]
+            nors.append(np.linalg.norm(y_part @ sol - rand)**2)
+            sol1 = sp.sparse.linalg.lsqr(y_part, rand, x0=np.copy(start_point), atol=0., btol=0., iter_lim=i)[0]
+            sol2 = sp.sparse.linalg.lsmr(y_part, rand, x0=np.copy(start_point), atol=0., btol=0., maxiter=i)[0]
+            nors.append(np.linalg.norm(y_part @ sol - rand)**2)
+            nors1.append(np.linalg.norm(y_part @ sol1 - rand)**2)
+            nors2.append(np.linalg.norm(y_part @ sol2 - rand)**2)
+        plt.figure()
+        plt.plot(nors)
+        plt.plot(nors1)
+        plt.plot(nors2)
+        plt.yscale('log')
+        plt.show()
+        breakpoint()
+
+        raise Exception
 
     # temporary, build sparse Q
     Q = sp.sparse.bmat([

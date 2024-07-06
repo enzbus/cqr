@@ -35,6 +35,7 @@ import numpy as np
 import scipy as sp
 
 from project_euromir.direction_calculator import (CGNewton, DenseNewton,
+                                                  GradientDescent,
                                                   WarmStartedCGNewton)
 from project_euromir.line_searcher import BacktrackingLineSearcher
 
@@ -48,10 +49,9 @@ class TestDirectionCalculator(TestCase):
 
         line_searcher = BacktrackingLineSearcher(
             loss_function=sp.optimize.rosen)
-        direction_calculator = DenseNewton(
-            hessian_function=sp.optimize.rosen_hess)
 
         for direction_calculator in [
+            GradientDescent(),
             DenseNewton(hessian_function=sp.optimize.rosen_hess),
             CGNewton(hessian_function=sp.optimize.rosen_hess),
             WarmStartedCGNewton(hessian_function=sp.optimize.rosen_hess)]:

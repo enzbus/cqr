@@ -123,12 +123,13 @@ def solve(matrix, b, c, zero, nonneg,
         loss_function=_local_loss,
         max_iters=1000)
 
-    # direction_calculator = CGNewton(
-    #     # warm start causes issues if null space changes b/w iterations
-    #     hessian_function=_local_hessian,
-    #     rtol_termination=lambda x, g: min(0.5, np.linalg.norm(g)),
-    #     max_cg_iters=None,
-    #     )
+    direction_calculator = CGNewton(
+        # warm start causes issues if null space changes b/w iterations
+        hessian_function=_local_hessian,
+        rtol_termination=lambda x, g: min(0.5, np.linalg.norm(g)),
+        max_cg_iters=None,
+        # regularizer=1e-10, # it seems 1e-10 is best, but it's too sensitive to it :(
+        )
 
     # direction_calculator = LSQRLevenbergMarquardt(
     #     residual_function=_local_residual,
@@ -136,11 +137,11 @@ def solve(matrix, b, c, zero, nonneg,
     #     )
 
     # LSMR seems better than LSQR and CG, however need to count matrix evals
-    direction_calculator = LSMRLevenbergMarquardt(
-        residual_function=_local_residual,
-        derivative_residual_function=_local_derivative_residual,
-        # warm_start=True, # also doesn't work with warm start
-        )
+    # direction_calculator = LSMRLevenbergMarquardt(
+    #     residual_function=_local_residual,
+    #     derivative_residual_function=_local_derivative_residual,
+    #     # warm_start=True, # also doesn't work with warm start
+    #     )
 
     # direction_calculator = DenseNewton( #WarmStartedCGNewton(
     #     hessian_function=_local_hessian,
