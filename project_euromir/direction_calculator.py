@@ -137,7 +137,7 @@ class CGNewton(DenseNewton):
     def __init__(
             self, hessian_function,
             rtol_termination=nocedal_wright_termination, max_cg_iters=None,
-            regularizer=0.):
+            regularizer=0., minres=False):
         """Initialize with function to calculate Hessian.
 
         :param hessian_function: Function that returns the Hessian. We support
@@ -157,6 +157,7 @@ class CGNewton(DenseNewton):
         self._rtol_termination = rtol_termination
         self._max_cg_iters = max_cg_iters
         self._regularizer = regularizer
+        self._minres = minres
         super().__init__(hessian_function=hessian_function)
 
     def get_direction(
@@ -183,7 +184,7 @@ class CGNewton(DenseNewton):
                 shape = current_hessian.shape,
                 matvec = lambda x: orig_hessian @ x + self._regularizer * x
             )
-        result = sp.sparse.linalg.cg(
+        result = getattr(sp.sparse.linalg, 'minres' if self._minres else 'cg')(
             A=current_hessian,
             b=-current_gradient,
             x0=self._x0, # this is None in this class

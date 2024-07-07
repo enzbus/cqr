@@ -47,9 +47,12 @@ from project_euromir.line_searcher import (BacktrackingLineSearcher,
                                            ScipyLineSearcher)
 from project_euromir.loss_no_hsde import (Dresidual, create_workspace, hessian,
                                           loss_gradient, residual)
+from project_euromir.minamide import (MinamideTest, hessian_x_nogap,
+                                      hessian_y_nogap)
 from project_euromir.refinement import refine
 
 logger = logging.getLogger(__name__)
+
 
 def solve(matrix, b, c, zero, nonneg,
         # xy = None, # need to import logic for equilibration
@@ -94,6 +97,14 @@ def solve(matrix, b, c, zero, nonneg,
             xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf,
             c=c_transf, workspace=workspace)
 
+    def _local_hessian_x_nogap(x):
+        return hessian_x_nogap(
+            x, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf)
+
+    def _local_hessian_y_nogap(x):
+        return hessian_y_nogap(
+            x, m=m, n=n, zero=zero, matrix=matrix_transf)
+
     def _local_residual(xy):
         return residual(
             xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf,
@@ -123,12 +134,26 @@ def solve(matrix, b, c, zero, nonneg,
         loss_function=_local_loss,
         max_iters=1000)
 
+    direction_calculator = MinamideTest(
+        b=b_transf, c=c_transf, h_x_nogap=_local_hessian_x_nogap,
+        h_y_nogap=_local_hessian_y_nogap)
+
+    direction_calculator = WarmStartedCGNewton(
+        # warm start causes issues if null space changes b/w iterations
+        hessian_function=_local_hessian,
+        rtol_termination=lambda x, g: min(0.5, np.linalg.norm(g)**0.5),
+        max_cg_iters=None,
+        minres=False,
+        regularizer=1e-8, # it seems 1e-10 is best, but it's too sensitive to it :(
+        )
+
     direction_calculator = CGNewton(
         # warm start causes issues if null space changes b/w iterations
         hessian_function=_local_hessian,
         rtol_termination=lambda x, g: min(0.5, np.linalg.norm(g)),
         max_cg_iters=None,
-        # regularizer=1e-10, # it seems 1e-10 is best, but it's too sensitive to it :(
+        minres=False,
+        # regularizer=1e-8, # it seems 1e-10 is best, but it's too sensitive to it :(
         )
 
     # direction_calculator = LSQRLevenbergMarquardt(
@@ -150,6 +175,7 @@ def solve(matrix, b, c, zero, nonneg,
     #     )
 
     _start = time.time()
+    # extra_iters=5
 
     for newton_iterations in range(1000):
 
@@ -161,7 +187,13 @@ def solve(matrix, b, c, zero, nonneg,
 
         if np.linalg.norm(grad_xy)/(n+m) < np.finfo(float).eps:
             logger.info('Converged in %d iterations.', newton_iterations)
+        #     extra_iters -= 1
+        # if extra_iters == 0:
             break
+
+        # if loss_xy < np.finfo(float).eps**2:
+        #     logger.info('Converged in %d iterations.', newton_iterations)
+        #     break
 
         direction = direction_calculator.get_direction(
             current_point=xy,

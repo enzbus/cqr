@@ -73,7 +73,7 @@ class TestSolver(TestCase):
         for generator in [
                 self._generate_problem_one,
                 self._generate_problem_two]:
-            for seed in range(10):
+            for seed in range(10): #(27,29):#100): #(405, 407):
                 print('\n\nEXPERIMENT', seed+1)
                 x, program = generator(
                     seed)
