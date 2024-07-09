@@ -76,18 +76,20 @@ def loss_gradient(xy, m, n, zero, matrix, b, c, workspace):
     loss += np.linalg.norm(workspace['s_error'])**2
     loss += gap**2
 
+    loss /= 2.
+
     # dual residual sqnorm
-    workspace['gradient'][n:] = 2 * (matrix @ workspace['dual_residual'])
+    workspace['gradient'][n:] = (matrix @ workspace['dual_residual'])
 
     # s_error sqnorm
-    workspace['gradient'][:n] = -2 * (matrix.T @ workspace['s_error'])
+    workspace['gradient'][:n] = -(matrix.T @ workspace['s_error'])
 
     # y_error sqnorm
-    workspace['gradient'][n+zero:] += 2 * workspace['y_error']
+    workspace['gradient'][n+zero:] += workspace['y_error']
 
     # gap sq
-    workspace['gradient'][:n] += (2 * gap) * c
-    workspace['gradient'][n:] += (2 * gap) * b
+    workspace['gradient'][:n] += gap * c
+    workspace['gradient'][n:] += gap * b
 
     return loss, workspace['gradient']
 
@@ -116,21 +118,21 @@ def hessian(xy, m, n, zero, matrix, b, c, workspace, regularizer = 0.):
         dy = dxdy[n:]
 
         # dual residual sqnorm
-        result[n:] = 2 * (matrix @ (matrix.T @ dy))
+        result[n:] = (matrix @ (matrix.T @ dy))
 
         # s_error sqnorm
         s_mask = np.ones(m, dtype=float)
         s_mask[zero:] = workspace['s_error'][zero:] < 0.
-        result[:n] = 2 * (matrix.T @ (s_mask * (matrix @ dx)))
+        result[:n] = (matrix.T @ (s_mask * (matrix @ dx)))
 
         # y_error sqnorm
         y_mask = np.ones(m-zero, dtype=float)
         y_mask[:] = workspace['y_error'] < 0.
-        result[n+zero:] += 2 * y_mask * dy[zero:]
+        result[n+zero:] += y_mask * dy[zero:]
 
         # gap
         constants = np.concatenate([c, b])
-        result[:] += constants * (2 * (constants @ dxdy))
+        result[:] += constants * (constants @ dxdy)
 
         return result + regularizer * dxdy
 
@@ -271,7 +273,7 @@ if __name__ == '__main__': # pragma: no cover
         DR = Dresidual(xy, m, n, zero, matrix, b, c)
         return sp.sparse.linalg.LinearOperator(
             (n+m, n+m),
-            matvec = lambda dxy: DR.T @ (DR @ (dxy * 2.)))
+            matvec = lambda dxy: DR.T @ (DR @ (dxy)))
 
     print('\nCHECKING GRADIENT')
     for i in range(10):
@@ -284,7 +286,7 @@ if __name__ == '__main__': # pragma: no cover
     print('\nCHECKING LOSS AND RESIDUAL CONSISTENT')
     for i in range(10):
         xy = np.random.randn(n+m)
-        assert np.isclose(my_loss(xy), np.linalg.norm(my_residual(xy))**2)
+        assert np.isclose(my_loss(xy), (np.linalg.norm(my_residual(xy))**2)/2.)
     print('\tOK!')
 
     print('\nCHECKING DR and DR^T CONSISTENT')
@@ -299,7 +301,7 @@ if __name__ == '__main__': # pragma: no cover
     for i in range(10):
         xy = np.random.randn(n+m)
         grad = my_grad(xy)
-        newgrad = 2 * (my_Dresidual(xy).T @ my_residual(xy))
+        newgrad = (my_Dresidual(xy).T @ my_residual(xy))
         assert np.allclose(grad, newgrad)
     print('\tOK!')
 
