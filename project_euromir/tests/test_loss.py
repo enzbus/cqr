@@ -103,7 +103,7 @@ class TestLoss(TestCase):
         dres = cls._dresidual_linop(xy)
         return sp.sparse.linalg.LinearOperator(
             shape=(cls.n+cls.m, cls.n+cls.m),
-            matvec=lambda dxy: dres.T @ (dres @ (dxy * 2.)))
+            matvec=lambda dxy: dres.T @ (dres @ dxy ))
 
     def test_gradient(self):
         """Test that the gradient is numerically accurate."""
@@ -129,7 +129,7 @@ class TestLoss(TestCase):
             xy = np.random.randn(self.n+self.m)
             self.assertTrue(
                 np.isclose(self._loss(xy),
-                    np.linalg.norm(self._residual(xy))**2))
+                    np.linalg.norm(self._residual(xy))**2/2.))
 
     def test_dr_drt(self):
         """Test that DR and DR^T are consistent."""
@@ -146,7 +146,7 @@ class TestLoss(TestCase):
             np.random.seed(seed)
             xy = np.random.randn(self.n+self.m)
             grad = self._grad(xy)
-            newgrad = 2 * (self._dresidual_linop(xy).T @ self._residual(xy))
+            newgrad = (self._dresidual_linop(xy).T @ self._residual(xy))
             self.assertTrue(np.allclose(grad, newgrad))
 
     def test_dresidual_hessian(self):
