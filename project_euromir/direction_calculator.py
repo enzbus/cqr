@@ -58,6 +58,10 @@ def nocedal_wright_termination(_current_point, current_gradient):
 class DirectionCalculator:
     """Base class for descent direction calculation."""
 
+    @property
+    def statistics(self):
+        return self._statistics if hasattr(self, '_statistics') else {}
+
     def get_direction(
         self, current_point: np.array, current_gradient: np.array) -> np.array:
         """Calculate descent direction at current point given current gradient.
@@ -133,6 +137,7 @@ class CGNewton(DenseNewton):
     """Calculate descent direction using Newton-CG."""
 
     _x0 = None # overwritten in derived class(es)
+    _preconditioner = None # overwritten in derived class(es)
 
     def __init__(
             self, hessian_function,
@@ -158,6 +163,7 @@ class CGNewton(DenseNewton):
         self._max_cg_iters = max_cg_iters
         self._regularizer = regularizer
         self._minres = minres
+        self._statistics = {'HESSIAN_MATMULS':  0}
         super().__init__(hessian_function=hessian_function)
 
     def get_direction(
@@ -184,13 +190,21 @@ class CGNewton(DenseNewton):
                 shape = current_hessian.shape,
                 matvec = lambda x: orig_hessian @ x + self._regularizer * x
             )
+        # breakpoint()
+        # diag = np.diag(self._preconditioner.todense())
+        # real_diag = np.diag( _densify(current_hessian))
+        # import matplotlib.pyplot as plt
+        # plt.plot(diag); plt.plot(real_diag); plt.show()
+        # breakpoint()
         result = getattr(sp.sparse.linalg, 'minres' if self._minres else 'cg')(
             A=current_hessian,
             b=-current_gradient,
             x0=self._x0, # this is None in this class
             rtol=self._rtol_termination(current_point, current_gradient),
+            M=self._preconditioner, # this is None in this class
             callback=_counter,
             maxiter=self._max_cg_iters)[0]
+        self._statistics['HESSIAN_MATMULS'] += iteration_counter
         logger.info(
             '%s calculated direction with residual norm %.2e, while the input'
             ' gradient had norm %.2e, in %d iterations',
@@ -199,6 +213,45 @@ class CGNewton(DenseNewton):
             np.linalg.norm(current_gradient),
             iteration_counter)
         return result
+
+class ExactDiagPreconditionedCGNewton(CGNewton):
+    """CG with exact diagonal preconditioning."""
+
+    def get_direction(
+        self, current_point: np.array, current_gradient: np.array) -> np.array:
+
+        diag_H = np.array(
+            np.diag(_densify(self._hessian_function(current_point))))
+
+        diag_H[diag_H < 1e-4] = 1.
+        self._preconditioner = sp.diags(1./diag_H)
+        return super().get_direction(
+            current_point=current_point, current_gradient=current_gradient)
+
+
+class DiagPreconditionedCGNewton(CGNewton):
+    """CG with diagonal preconditioning."""
+
+    def __init__(self, matrix, b, c, zero, **kwargs):
+
+        self._matrix = matrix
+        self._b = b
+        m = len(b)
+        self._c = c
+        n = len(c)
+        self._zero = zero
+        gap_part = np.concatenate([self._c, self._b])**2
+        col_norms = sp.sparse.linalg.norm(matrix, axis=0)**2
+        assert len(col_norms) == n
+        row_norms = sp.sparse.linalg.norm(matrix, axis=1)**2
+        assert len(row_norms) == m
+        diag = gap_part
+        diag[:n] += col_norms / np.sqrt(2)
+        diag[n:] += row_norms
+        diag[n+zero:] += 0.5
+        self._preconditioner = sp.sparse.diags(1./diag)
+        super().__init__(**kwargs)
+
 
 class WarmStartedCGNewton(CGNewton):
     """Calculate descent direction using warm-started Newton CG.

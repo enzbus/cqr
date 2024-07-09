@@ -41,6 +41,10 @@ class LineSearchError(Exception):
 class LineSearcher:
     """Base class for line search algorithms using strong Wolfe conditions."""
 
+    @property
+    def statistics(self):
+        return self._statistics if hasattr(self, '_statistics') else {}
+
     def __init__(
             self, initial_step = 1., c_1=1e-4, c_2=0.9):
         """Initialize with parameters.
@@ -80,18 +84,16 @@ class LineSearcher:
     def armijo(
             self,
             current_loss: np.array,
-            current_gradient: np.array,
-            direction: np.array,
+            direction_dot_current_gradient: float,
             step_size: float,
             proposed_loss: np.array):
         """Is Armijo rule satisfied?
 
         :param current_loss: Loss at current point.
         :type current_loss: float
-        :param current_gradient: Gradient at current point.
-        :type current_gradient: np.array
-        :param direction: Search direction.
-        :type direction: np.array
+        :param direction_dot_current_gradient: Search direction dot gradient
+            at current point.
+        :type direction_dot_current_gradient: float
         :param step_size: Length of the step along direction.
         :type step_size: float
         :param proposed_loss: Loss at proposed point.
@@ -100,9 +102,10 @@ class LineSearcher:
         :returns: Is Armijo rule satisfied?
         :rtype: bool
         """
+        assert direction_dot_current_gradient < 0
 
         return proposed_loss <= current_loss + self._c_1 * step_size * (
-            direction @ current_gradient)
+            direction_dot_current_gradient)
 
     def strong_curvature(
             self,
@@ -145,6 +148,7 @@ class BacktrackingLineSearcher(LineSearcher):
         self._loss_function = loss_function
         self._backtrack = backtrack
         self._max_iters = max_iters
+        self._statistics = {'LOSS_EVALS': 0}
         super().__init__(initial_step=initial_step, c_1=c_1, c_2=None)
 
     def get_next(
@@ -164,21 +168,23 @@ class BacktrackingLineSearcher(LineSearcher):
         :returns: Next point.
         :rtype: np.array
         """
-        assert current_gradient @ direction < 0
+        direction_dot_current_gradient = current_gradient @ direction
+        assert direction_dot_current_gradient < 0
         step_size = float(self._initial_step)
         proposed_point = np.empty_like(current_point)
 
-        for _ in range(self._max_iters):
+        for bt_iters in range(self._max_iters):
             proposed_point[:] = current_point + direction * step_size
             proposed_loss = self._loss_function(proposed_point)
             if self.armijo(
                     current_loss=current_loss,
-                    current_gradient=current_gradient, direction=direction,
+                    direction_dot_current_gradient=direction_dot_current_gradient,
                     step_size=step_size, proposed_loss=proposed_loss):
                 logger.info(
                     '%s: step lenght %.2e, function calls %d, current loss '
                     '%.2e, previous loss %.2e', self.__class__.__name__,
-                    step_size, _+1, proposed_loss, current_loss)
+                    step_size, bt_iters+1, proposed_loss, current_loss)
+                self._statistics['LOSS_EVALS'] += bt_iters
                 return (proposed_point, proposed_loss, None)
             step_size *= self._backtrack
         raise LineSearchError(

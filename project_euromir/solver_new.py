@@ -37,11 +37,10 @@ import scipy as sp
 NOHSDE = True
 
 from project_euromir import equilibrate
-from project_euromir.direction_calculator import (CGNewton, DenseNewton,
-                                                  LSMRLevenbergMarquardt,
-                                                  LSQRLevenbergMarquardt,
-                                                  WarmStartedCGNewton,
-                                                  nocedal_wright_termination)
+from project_euromir.direction_calculator import (
+    CGNewton, DenseNewton, DiagPreconditionedCGNewton,
+    ExactDiagPreconditionedCGNewton, LSMRLevenbergMarquardt,
+    LSQRLevenbergMarquardt, WarmStartedCGNewton, nocedal_wright_termination)
 from project_euromir.line_searcher import (BacktrackingLineSearcher,
                                            LogSpaceLineSearcher,
                                            ScipyLineSearcher)
@@ -147,12 +146,29 @@ def solve(matrix, b, c, zero, nonneg,
         regularizer=1e-8, # it seems 1e-10 is best, but it's too sensitive to it :(
         )
 
-    direction_calculator = CGNewton(
+    # doesn't improve, yet; we can make many tests
+    # direction_calculator = DiagPreconditionedCGNewton(
+    #     matrix=matrix_transf,
+    #     b=b_transf,
+    #     c=c_transf,
+    #     zero=zero,
+    #     hessian_function=_local_hessian,
+    #     rtol_termination=lambda x, g: min(0.5, np.linalg.norm(g)), #,**2),
+    #     max_cg_iters=None,
+    # )
+
+    # this one also doesn't seem to improve; must be because my diagonal is
+    # already quite well scaled, and/or it interacts with the rank 1 part;
+    # makes sense to try diag plus rank 1;
+    # direction_calculator = ExactDiagPreconditionedCGNewton(
+    direction_calculator  = CGNewton(
         # warm start causes issues if null space changes b/w iterations
         hessian_function=_local_hessian,
-        rtol_termination=lambda x, g: min(0.5, np.linalg.norm(g)),
+        rtol_termination=lambda x, g: min(0.5, np.linalg.norm(g)), #,**2),
         max_cg_iters=None,
-        minres=False,
+        # minres=True, # less stable, needs more stringent termination,
+        # and/or better logic to transition to refinement, but it is a bit faster
+        # it seems
         # regularizer=1e-8, # it seems 1e-10 is best, but it's too sensitive to it :(
         )
 
@@ -215,6 +231,9 @@ def solve(matrix, b, c, zero, nonneg,
             'Certificates not yet implemented.')
 
     print('Newton-CG loop took %.2e seconds' % (time.time() - _start ))
+    print('Newton-CG iterations', newton_iterations)
+    print('DirectionCalculator statistics', direction_calculator.statistics)
+    print('LineSearcher statistics', line_searcher.statistics)
 
     # create HSDE variables for refinement
     u = np.empty(n+m+1, dtype=float)

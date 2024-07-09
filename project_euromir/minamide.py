@@ -56,7 +56,7 @@ def hessian_x_nogap(x, m, n, zero, matrix, b, regularizer = 0.):
 
     def _matvec(dx):
         result = np.empty_like(dx)
-        result[:] = 2 * (matrix.T @ (s_mask * (matrix @ dx)))
+        result[:] = (matrix.T @ (s_mask * (matrix @ dx)))
         return result + regularizer * dx
 
     return sp.sparse.linalg.LinearOperator(
@@ -76,8 +76,8 @@ def hessian_y_nogap(y, m, n, zero, matrix, regularizer = 0.):
         result = np.empty_like(dy)
 
         # dual residual sqnorm
-        result[:] = 2 * (matrix @ (matrix.T @ dy))
-        result[zero:] += 2 * y_mask * dy[zero:]
+        result[:] = (matrix @ (matrix.T @ dy))
+        result[zero:] += y_mask * dy[zero:]
 
         return result + regularizer * dy
 
@@ -93,7 +93,7 @@ from .direction_calculator import DirectionCalculator, _densify
 class MinamideTest(DirectionCalculator):
 
     def __init__(self, b, c, h_x_nogap, h_y_nogap):
-        self._constants_sqrt2 = np.concatenate([c, b]) * np.sqrt(2.)
+        self._constants = np.concatenate([c, b])
         self._hessian_x_nogap = h_x_nogap
         self._hessian_y_nogap = h_y_nogap
         self._n = len(c)
@@ -107,27 +107,42 @@ class MinamideTest(DirectionCalculator):
         # gets stuck on directions of little descent, not sure how much
         # regularization is needed
 
-        # make all dense for test
-        hx = _densify(self._hessian_x_nogap(current_point[:self._n]))#  + np.eye(self._n) * REGU
-        hy = _densify(self._hessian_y_nogap(current_point[self._n:]))#  + np.eye(self._m) * REGU
+        # linear operators
+        hx = self._hessian_x_nogap(current_point[:self._n])#  + np.eye(self._n) * REGU
+        hy = self._hessian_y_nogap(current_point[self._n:])#  + np.eye(self._m) * REGU
 
         # minamide notation
-        S = sp.sparse.bmat([
-            [hx, None],
-            [None, hy],
-            ]).tocsc()
-        phi = self._constants_sqrt2
+
+        # S = sp.sparse.bmat([
+        #     [hx, None],
+        #     [None, hy],
+        #     ]).tocsc()
+
+        def _s_matvec(array):
+            return np.concatenate([
+                hx @ array[:self._n], hy @ array[self._n:]
+            ])
+
+        S = sp.sparse.linalg.LinearOperator(
+            shape = (self._n + self._m, self._n + self._m),
+            matvec = _s_matvec
+        )
+
+        phi = self._constants
+
+        hx_dense = _densify(hx)
+        hy_dense = _densify(hy)
 
         def _splus_matvec(array):
             return np.concatenate([
-                np.linalg.lstsq(hx, array[:self._n], rcond=None)[0],
-                np.linalg.lstsq(hy, array[self._n:], rcond=None)[0]
+                np.linalg.lstsq(hx_dense, array[:self._n], rcond=None)[0],
+                np.linalg.lstsq(hy_dense, array[self._n:], rcond=None)[0]
             ])
 
         # def _splus_matvec(array):
         #     return np.concatenate([
-        #         sp.sparse.linalg.cg(hx, array[:self._n], rtol=1e-5)[0],
-        #         sp.sparse.linalg.cg(hy, array[self._n:], rtol=1e-5)[0]
+        #         sp.sparse.linalg.cg(hx, array[:self._n], rtol=min(0.5, np.linalg.norm(current_gradient)))[0],
+        #         sp.sparse.linalg.cg(hy, array[self._n:], rtol=min(0.5, np.linalg.norm(current_gradient)))[0]
         #     ])
 
         # def _splus_matvec(array):
@@ -265,7 +280,7 @@ if __name__ == '__main__': # pragma: no cover
             [hess_x_ng, np.zeros((n, m))],
             [np.zeros((m, n)), hess_y_ng]])
         gap_constants = np.concatenate([c, b])
-        hess_rebuilt += np.outer(gap_constants, gap_constants) * 2.
+        hess_rebuilt += np.outer(gap_constants, gap_constants)
         assert np.allclose(hess, hess_rebuilt)
     print('\tOK!')
 
@@ -285,7 +300,7 @@ if __name__ == '__main__': # pragma: no cover
         S = np.bmat([
             [hess_x_ng, np.zeros((n, m))],
             [np.zeros((m, n)), hess_y_ng]]).A
-        phi = np.concatenate([c, b]) * np.sqrt(2.)
+        phi = np.concatenate([c, b])
 
         # obtain pinv of the reduced system
         Splus = np.linalg.pinv(S)
