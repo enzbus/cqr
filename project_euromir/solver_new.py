@@ -40,7 +40,8 @@ from project_euromir import equilibrate
 from project_euromir.direction_calculator import (
     CGNewton, DenseNewton, DiagPreconditionedCGNewton,
     ExactDiagPreconditionedCGNewton, LSMRLevenbergMarquardt,
-    LSQRLevenbergMarquardt, WarmStartedCGNewton, nocedal_wright_termination)
+    LSQRLevenbergMarquardt, MinResQLPTest, WarmStartedCGNewton,
+    nocedal_wright_termination)
 from project_euromir.line_searcher import (BacktrackingLineSearcher,
                                            LogSpaceLineSearcher,
                                            ScipyLineSearcher)
@@ -171,6 +172,14 @@ def solve(matrix, b, c, zero, nonneg,
         # it seems
         # regularizer=1e-8, # it seems 1e-10 is best, but it's too sensitive to it :(
         )
+
+    # breaks on little testing, seems that it triggers my stopping condition (?)
+    # on a bad point; some more testing is required; may converge in
+    # less hessian evals than CG (like minres)
+    # direction_calculator = MinResQLPTest(
+    #     hessian_function=_local_hessian,
+    #     rtol_termination=lambda x, g: min(0.5, np.linalg.norm(g)),
+    #     )
 
     # direction_calculator = LSQRLevenbergMarquardt(
     #     residual_function=_local_residual,

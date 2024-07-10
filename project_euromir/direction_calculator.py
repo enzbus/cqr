@@ -214,6 +214,46 @@ class CGNewton(DenseNewton):
             iteration_counter)
         return result
 
+from .minresQLP import MinresQLP
+
+
+class MinResQLPTest(DenseNewton):
+
+    def __init__(self, hessian_function, rtol_termination):
+        self._rtol_termination = rtol_termination
+        # self._max_cg_iters = max_cg_iters
+        # self._regularizer = regularizer
+        # self._minres = minres
+        self._statistics = {'HESSIAN_MATMULS':  0}
+
+        super().__init__(hessian_function=hessian_function)
+
+    def get_direction(
+        self, current_point: np.array, current_gradient: np.array) -> np.array:
+        """Calculate descent direction at current point given current gradient.
+
+        :param current_point: Current point.
+        :type current_point: np.array
+        :param current_gradient: Gradient of the loss function at current
+            point.
+        :type current_gradient: np.array
+
+        :returns: Descent direction.
+        :rtype: np.array
+        """
+
+        current_hessian = self._hessian_function(current_point)
+        # breakpoint()
+        result = MinresQLP(
+            A=current_hessian,
+            b=-current_gradient,
+            rtol=self._rtol_termination(current_point, current_gradient),
+            maxit=1e10)
+        # breakpoint()
+        print(result[1:])
+        self._statistics['HESSIAN_MATMULS'] += result[2]
+        return result[0].flatten()
+
 class ExactDiagPreconditionedCGNewton(CGNewton):
     """CG with exact diagonal preconditioning."""
 
