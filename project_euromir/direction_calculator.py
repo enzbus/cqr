@@ -326,6 +326,7 @@ class LSQRLevenbergMarquardt(DirectionCalculator):
         self._residual_function = residual_function
         self._derivative_residual_function = derivative_residual_function
         self._warm_start = warm_start
+        self._statistics = {'HESSIAN_MATMULS':  0}
 
     def _inner_function(self, derivative_residual, residual, current_gradient):
         """In order to replace with LSMR below."""
@@ -348,8 +349,10 @@ class LSQRLevenbergMarquardt(DirectionCalculator):
         """
         residual = self._residual_function(current_point)
         derivative_residual = self._derivative_residual_function(current_point)
+        # breakpoint()
         solution, n_iters = self._inner_function(
             derivative_residual, residual, current_gradient)
+        self._statistics['HESSIAN_MATMULS'] += n_iters
         logger.info(
             '%s calculated direction with error norm %.2e, while the input'
             ' gradient had norm %.2e, in %d iterations',
@@ -367,8 +370,9 @@ class LSMRLevenbergMarquardt(LSQRLevenbergMarquardt):
 
     def _inner_function(self, derivative_residual, residual, current_gradient):
         """Just the call to the iterative solver."""
+        breakpoint()
         result = sp.sparse.linalg.lsmr(
-            derivative_residual, -residual, x0=self._x0, # damp=1e-06, # seems
+            derivative_residual, -residual, x0=self._x0, damp=1e-06, # seems
             # that up to about 1e-6 performance is not affected
             atol=min(0.5, np.linalg.norm(current_gradient)), btol=0.)
         return result[0], result[2] # solution, number of iterations

@@ -41,6 +41,7 @@ from project_euromir.refinement import refine
 
 logger = logging.getLogger(__name__)
 
+QR_PRESOLVE = True
 
 def solve(matrix, b, c, zero, nonneg,
         # xy = None, # need to import logic for equilibration
@@ -66,6 +67,15 @@ def solve(matrix, b, c, zero, nonneg,
             matrix, b, c, dimensions={
                 'zero': zero, 'nonneg': nonneg, 'second_order': ()},
             max_iters=25)
+
+    if QR_PRESOLVE:
+        q, r = np.linalg.qr(
+            np.vstack([matrix_transf.todense(), c_transf.reshape((1, n))]))
+        matrix_transf = q[:-1].A
+        c_transf = q[-1].A1
+        sigma_qr = np.linalg.norm(
+            b_transf) / np.mean(np.linalg.norm(matrix_transf, axis=1))
+        b_transf = b_transf/sigma_qr
 
     workspace = create_workspace(m, n, zero)
 
@@ -121,10 +131,6 @@ def solve(matrix, b, c, zero, nonneg,
         # with small steps
         loss_function=_local_loss,
         max_iters=1000)
-
-    direction_calculator = MinamideTest(
-        b=b_transf, c=c_transf, h_x_nogap=_local_hessian_x_nogap,
-        h_y_nogap=_local_hessian_y_nogap)
 
     direction_calculator = WarmStartedCGNewton(
         # warm start causes issues if null space changes b/w iterations
@@ -186,6 +192,9 @@ def solve(matrix, b, c, zero, nonneg,
     #     #rtol_termination=nocedal_wright_termination,
     #     #max_cg_iters=None,
     #     )
+    # direction_calculator = MinamideTest(
+    #     b=b_transf, c=c_transf, h_x_nogap=_local_hessian_x_nogap,
+    #     h_y_nogap=_local_hessian_y_nogap)
 
     _start = time.time()
     # extra_iters=5
@@ -198,7 +207,9 @@ def solve(matrix, b, c, zero, nonneg,
             'Iteration %d, current loss %.2e, current inf norm grad %.2e',
             newton_iterations, loss_xy, np.max(np.abs(grad_xy)))
 
-        if np.linalg.norm(grad_xy)/(n+m) < np.finfo(float).eps:
+        if ((np.linalg.norm(grad_xy)/(n+m) < np.finfo(float).eps)) and \
+                loss_xy < 1e-24:
+                # temporary fix, this termination needs to be softer and smarter
             logger.info('Converged in %d iterations.', newton_iterations)
         #     extra_iters -= 1
         # if extra_iters == 0:
@@ -228,6 +239,7 @@ def solve(matrix, b, c, zero, nonneg,
             'Certificates not yet implemented.')
 
     print('Newton-CG loop took %.2e seconds' % (time.time() - _start ))
+    print('Loss at end of Newton-CG loop: %.2e' % loss_xy)
     print('Newton-CG iterations', newton_iterations)
     print('DirectionCalculator statistics', direction_calculator.statistics)
     print('LineSearcher statistics', line_searcher.statistics)
@@ -259,6 +271,10 @@ def solve(matrix, b, c, zero, nonneg,
     x = u1 / u3
     y = u2 / u3
     s = v2 / u3
+
+    if QR_PRESOLVE:
+        x = np.linalg.solve(r, x) * sigma_qr
+        s *= sigma_qr
 
     # invert Ruiz scaling, copied from other repo
     x_orig = e * x / sigma

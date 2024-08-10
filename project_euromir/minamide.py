@@ -76,6 +76,7 @@ def hessian_y_nogap(y, m, n, zero, matrix, regularizer = 0.):
 
 
 from .direction_calculator import DirectionCalculator, _densify
+from .minresQLP import MinresQLP
 
 
 class MinamideTest(DirectionCalculator):
@@ -96,8 +97,8 @@ class MinamideTest(DirectionCalculator):
         # regularization is needed
 
         # linear operators
-        hx = self._hessian_x_nogap(current_point[:self._n])#  + np.eye(self._n) * REGU
-        hy = self._hessian_y_nogap(current_point[self._n:])#  + np.eye(self._m) * REGU
+        hx = self._hessian_x_nogap(current_point[:self._n])  #+ np.eye(self._n) * 1e-12
+        hy = self._hessian_y_nogap(current_point[self._n:])  #+ np.eye(self._m) * 1e-12
 
         # minamide notation
 
@@ -126,6 +127,10 @@ class MinamideTest(DirectionCalculator):
                 np.linalg.lstsq(hx_dense, array[:self._n], rcond=None)[0],
                 np.linalg.lstsq(hy_dense, array[self._n:], rcond=None)[0]
             ])
+        Splusdense = sp.sparse.linalg.LinearOperator(
+            shape = (self._n + self._m, self._n + self._m),
+            matvec = _splus_matvec
+        )
 
         # def _splus_matvec(array):
         #     return np.concatenate([
@@ -135,9 +140,15 @@ class MinamideTest(DirectionCalculator):
 
         # def _splus_matvec(array):
         #     return np.concatenate([
-        #         sp.sparse.linalg.minres(hx, array[:self._n], rtol=min(0.5, np.linalg.norm(array[:self._n])**0.5))[0],
-        #         sp.sparse.linalg.minres(hy, array[self._n:], rtol=min(0.5, np.linalg.norm(array[self._n:])**0.5))[0]
+        #         sp.sparse.linalg.minres(hx, array[:self._n], shift=1-8, rtol=1e-16)[0],
+        #         sp.sparse.linalg.minres(hy, array[self._n:], shift=1e-8, rtol=1e-16)[0]
         #     ])
+
+        def _splus_matvec(array):
+            return np.concatenate([
+                MinresQLP(hx, array[:self._n], rtol=1e-64, maxit=10000)[0],
+                MinresQLP(hy, array[self._n:], rtol=1e-64, maxit=10000)[0]
+            ])
 
         Splus = sp.sparse.linalg.LinearOperator(
             shape = (self._n + self._m, self._n + self._m),
@@ -145,6 +156,15 @@ class MinamideTest(DirectionCalculator):
         )
 
         Splusphi = Splus @ phi
+        #import matplotlib.pyplot as plt
+        Splusphi_dense = Splusdense @ phi
+        print('NORM DIFF SPLUS PHI vs dense',
+            np.linalg.norm(Splusphi-Splusphi_dense))
+
+        Splusphi = Splusphi_dense
+
+        #plt.plot(Splusphi); plt.plot(Splusphi_dense); plt.show()
+        #breakpoint()
         Tphi = phi - S @ Splusphi
 
         # breakpoint()
@@ -172,6 +192,12 @@ class MinamideTest(DirectionCalculator):
             #pinv_rebuilt = Splus - np.outer(Splusphi, Splusphi) / (
             #    1 + phi @ Splusphi)
             result = Splus @ rhs
+            result_dense = Splusdense @ rhs
+            print('NORM DIFF result vs dense',
+                np.linalg.norm(result-result_dense))
+            #plt.plot(result); plt.plot(result_dense); plt.show()
+            result = result_dense
+            #breakpoint()
             result -= Splusphi * ((Splusphi @ rhs) /  (1 + phi @ Splusphi))
             return result + FINAL_REGU * rhs
 
@@ -189,6 +215,12 @@ class MinamideTest(DirectionCalculator):
 
             # multiply by Splus
             result = Splus @ result
+            result_dense = Splusdense @ rhs
+            #plt.plot(result); plt.plot(result_dense); plt.show()
+            #breakpoint()
+            print('NORM DIFF result vs dense',
+                np.linalg.norm(result-result_dense))
+            result = result_dense
 
             # multiply by left
             result = result - Tphi * ((phi @ result) / (phi @ Tphi))
