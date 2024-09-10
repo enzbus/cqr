@@ -41,7 +41,7 @@ from project_euromir.refinement import refine
 
 logger = logging.getLogger(__name__)
 
-QR_PRESOLVE = False
+QR_PRESOLVE = True
 
 def solve(matrix, b, c, zero, nonneg,
         # xy = None, # need to import logic for equilibration
