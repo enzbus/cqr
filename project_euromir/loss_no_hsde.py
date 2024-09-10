@@ -37,9 +37,45 @@ def create_workspace(m, n, zero, soc=()):
 
     return workspace
 
+def project(vec, result, zero, nonneg, soc):
+    """Project. We skip zero cone.
+
+    This is -Pi_K(-vec), not sure if minus outside is needed.
+    """
+    result[:nonneg] = np.minimum(vec[:nonneg], 0.)
+
+def dual_project(vec, result, zero, nonneg, soc):
+    """Project on dual cone.
+
+    This is -Pi_K*(-vec), not sure if minus outside is needed.
+    """
+    result[:zero] = vec[:zero]
+    result[zero:zero+nonneg] = np.minimum(vec[zero:zero+nonneg], 0.)
+
+def make_derivative_project(vec, result, zero, nonneg, soc):
+    """Make DPi_K. We skip zero cone.
+    """
+    y_mask = np.ones(nonneg, dtype=float)
+    y_mask[:] = result < 0.
+    def operator(dy):
+        return dy * y_mask
+    return operator
+
+def make_derivative_dual_project(vec, result, zero, nonneg, soc):
+    """Make DPi_K*.
+    """
+    s_mask = np.ones(zero+nonneg, dtype=float)
+    s_mask[zero:] = result[zero:] < 0.
+    def operator(ds):
+        return ds * s_mask
+    return operator
+
+
 # variable is xy
 def loss_gradient(xy, m, n, zero, nonneg, matrix, b, c, workspace, soc=()):
     """Function for LBFGS loop, used in line search as well."""
+
+    assert zero + nonneg + sum(soc, 0) == m
 
     x = xy[:n]
     y = xy[n:]
@@ -47,12 +83,20 @@ def loss_gradient(xy, m, n, zero, nonneg, matrix, b, c, workspace, soc=()):
     # y_error is Pi_K(-y)
 
     # zero cone dual variable is unconstrained
-    workspace['y_error'][:nonneg] = np.minimum(y[zero:], 0.)
+    # workspace['y_error'][:nonneg] = np.minimum(y[zero:zero+nonneg], 0.)
+    project(vec=y[zero:], result=workspace['y_error'], zero=zero, nonneg=nonneg, soc=soc)
     # dual_cone_project(
     #     z_cone=-y[zero:],
     #     result=workspace['y_error'],
     #     dimensions=(None, 0, nonneg, soc))
     # workspace['y_error'] = -workspace['y_error']
+    # soc_cursor = 0
+    # for soc_cone in soc:
+    #     second_order_project(
+    #         z=-y[zero+nonneg+soc_cursor:zero+nonneg+soc_cursor+soc_cone],
+    #         result=workspace['y_error'][nonneg+soc_cursor:nonneg+soc_cursor+soc_cone])
+    #     workspace['y_error'][nonneg+soc_cursor:nonneg+soc_cursor+soc_cone] *= -1.
+    #     soc_cursor += soc_cone
 
     # this must be all zeros
     workspace['dual_residual'][:] = matrix.T @ y + c
@@ -63,9 +107,12 @@ def loss_gradient(xy, m, n, zero, nonneg, matrix, b, c, workspace, soc=()):
     # s_error is Pi_K*(-s)
 
     # slacks for zero cone must be zero
-    workspace['s_error'][:zero] = workspace['s'][:zero]
-    workspace['s_error'][zero:zero+nonneg] = np.minimum(
-        workspace['s'][zero:], 0.)
+    # workspace['s_error'][:zero] = workspace['s'][:zero]
+    dual_project(
+        vec=workspace['s'], result=workspace['s_error'],
+        zero=zero, nonneg=nonneg, soc=soc)
+    # workspace['s_error'][zero:zero+nonneg] = np.minimum(
+    #     workspace['s'][zero:zero+nonneg], 0.)
 
     # duality gap
     gap = c.T @ x + b.T @ y
@@ -100,11 +147,14 @@ def hessian(
     xy, m, n, zero, nonneg, matrix, b, c, workspace, soc=(), regularizer = 0.):
     """Hessian to use inside LBFGS loop."""
 
+    assert zero + nonneg + sum(soc, 0) == m
+
     x = xy[:n]
     y = xy[n:]
 
     # zero cone dual variable is unconstrained
-    workspace['y_error'][:nonneg] = np.minimum(y[zero:], 0.)
+    # workspace['y_error'][:nonneg] = np.minimum(y[zero:zero+nonneg], 0.)
+    project(vec=y[zero:], result=workspace['y_error'], zero=zero, nonneg=nonneg, soc=soc)
 
     # this must be all zeros
     workspace['dual_residual'][:] = matrix.T @ y + c
@@ -113,15 +163,25 @@ def hessian(
     workspace['s'][:] = -matrix @ x + b
 
     # slacks for zero cone must be zero
-    workspace['s_error'][:zero] = workspace['s'][:zero]
-    workspace['s_error'][zero:zero+nonneg] = np.minimum(
-        workspace['s'][zero:], 0.)
+    # workspace['s_error'][:zero] = workspace['s'][:zero]
+    # workspace['s_error'][zero:zero+nonneg] = np.minimum(
+    #     workspace['s'][zero:zero+nonneg], 0.)
+    dual_project(
+        vec=workspace['s'], result=workspace['s_error'], zero=zero,
+        nonneg=nonneg, soc=soc)
 
     # this is DProj
-    s_mask = np.ones(m, dtype=float)
-    s_mask[zero:] = workspace['s_error'][zero:] < 0.
-    y_mask = np.ones(m-zero, dtype=float)
-    y_mask[:] = workspace['y_error'] < 0.
+    # s_mask = np.ones(m, dtype=float)
+    # s_mask[zero:] = workspace['s_error'][zero:] < 0.
+    # y_mask = np.ones(m-zero, dtype=float)
+    # y_mask[:] = workspace['y_error'] < 0.
+
+    dpi_s = make_derivative_dual_project(
+        vec=workspace['s'], result=workspace['s_error'], zero=zero,
+        nonneg=nonneg, soc=soc)
+
+    dpi_y = make_derivative_project(
+        vec=y, result=workspace['y_error'], zero=zero, nonneg=nonneg, soc=soc)
 
     def _matvec(dxdy):
         result = np.empty_like(dxdy)
@@ -132,10 +192,10 @@ def hessian(
         result[n:] = (matrix @ (matrix.T @ dy))
 
         # s_error sqnorm
-        result[:n] = (matrix.T @ (s_mask * (matrix @ dx)))
+        result[:n] = (matrix.T @ dpi_s(matrix @ dx))
 
         # y_error sqnorm
-        result[n+zero:] += y_mask * dy[zero:]
+        result[n+zero:] += dpi_y(dy[zero:])
 
         # gap
         constants = np.concatenate([c, b])
