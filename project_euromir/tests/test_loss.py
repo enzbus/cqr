@@ -53,7 +53,7 @@ class TestLoss(TestCase):
         """Wrapped call to the loss function."""
         return loss_gradient(
             xy, m=cls.m, n=cls.n, zero=cls.zero, matrix=cls.matrix, b=cls.b,
-            c=cls.c, workspace=cls.workspace)[0]
+            c=cls.c, workspace=cls.workspace, nonneg=cls.nonneg)[0]
 
     @classmethod
     def _grad(cls, xy):
@@ -64,7 +64,7 @@ class TestLoss(TestCase):
         """
         return np.copy(loss_gradient(
             xy, m=cls.m, n=cls.n, zero=cls.zero, matrix=cls.matrix, b=cls.b,
-            c=cls.c, workspace=cls.workspace)[1])
+            c=cls.c, workspace=cls.workspace, nonneg=cls.nonneg)[1])
 
     @classmethod
     def _dense_hessian(cls, xy):
@@ -72,19 +72,19 @@ class TestLoss(TestCase):
         return _densify(
             hessian(
                 xy, m=cls.m, n=cls.n, zero=cls.zero, matrix=cls.matrix,
-                b=cls.b, c=cls.c, workspace=cls.workspace))
+                b=cls.b, c=cls.c, workspace=cls.workspace, nonneg=cls.nonneg))
 
     @classmethod
     def _residual(cls, xy):
         """Wrapped call to the residual function."""
         return np.copy(residual(
-            xy, cls.m, cls.n, cls.zero, cls.matrix, cls.b, cls.c))
+            xy, cls.m, cls.n, cls.zero, cls.nonneg, cls.matrix, cls.b, cls.c))
 
     @classmethod
     def _dresidual_linop(cls, xy):
         """Wrapped call to the dresidual function, as LinearOperator."""
         return Dresidual(
-            xy, cls.m, cls.n, cls.zero, cls.matrix, cls.b, cls.c)
+            xy, cls.m, cls.n, cls.zero, cls.nonneg, cls.matrix, cls.b, cls.c)
 
     @classmethod
     def _hessian_from_dresidual(cls, xy):

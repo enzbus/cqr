@@ -19,6 +19,8 @@
 import numpy as np
 import scipy as sp
 
+from .cones import dual_cone_project
+
 ###
 # The loss function used in the main loop
 ###
@@ -36,14 +38,21 @@ def create_workspace(m, n, zero, soc=()):
     return workspace
 
 # variable is xy
-def loss_gradient(xy, m, n, zero, matrix, b, c, workspace, soc=()):
+def loss_gradient(xy, m, n, zero, nonneg, matrix, b, c, workspace, soc=()):
     """Function for LBFGS loop, used in line search as well."""
 
     x = xy[:n]
     y = xy[n:]
 
+    # y_error is Pi_K(-y)
+
     # zero cone dual variable is unconstrained
-    workspace['y_error'][:] = np.minimum(y[zero:], 0.)
+    workspace['y_error'][:nonneg] = np.minimum(y[zero:], 0.)
+    # dual_cone_project(
+    #     z_cone=-y[zero:],
+    #     result=workspace['y_error'],
+    #     dimensions=(None, 0, nonneg, soc))
+    # workspace['y_error'] = -workspace['y_error']
 
     # this must be all zeros
     workspace['dual_residual'][:] = matrix.T @ y + c
@@ -51,9 +60,12 @@ def loss_gradient(xy, m, n, zero, matrix, b, c, workspace, soc=()):
     # slacks
     workspace['s'][:] = -matrix @ x + b
 
+    # s_error is Pi_K*(-s)
+
     # slacks for zero cone must be zero
     workspace['s_error'][:zero] = workspace['s'][:zero]
-    workspace['s_error'][zero:] = np.minimum(workspace['s'][zero:], 0.)
+    workspace['s_error'][zero:zero+nonneg] = np.minimum(
+        workspace['s'][zero:], 0.)
 
     # duality gap
     gap = c.T @ x + b.T @ y
@@ -65,6 +77,9 @@ def loss_gradient(xy, m, n, zero, matrix, b, c, workspace, soc=()):
     loss += gap**2
 
     loss /= 2.
+
+    # The following miss logic for Dproj, b/c LP cone doesn't need it;
+    # maybe that's true for all cones? would have to derive it to be sure
 
     # dual residual sqnorm
     workspace['gradient'][n:] = (matrix @ workspace['dual_residual'])
@@ -81,14 +96,15 @@ def loss_gradient(xy, m, n, zero, matrix, b, c, workspace, soc=()):
 
     return loss, workspace['gradient']
 
-def hessian(xy, m, n, zero, matrix, b, c, workspace, soc=(), regularizer = 0.):
+def hessian(
+    xy, m, n, zero, nonneg, matrix, b, c, workspace, soc=(), regularizer = 0.):
     """Hessian to use inside LBFGS loop."""
 
     x = xy[:n]
     y = xy[n:]
 
     # zero cone dual variable is unconstrained
-    workspace['y_error'][:] = np.minimum(y[zero:], 0.)
+    workspace['y_error'][:nonneg] = np.minimum(y[zero:], 0.)
 
     # this must be all zeros
     workspace['dual_residual'][:] = matrix.T @ y + c
@@ -98,7 +114,14 @@ def hessian(xy, m, n, zero, matrix, b, c, workspace, soc=(), regularizer = 0.):
 
     # slacks for zero cone must be zero
     workspace['s_error'][:zero] = workspace['s'][:zero]
-    workspace['s_error'][zero:] = np.minimum(workspace['s'][zero:], 0.)
+    workspace['s_error'][zero:zero+nonneg] = np.minimum(
+        workspace['s'][zero:], 0.)
+
+    # this is DProj
+    s_mask = np.ones(m, dtype=float)
+    s_mask[zero:] = workspace['s_error'][zero:] < 0.
+    y_mask = np.ones(m-zero, dtype=float)
+    y_mask[:] = workspace['y_error'] < 0.
 
     def _matvec(dxdy):
         result = np.empty_like(dxdy)
@@ -109,13 +132,9 @@ def hessian(xy, m, n, zero, matrix, b, c, workspace, soc=(), regularizer = 0.):
         result[n:] = (matrix @ (matrix.T @ dy))
 
         # s_error sqnorm
-        s_mask = np.ones(m, dtype=float)
-        s_mask[zero:] = workspace['s_error'][zero:] < 0.
         result[:n] = (matrix.T @ (s_mask * (matrix @ dx)))
 
         # y_error sqnorm
-        y_mask = np.ones(m-zero, dtype=float)
-        y_mask[:] = workspace['y_error'] < 0.
         result[n+zero:] += y_mask * dy[zero:]
 
         # gap
@@ -129,7 +148,7 @@ def hessian(xy, m, n, zero, matrix, b, c, workspace, soc=(), regularizer = 0.):
         matvec=_matvec
     )
 
-def residual(xy, m, n, zero, matrix, b, c, soc=()):
+def residual(xy, m, n, zero, nonneg, matrix, b, c, soc=()):
     """Residual function to use L-M approach instead."""
 
     x = xy[:n]
@@ -160,7 +179,7 @@ def residual(xy, m, n, zero, matrix, b, c, soc=()):
 
     return res
 
-def Dresidual(xy, m, n, zero, matrix, b, c, soc=()):
+def Dresidual(xy, m, n, zero, nonneg, matrix, b, c, soc=()):
     """Linear operator to matrix multiply the residual derivative."""
 
     x = xy[:n]
@@ -242,23 +261,23 @@ if __name__ == '__main__': # pragma: no cover
     wks = create_workspace(m, n, zero)
 
     def my_loss(xy):
-        return loss_gradient(xy, m, n, zero, matrix, b, c, wks)[0]
+        return loss_gradient(xy, m, n, zero, nonneg, matrix, b, c, wks)[0]
 
     def my_grad(xy):
-        return np.copy(loss_gradient(xy, m, n, zero, matrix, b, c, wks)[1])
+        return np.copy(loss_gradient(xy, m, n, zero, nonneg, matrix, b, c, wks)[1])
 
     def my_hessian(xy):
         return _densify_also_nonsquare(
-            hessian(xy, m, n, zero, matrix, b, c, wks))
+            hessian(xy, m, n, zero, nonneg, matrix, b, c, wks))
 
     def my_residual(xy):
-        return residual(xy, m, n, zero, matrix, b, c)
+        return residual(xy, m, n, zero, nonneg, matrix, b, c)
 
     def my_Dresidual(xy):
-        return Dresidual(xy, m, n, zero, matrix, b, c)
+        return Dresidual(xy, m, n, zero, nonneg, matrix, b, c)
 
     def my_hessian_from_dresidual(xy):
-        DR = Dresidual(xy, m, n, zero, matrix, b, c)
+        DR = Dresidual(xy, m, n, zero, nonneg, matrix, b, c)
         return sp.sparse.linalg.LinearOperator(
             (n+m, n+m),
             matvec = lambda dxy: DR.T @ (DR @ (dxy)))

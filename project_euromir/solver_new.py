@@ -82,18 +82,18 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
     def _local_loss(xy):
         return loss_gradient(
             xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf,
-            c=c_transf, workspace=workspace, soc=soc)[0]
+            c=c_transf, workspace=workspace, nonneg=nonneg, soc=soc)[0]
 
     def _local_grad(xy):
         # very important, need to copy the output, to redesign
         return np.copy(loss_gradient(
             xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf,
-            c=c_transf, workspace=workspace, soc=soc)[1])
+            c=c_transf, workspace=workspace, nonneg=nonneg, soc=soc)[1])
 
     def _local_hessian(xy):
         return hessian(
             xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf,
-            c=c_transf, workspace=workspace, soc=soc)
+            c=c_transf, workspace=workspace, nonneg=nonneg,  soc=soc)
 
     def _local_hessian_x_nogap(x):
         return hessian_x_nogap(
@@ -106,12 +106,12 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
     def _local_residual(xy):
         return residual(
             xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf,
-            c=c_transf, soc=soc)
+            c=c_transf, soc=soc, nonneg=nonneg)
 
     def _local_derivative_residual(xy):
         return Dresidual(
             xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf,
-            c=c_transf, soc=soc)
+            c=c_transf, nonneg=nonneg,  soc=soc)
 
     xy = np.zeros(n+m)
     loss_xy = _local_loss(xy)
