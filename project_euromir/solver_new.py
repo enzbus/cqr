@@ -41,7 +41,7 @@ from project_euromir.refinement import refine
 
 logger = logging.getLogger(__name__)
 
-QR_PRESOLVE = True
+QR_PRESOLVE = False
 
 def solve(matrix, b, c, zero, nonneg,
         # xy = None, # need to import logic for equilibration
@@ -181,11 +181,11 @@ def solve(matrix, b, c, zero, nonneg,
     #     )
 
     # LSMR seems better than LSQR and CG, however need to count matrix evals
-    # direction_calculator = LSMRLevenbergMarquardt(
-    #     residual_function=_local_residual,
-    #     derivative_residual_function=_local_derivative_residual,
-    #     # warm_start=True, # also doesn't work with warm start
-    #     )
+    direction_calculator = LSMRLevenbergMarquardt(
+        residual_function=_local_residual,
+        derivative_residual_function=_local_derivative_residual,
+        # warm_start=True, # also doesn't work with warm start
+        )
 
     # direction_calculator = DenseNewton( #WarmStartedCGNewton(
     #     hessian_function=_local_hessian,

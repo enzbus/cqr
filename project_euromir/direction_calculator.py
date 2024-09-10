@@ -370,7 +370,7 @@ class LSMRLevenbergMarquardt(LSQRLevenbergMarquardt):
 
     def _inner_function(self, derivative_residual, residual, current_gradient):
         """Just the call to the iterative solver."""
-        breakpoint()
+        # breakpoint()
         result = sp.sparse.linalg.lsmr(
             derivative_residual, -residual, x0=self._x0, damp=1e-06, # seems
             # that up to about 1e-6 performance is not affected
