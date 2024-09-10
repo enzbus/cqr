@@ -22,7 +22,7 @@ import numpy as np
 import scipy as sp
 
 
-def refine(z, matrix, b, c, zero, nonneg, max_iters=None):
+def refine(z, matrix, b, c, zero, nonneg, soc=(), max_iters=None):
     """All Python for now, will call all the rest.
 
     Equilibration is not done here, data must be already transformed.

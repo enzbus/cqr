@@ -23,7 +23,7 @@ import scipy as sp
 # The loss function used in the main loop
 ###
 
-def create_workspace(m, n, zero):
+def create_workspace(m, n, zero, soc=()):
     workspace = {}
 
     # preallocate some variables
@@ -36,7 +36,7 @@ def create_workspace(m, n, zero):
     return workspace
 
 # variable is xy
-def loss_gradient(xy, m, n, zero, matrix, b, c, workspace):
+def loss_gradient(xy, m, n, zero, matrix, b, c, workspace, soc=()):
     """Function for LBFGS loop, used in line search as well."""
 
     x = xy[:n]
@@ -81,7 +81,7 @@ def loss_gradient(xy, m, n, zero, matrix, b, c, workspace):
 
     return loss, workspace['gradient']
 
-def hessian(xy, m, n, zero, matrix, b, c, workspace, regularizer = 0.):
+def hessian(xy, m, n, zero, matrix, b, c, workspace, soc=(), regularizer = 0.):
     """Hessian to use inside LBFGS loop."""
 
     x = xy[:n]
@@ -129,7 +129,7 @@ def hessian(xy, m, n, zero, matrix, b, c, workspace, regularizer = 0.):
         matvec=_matvec
     )
 
-def residual(xy, m, n, zero, matrix, b, c):
+def residual(xy, m, n, zero, matrix, b, c, soc=()):
     """Residual function to use L-M approach instead."""
 
     x = xy[:n]
@@ -160,7 +160,7 @@ def residual(xy, m, n, zero, matrix, b, c):
 
     return res
 
-def Dresidual(xy, m, n, zero, matrix, b, c):
+def Dresidual(xy, m, n, zero, matrix, b, c, soc=()):
     """Linear operator to matrix multiply the residual derivative."""
 
     x = xy[:n]

@@ -35,7 +35,7 @@ try:
     from cvxpy.reductions.solution import Solution
     from cvxpy.reductions.solvers import utilities
     from cvxpy.reductions.solvers.conic_solvers.conic_solver import (
-        ConicSolver, NonNeg, Zero)
+        SOC, ConicSolver, NonNeg, Zero)
 except ImportError as exc: # pragma: no cover
     raise ImportError(
         "Can't use CVXPY interface if CVXPY is not installed!") from exc
@@ -73,7 +73,7 @@ class Solver(ConicSolver):
     """
 
     MIP_CAPABLE = False
-    SUPPORTED_CONSTRAINTS = [Zero, NonNeg]
+    SUPPORTED_CONSTRAINTS = [Zero, NonNeg, SOC]
     REQUIRES_CONSTR = False
 
     def name(self):
@@ -86,7 +86,7 @@ class Solver(ConicSolver):
 
         x_orig, y_orig, s_orig = solve(
             matrix=data['A'], b=data['b'], c=data['c'], zero=data['dims'].zero,
-            nonneg=data['dims'].nonneg)
+            nonneg=data['dims'].nonneg, soc=data['dims'].soc)
 
         # breakpoint()
 

@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 QR_PRESOLVE = True
 
-def solve(matrix, b, c, zero, nonneg,
+def solve(matrix, b, c, zero, nonneg, soc=(),
         # xy = None, # need to import logic for equilibration
         ):
     "Main function."
@@ -65,7 +65,7 @@ def solve(matrix, b, c, zero, nonneg,
     d, e, sigma, rho, matrix_transf, b_transf, c_transf = \
     equilibrate.hsde_ruiz_equilibration(
             matrix, b, c, dimensions={
-                'zero': zero, 'nonneg': nonneg, 'second_order': ()},
+                'zero': zero, 'nonneg': nonneg, 'second_order': soc},
             max_iters=25)
 
     if QR_PRESOLVE:
@@ -82,18 +82,18 @@ def solve(matrix, b, c, zero, nonneg,
     def _local_loss(xy):
         return loss_gradient(
             xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf,
-            c=c_transf, workspace=workspace)[0]
+            c=c_transf, workspace=workspace, soc=soc)[0]
 
     def _local_grad(xy):
         # very important, need to copy the output, to redesign
         return np.copy(loss_gradient(
             xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf,
-            c=c_transf, workspace=workspace)[1])
+            c=c_transf, workspace=workspace, soc=soc)[1])
 
     def _local_hessian(xy):
         return hessian(
             xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf,
-            c=c_transf, workspace=workspace)
+            c=c_transf, workspace=workspace, soc=soc)
 
     def _local_hessian_x_nogap(x):
         return hessian_x_nogap(
@@ -106,12 +106,12 @@ def solve(matrix, b, c, zero, nonneg,
     def _local_residual(xy):
         return residual(
             xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf,
-            c=c_transf)
+            c=c_transf, soc=soc)
 
     def _local_derivative_residual(xy):
         return Dresidual(
             xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf,
-            c=c_transf)
+            c=c_transf, soc=soc)
 
     xy = np.zeros(n+m)
     loss_xy = _local_loss(xy)
@@ -254,7 +254,7 @@ def solve(matrix, b, c, zero, nonneg,
     for _ in range(3):
         u, v = refine(
             z=u-v, matrix=matrix_transf, b=b_transf, c=c_transf, zero=zero,
-            nonneg=nonneg)
+            nonneg=nonneg, soc=soc)
 
     if u[-1] < 1e-8:
         raise FloatingPointError(
