@@ -40,7 +40,7 @@ from project_euromir.minamide import (MinamideTest, hessian_x_nogap,
 from project_euromir.refinement import refine as hsde_refine
 from project_euromir.refinement_no_hsde import refine
 
-HSDE_REFINEMENT = False
+HSDE_REFINEMENT = True
 
 logger = logging.getLogger(__name__)
 
