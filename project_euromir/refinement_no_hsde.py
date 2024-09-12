@@ -16,6 +16,8 @@
 # Project Euromir. If not, see <https://www.gnu.org/licenses/>.
 """Define residual and Dresidual for use by refinement loop."""
 
+import time
+
 import numpy as np
 import scipy as sp
 
@@ -128,6 +130,46 @@ def Dresidual(xz, m, n, zero, nonneg, matrix, b, c, soc=()):
         matvec = _matvec,
         rmatvec = _rmatvec)
 
+def refine(xz, m, n, zero, nonneg, matrix, b, c, soc=(), max_iters=None):
+    """Refinement without using HSDE."""
+
+    res = residual(
+        xz, m=m, n=n, zero=zero, nonneg=nonneg, matrix=matrix, b=b, c=c,
+        soc=soc)
+
+    oldnormsq = np.linalg.norm(res)**2
+    print('residual norm sq before LSQR', oldnormsq)
+
+    DR = Dresidual(
+        xz, m=m, n=n, zero=zero, nonneg=nonneg, matrix=matrix, b=b, c=c,
+        soc=soc)
+
+    # call LSQR
+    start = time.time()
+    result = sp.sparse.linalg.lsqr(
+        DR, res, atol=0., btol=0.,
+        iter_lim=(n+m)*2 if max_iters is None else max_iters)
+    print('LSQR result[1:-1]', result[1:-1])
+    print('LSQR took', time.time() - start)
+    dxz = result[0]
+
+    # recompute problem variables
+    for i in range(20):
+        xz1 = xz - dxz * (0.5) ** i
+        res = residual(
+            xz1, m=m, n=n, zero=zero, nonneg=nonneg, matrix=matrix, b=b, c=c,
+            soc=soc)
+        newnormsq = np.linalg.norm(res)**2
+
+        if newnormsq < oldnormsq:
+            break
+    else:
+        print('REFINEMENT FAILED!')
+    print("residual norm sq after LSQR", newnormsq)
+
+    return xz1
+
+
 if __name__ == '__main__': # pragma: no cover
 
     from scipy.optimize import check_grad
@@ -170,3 +212,10 @@ if __name__ == '__main__': # pragma: no cover
         DRT = _densify_also_nonsquare(my_Dresidual(xy).T)
         assert np.allclose(DR.T, DRT)
     print('\tOK!')
+
+    print('\nCHECKING REFINE')
+    for i in range(1):
+        xz = np.random.randn(n+m)
+        for i in range(2):
+            xz = refine(
+                xz, m, n, zero, nonneg, matrix, b, c, soc=(), max_iters=None)

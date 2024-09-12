@@ -37,7 +37,10 @@ from project_euromir.loss_no_hsde import (Dresidual, create_workspace, hessian,
                                           loss_gradient, residual)
 from project_euromir.minamide import (MinamideTest, hessian_x_nogap,
                                       hessian_y_nogap)
-from project_euromir.refinement import refine
+from project_euromir.refinement import refine as hsde_refine
+from project_euromir.refinement_no_hsde import refine
+
+HSDE_REFINEMENT = False
 
 logger = logging.getLogger(__name__)
 
@@ -281,33 +284,52 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
     print('DirectionCalculator statistics', direction_calculator.statistics)
     print('LineSearcher statistics', line_searcher.statistics)
 
-    # create HSDE variables for refinement
-    u = np.empty(n+m+1, dtype=float)
-    u[:-1] = xy
-    u[-1] = 1.
-    v = np.zeros_like(u)
-    v[n:-1] = -matrix_transf @ u[:n] + b_transf
+    if not HSDE_REFINEMENT:
+        # switch to refinement
+        x = xy[:n]
+        y = xy[n:]
+        y[zero:] = np.maximum(y[zero:], 0.)
+        s = -matrix_transf @ x + b_transf
+        s[:zero] = 0.
+        s[zero:] = np.maximum(s[zero:], 0.)
+        z = y-s
+        xz = np.concatenate([x, z])
+        for _ in range(3):
+            xz = refine(xz, matrix=matrix_transf, b=b_transf, c=c_transf, zero=zero,
+                nonneg=nonneg, soc=soc, m=m, n=n)
+        x = xz[:n]
+        y = xz[n:]
+        y[zero:] = np.maximum(y[zero:], 0.)
 
-    for _ in range(3):
-        u, v = refine(
-            z=u-v, matrix=matrix_transf, b=b_transf, c=c_transf, zero=zero,
-            nonneg=nonneg, soc=soc)
+    else:
 
-    if u[-1] < 1e-8:
-        raise FloatingPointError(
-            "Refinement failed, Newton-CG solution wasn't good enough.")
+        # create HSDE variables for refinement
+        u = np.empty(n+m+1, dtype=float)
+        u[:-1] = xy
+        u[-1] = 1.
+        v = np.zeros_like(u)
+        v[n:-1] = -matrix_transf @ u[:n] + b_transf
 
-    # Transform back into problem format
-    u1, u2, u3 = u[:n], u[n:n+m], u[-1]
-    v2, v3 = v[n:n+m], v[-1]
+        for _ in range(3):
+            u, v = hsde_refine(
+                z=u-v, matrix=matrix_transf, b=b_transf, c=c_transf, zero=zero,
+                nonneg=nonneg, soc=soc)
 
-    if v3 > u3:
-        raise NotImplementedError('Certificates not yet implemented.')
+        if u[-1] < 1e-8:
+            raise FloatingPointError(
+                "Refinement failed, Newton-CG solution wasn't good enough.")
 
-    # Apply HSDE scaling
-    x = u1 / u3
-    y = u2 / u3
-    s = v2 / u3
+        # Transform back into problem format
+        u1, u2, u3 = u[:n], u[n:n+m], u[-1]
+        v2, v3 = v[n:n+m], v[-1]
+
+        if v3 > u3:
+            raise NotImplementedError('Certificates not yet implemented.')
+
+        # Apply HSDE scaling
+        x = u1 / u3
+        y = u2 / u3
+        s = v2 / u3
 
     if QR_PRESOLVE:
         x = np.linalg.solve(r, x) * sigma_qr
