@@ -42,7 +42,7 @@ HSDE_REFINEMENT = False
 
 logger = logging.getLogger(__name__)
 
-QR_PRESOLVE = True
+QR_PRESOLVE = False
 
 def solve(matrix, b, c, zero, nonneg, soc=(),
         # xy = None, # need to import logic for equilibration
@@ -120,7 +120,8 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
 
     # line_searcher = LogSpaceLineSearcher(
     #     loss_function=_local_loss,
-    #     min_step=1e-12,
+    #     min_step=1e-16,
+    #     grid_len=1000,
     #     #gradient_function=_local_grad,
     #     #c_1=1e-4,
     #     #c_2=0.9,
@@ -133,14 +134,14 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
         loss_function=_local_loss,
         max_iters=1000)
 
-    direction_calculator = WarmStartedCGNewton(
-        # warm start causes issues if null space changes b/w iterations
-        hessian_function=_local_hessian,
-        rtol_termination=lambda x, g: min(0.5, np.linalg.norm(g)**0.5),
-        max_cg_iters=None,
-        minres=False,
-        regularizer=1e-8, # it seems 1e-10 is best, but it's too sensitive to it :(
-        )
+    # direction_calculator = WarmStartedCGNewton(
+    #     # warm start causes issues if null space changes b/w iterations
+    #     hessian_function=_local_hessian,
+    #     rtol_termination=lambda x, g: min(0.5, np.linalg.norm(g)**0.5),
+    #     max_cg_iters=None,
+    #     minres=False,
+    #     regularizer=1e-8, # it seems 1e-10 is best, but it's too sensitive to it :(
+    #     )
 
     # doesn't improve, yet; we can make many tests
     # direction_calculator = DiagPreconditionedCGNewton(
@@ -160,7 +161,7 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
     direction_calculator  = CGNewton(
         # warm start causes issues if null space changes b/w iterations
         hessian_function=_local_hessian,
-        rtol_termination=lambda x, g: min(0.5, np.linalg.norm(g)), #,**2),
+        rtol_termination=lambda x, g: min(0.5, np.linalg.norm(g)**0.5), #,**2),
         max_cg_iters=None,
         # minres=True, # less stable, needs more stringent termination,
         # and/or better logic to transition to refinement, but it is a bit faster

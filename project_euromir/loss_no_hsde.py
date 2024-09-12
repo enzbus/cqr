@@ -71,7 +71,9 @@ def dual_project(vec, result, zero, nonneg, soc):
     result[zero+nonneg:zero+nonneg+soc_cursor] *= -1.
 
 def make_derivative_project(vec, result, nonneg, soc):
-    """Make DPi_K. We skip zero cone.
+    """Make DPi_K.
+
+    We skip zero cone.
     """
     y_mask = np.ones(nonneg, dtype=float)
     y_mask[:] = result < 0.
@@ -80,8 +82,7 @@ def make_derivative_project(vec, result, nonneg, soc):
     return operator
 
 def make_derivative_dual_project(vec, result, zero, nonneg, soc):
-    """Make DPi_K*.
-    """
+    """Make DPi_K*."""
     s_mask = np.ones(zero+nonneg, dtype=float)
     s_mask[zero:] = result[zero:] < 0.
     def operator(ds):

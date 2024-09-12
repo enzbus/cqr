@@ -251,8 +251,8 @@ class ExactDiagPreconditionedCGNewton(CGNewton):
         diag_H = np.array(
             np.diag(_densify(self._hessian_function(current_point))))
 
-        diag_H[diag_H < 1e-4] = 1.
-        self._preconditioner = sp.diags(1./diag_H)
+        diag_H += 1e-6 #[diag_H < 1e-12] = 1.
+        self._preconditioner = sp.sparse.diags(1./diag_H)
         return super().get_direction(
             current_point=current_point, current_gradient=current_gradient)
 
