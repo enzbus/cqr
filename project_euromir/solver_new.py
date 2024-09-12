@@ -22,8 +22,6 @@ import time
 import numpy as np
 import scipy as sp
 
-NOHSDE = True
-
 from project_euromir import equilibrate
 from project_euromir.direction_calculator import (
     CGNewton, DenseNewton, DiagPreconditionedCGNewton,
@@ -40,7 +38,7 @@ from project_euromir.minamide import (MinamideTest, hessian_x_nogap,
 from project_euromir.refinement import refine as hsde_refine
 from project_euromir.refinement_no_hsde import refine
 
-HSDE_REFINEMENT = True
+HSDE_REFINEMENT = False
 
 logger = logging.getLogger(__name__)
 
@@ -288,10 +286,10 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
         # switch to refinement
         x = xy[:n]
         y = xy[n:]
-        y[zero:] = np.maximum(y[zero:], 0.)
+        # y[zero:] = np.maximum(y[zero:], 0.)
         s = -matrix_transf @ x + b_transf
-        s[:zero] = 0.
-        s[zero:] = np.maximum(s[zero:], 0.)
+        # s[:zero] = 0.
+        # s[zero:] = np.maximum(s[zero:], 0.)
         z = y-s
         xz = np.concatenate([x, z])
         for _ in range(3):
