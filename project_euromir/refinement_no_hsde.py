@@ -82,59 +82,49 @@ def Dresidual_densefull(xz, m, n, zero, nonneg, matrix, b, c, soc=()):
     return jacobian
 
 
-def Dresidual(xy, m, n, zero, nonneg, matrix, b, c, soc=()):
+def Dresidual(xz, m, n, zero, nonneg, matrix, b, c, soc=()):
     """Linear operator to matrix multiply the refinement residual derivative."""
 
-    x = xy[:n]
-    y = xy[n:]
+    # Pi derivatives
+    y_mask = np.ones(m, dtype=float)
+    y_mask[zero:zero+nonneg] = xz[n+zero:n+zero+nonneg] >= 0
+    s_mask = y_mask - 1.
 
-    # zero cone dual variable is unconstrained
-    y_mask = (y[zero:] <= 0.) * 1.
+    # gap
+    gap_part = np.concatenate([c, y_mask * b])
 
-    # slacks
-    s = -matrix @ x + b
-
-    # slacks for zero cone must be zero
-    s_mask = np.ones_like(s)
-    s_mask[zero:] = s[zero:] <= 0.
-
-    # concatenation of primal and dual costs
-    pridua = np.concatenate([c, b])
-
-    def _matvec(dxy):
+    def _matvec(dxz):
 
         # decompose direction
-        dx = dxy[:n]
-        dy = dxy[n:]
+        dx = dxz[:n]
+        dz = dxz[n:]
 
         # compose result
-        dr = np.empty(n + 2 * m - zero + 1, dtype=float)
-        dr[:m-zero] = y_mask * dy[zero:]
-        dr[m-zero:m+n-zero] = matrix.T @ dy
-        dr[-1-m:-1] = s_mask * (-(matrix @ dx))
-        dr[-1] = pridua @ dxy
+        dr = np.empty(n + m + 1, dtype=float)
+        dr[:m] = matrix @ dx + s_mask * dz
+        dr[m:m+n] = matrix.T @ (y_mask * dz)
+        dr[-1] = gap_part @ dxz
 
         return dr
 
     def _rmatvec(dr):
 
         # decompose direction
-        dy_err = dr[:m-zero]
-        ddua_res = dr[m-zero:m+n-zero]
-        ds_err = dr[-1-m:-1]
+        dpri_res = dr[:m]
+        ddua_res = dr[m:m+n]
         dgap = dr[-1]
 
         # compose result
-        dxy = np.zeros(n + m, dtype=float)
-        dxy[-(m-zero):] += y_mask * dy_err
-        dxy[-m:] += matrix @ ddua_res
-        dxy[:n] -= matrix.T @ (s_mask * ds_err)
-        dxy += dgap * pridua
+        dxz = np.zeros(n + m, dtype=float)
+        dxz[:n] += matrix.T @ dpri_res
+        dxz[n:] += s_mask * dpri_res
+        dxz[n:] += (matrix @ ddua_res) * y_mask
+        dxz += dgap * gap_part
 
-        return dxy
+        return dxz
 
     return sp.sparse.linalg.LinearOperator(
-        shape=(n + 2 * m - zero + 1, n+m),
+        shape=(n + m + 1, n+m),
         matvec = _matvec,
         rmatvec = _rmatvec)
 
@@ -169,14 +159,14 @@ if __name__ == '__main__': # pragma: no cover
         print(check_grad(
             my_residual, my_Dresidual_densefull, np.random.randn(n+m)))
 
-    # print('\nCHECKING D_RESIDUAL')
-    # for i in range(10):
-    #     print(check_grad(my_residual, my_Dresidual_dense, np.random.randn(n+m)))
+    print('\nCHECKING D_RESIDUAL')
+    for i in range(10):
+        print(check_grad(my_residual, my_Dresidual_dense, np.random.randn(n+m)))
 
-    # print('\nCHECKING DR and DR^T CONSISTENT')
-    # for i in range(10):
-    #     xy = np.random.randn(n+m)
-    #     DR = _densify_also_nonsquare(my_Dresidual(xy))
-    #     DRT = _densify_also_nonsquare(my_Dresidual(xy).T)
-    #     assert np.allclose(DR.T, DRT)
-    # print('\tOK!')
+    print('\nCHECKING DR and DR^T CONSISTENT')
+    for i in range(10):
+        xy = np.random.randn(n+m)
+        DR = _densify_also_nonsquare(my_Dresidual(xy))
+        DRT = _densify_also_nonsquare(my_Dresidual(xy).T)
+        assert np.allclose(DR.T, DRT)
+    print('\tOK!')
