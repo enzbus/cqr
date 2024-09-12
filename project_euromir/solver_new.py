@@ -198,6 +198,7 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
 
     _start = time.time()
     # extra_iters=5
+    # all_losses = []
 
     for newton_iterations in range(1000):
 
@@ -228,9 +229,45 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
             current_loss=loss_xy,
             current_gradient=grad_xy, direction=direction)
 
+        # all_losses.append(loss_xy)
+
+        # import matplotlib.pyplot as plt
+        # iter_x = xy[:n]
+        # iter_y = xy[n:]
+        # iter_s = -matrix_transf @ iter_x + b_transf
+        # positive_y = iter_y[zero:zero+nonneg] > 0
+        # positive_s = iter_s[zero:zero+nonneg] > 0
+        # both_positive = positive_y & positive_s
+        # myy = np.copy(iter_y[zero:zero+nonneg])
+        # plt.plot(myy, alpha=.3, color='b', marker='*', linestyle=' ')
+        # myy[~both_positive] = np.nan
+
+        # mys = np.copy(iter_s[zero:zero+nonneg])
+        # plt.plot(mys, alpha=.3, color='g', marker='*', linestyle=' ')
+        # mys[~both_positive] = np.nan
+        # plt.plot(myy, color='b', marker='*', linestyle=' ')
+
+        # plt.plot(mys, color='g', marker='*', linestyle=' ')
+        # avgerr = np.sqrt(loss_xy/(m+n))
+        # plt.hlines(avgerr, 0, nonneg, color='r', alpha=.5)
+        # plt.hlines(0, 0, nonneg, color='y', alpha=.5)
+        # to_block_y = (myy < mys) # & (myy < avgerr)
+        # to_block_s = (mys < myy) # & (mys < avgerr)
+        # plt.ylim([0, avgerr])
+        # plt.show()
+
+        # plt.plot(iter_y[zero:zero+nonneg])
+        # plt.plot(iter_s[zero:zero+nonneg])
+        # plt.show()
+        # breakpoint()
+
     else:
         raise FloatingPointError(
             f'Solver did not converge in {newton_iterations} iterations.')
+
+    # import matplotlib.pyplot as plt
+    # plt.semilogy(all_losses)
+    # plt.show()
 
     if loss_xy > np.finfo(float).eps:
         raise NotImplementedError(

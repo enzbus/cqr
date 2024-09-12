@@ -37,12 +37,21 @@ def create_workspace(m, n, zero, soc=()):
 
     return workspace
 
-def project(vec, result, zero, nonneg, soc):
+def project(vec, result, nonneg, soc):
     """Project. We skip zero cone.
 
     This is -Pi_K(-vec), not sure if minus outside is needed.
     """
     result[:nonneg] = np.minimum(vec[:nonneg], 0.)
+
+    # SOC
+    soc_cursor = 0
+    for soc_cone in soc:
+        second_order_project(
+            z=-vec[nonneg+soc_cursor:nonneg+soc_cursor+soc_cone],
+            result=result[nonneg+soc_cursor:nonneg+soc_cursor+soc_cone])
+        soc_cursor += soc_cone
+    result[nonneg:nonneg+soc_cursor] *= -1.
 
 def dual_project(vec, result, zero, nonneg, soc):
     """Project on dual cone.
@@ -52,7 +61,16 @@ def dual_project(vec, result, zero, nonneg, soc):
     result[:zero] = vec[:zero]
     result[zero:zero+nonneg] = np.minimum(vec[zero:zero+nonneg], 0.)
 
-def make_derivative_project(vec, result, zero, nonneg, soc):
+    # SOC
+    soc_cursor = 0
+    for soc_cone in soc:
+        second_order_project(
+            z=-vec[zero+nonneg+soc_cursor:zero+nonneg+soc_cursor+soc_cone],
+            result=result[zero+nonneg+soc_cursor:zero+nonneg+soc_cursor+soc_cone])
+        soc_cursor += soc_cone
+    result[zero+nonneg:zero+nonneg+soc_cursor] *= -1.
+
+def make_derivative_project(vec, result, nonneg, soc):
     """Make DPi_K. We skip zero cone.
     """
     y_mask = np.ones(nonneg, dtype=float)
@@ -84,19 +102,7 @@ def loss_gradient(xy, m, n, zero, nonneg, matrix, b, c, workspace, soc=()):
 
     # zero cone dual variable is unconstrained
     # workspace['y_error'][:nonneg] = np.minimum(y[zero:zero+nonneg], 0.)
-    project(vec=y[zero:], result=workspace['y_error'], zero=zero, nonneg=nonneg, soc=soc)
-    # dual_cone_project(
-    #     z_cone=-y[zero:],
-    #     result=workspace['y_error'],
-    #     dimensions=(None, 0, nonneg, soc))
-    # workspace['y_error'] = -workspace['y_error']
-    # soc_cursor = 0
-    # for soc_cone in soc:
-    #     second_order_project(
-    #         z=-y[zero+nonneg+soc_cursor:zero+nonneg+soc_cursor+soc_cone],
-    #         result=workspace['y_error'][nonneg+soc_cursor:nonneg+soc_cursor+soc_cone])
-    #     workspace['y_error'][nonneg+soc_cursor:nonneg+soc_cursor+soc_cone] *= -1.
-    #     soc_cursor += soc_cone
+    project(vec=y[zero:], result=workspace['y_error'], nonneg=nonneg, soc=soc)
 
     # this must be all zeros
     workspace['dual_residual'][:] = matrix.T @ y + c
@@ -154,7 +160,7 @@ def hessian(
 
     # zero cone dual variable is unconstrained
     # workspace['y_error'][:nonneg] = np.minimum(y[zero:zero+nonneg], 0.)
-    project(vec=y[zero:], result=workspace['y_error'], zero=zero, nonneg=nonneg, soc=soc)
+    project(vec=y[zero:], result=workspace['y_error'], nonneg=nonneg, soc=soc)
 
     # this must be all zeros
     workspace['dual_residual'][:] = matrix.T @ y + c
@@ -181,7 +187,7 @@ def hessian(
         nonneg=nonneg, soc=soc)
 
     dpi_y = make_derivative_project(
-        vec=y, result=workspace['y_error'], zero=zero, nonneg=nonneg, soc=soc)
+        vec=y, result=workspace['y_error'], nonneg=nonneg, soc=soc)
 
     def _matvec(dxdy):
         result = np.empty_like(dxdy)
