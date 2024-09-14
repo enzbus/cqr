@@ -74,13 +74,39 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
         #     np.vstack([matrix_transf.todense(), c_transf.reshape((1, n))]))
         # matrix_transf = q[:-1].A
         # c_transf = q[-1].A1
-        q, r = np.linalg.qr(matrix_transf.todense())
-        matrix_transf = q.A
+        assert m > n
+        q, r = np.linalg.qr(matrix_transf.todense(), mode='complete')
+        matrix_transf = q[:, :n].A
+        nullspace_projector = q[:, n:].A
+        r = r[:n]
         c_transf = np.linalg.solve(r, c_transf)
 
         sigma_qr = np.linalg.norm(
             b_transf) #/ np.mean(np.linalg.norm(matrix_transf, axis=1))
         b_transf = b_transf/sigma_qr
+
+    # nullspace projection idea
+    y0 = -c_transf @ matrix_transf.T
+    # y is y0 plus vector in span of nullspace_projector
+    assert np.allclose(matrix_transf.T @ (y0 + nullspace_projector @ np.random.randn(m-n)) + c_transf, 0.)
+
+    variable = np.zeros(m)
+    #
+    def new_nullspace_loss(variable):
+        x = variable[:n]; y_null = variable[n:]
+        y = y0 + nullspace_projector @ y_null
+        s = -matrix_transf @ x + b_transf
+        y_loss = np.linalg.norm(np.minimum(y[zero:], 0.))**2
+        s_loss_zero = np.linalg.norm(s[:zero])**2
+        s_loss_nonneg = np.linalg.norm(np.minimum(s[zero:], 0.))**2
+        gap_loss = (c_transf.T @ x + b_transf.T @ y)**2
+        return (y_loss + s_loss_zero + s_loss_nonneg + gap_loss) / 2.
+
+    # import scipy.optimize as opt
+    # result = opt.minimize(new_nullspace_loss, variable, tol=1e-32)
+    # print(result)
+
+    # breakpoint()
 
     workspace = create_workspace(m, n, zero)
 
