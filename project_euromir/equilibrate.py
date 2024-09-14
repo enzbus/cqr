@@ -34,7 +34,7 @@ def _cones_separation_matrix(zero, nonneg, second_order):
 
 def hsde_ruiz_equilibration(  # pylint: disable=too-many-arguments
         matrix, b, c, dimensions, d=None, e=None, rho=1., sigma=1.,
-        eps_rows=1E-4, eps_cols=1E-4, max_iters=25):
+        eps_rows=1E-1, eps_cols=1E-1, max_iters=25):
     """Ruiz equilibration of problem matrices for the HSDE system.
 
     :param matrix: Problem matrix.
