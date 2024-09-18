@@ -33,6 +33,7 @@ from project_euromir.line_searcher import (BacktrackingLineSearcher,
                                            ScipyLineSearcher)
 from project_euromir.loss_no_hsde import (Dresidual, create_workspace, hessian,
                                           loss_gradient, residual)
+from project_euromir.loss_nullspace_proj import NullSpaceModel
 from project_euromir.minamide import (MinamideTest, hessian_x_nogap,
                                       hessian_y_nogap)
 from project_euromir.refinement import refine as hsde_refine
@@ -43,6 +44,7 @@ HSDE_REFINEMENT = False
 logger = logging.getLogger(__name__)
 
 QR_PRESOLVE = True
+NULLSPACE = True
 
 def solve(matrix, b, c, zero, nonneg, soc=(),
         # xy = None, # need to import logic for equilibration
@@ -88,10 +90,10 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
     # nullspace projection idea
     y0 = -c_transf @ matrix_transf.T
     # y is y0 plus vector in span of nullspace_projector
-    assert np.allclose(matrix_transf.T @ (y0 + nullspace_projector @ np.random.randn(m-n)) + c_transf, 0.)
+    assert np.allclose(
+        matrix_transf.T @ (
+            y0 + nullspace_projector @ np.random.randn(m-n)) + c_transf, 0.)
 
-    variable = np.zeros(m)
-    #
     def new_nullspace_loss(variable):
         x = variable[:n]; y_null = variable[n:]
         y = y0 + nullspace_projector @ y_null
@@ -103,10 +105,15 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
         return (y_loss + s_loss_zero + s_loss_nonneg + gap_loss) / 2.
 
     # import scipy.optimize as opt
+    # variable = np.zeros(m)
     # result = opt.minimize(new_nullspace_loss, variable, tol=1e-32)
     # print(result)
 
     # breakpoint()
+
+    ns_model = NullSpaceModel(
+        m=m, n=n, zero=zero, nonneg=nonneg, matrix_transfqr=matrix_transf,
+        b=b_transf, c=c_transf, nullspace_projector=nullspace_projector)
 
     workspace = create_workspace(m, n, zero)
 
@@ -144,9 +151,19 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
             xy, m=m, n=n, zero=zero, matrix=matrix_transf, b=b_transf,
             c=c_transf, nonneg=nonneg,  soc=soc)
 
-    xy = np.zeros(n+m)
-    loss_xy = _local_loss(xy)
-    grad_xy = _local_grad(xy)
+    if NULLSPACE:
+        xy = np.zeros(m)
+        loss_func = ns_model.loss
+        grad_func = ns_model.gradient
+        hess_func = ns_model.hessian
+    else:
+        xy = np.zeros(n+m)
+        loss_func = _local_loss
+        grad_func = _local_grad
+        hess_func = _local_hessian
+
+    loss_xy = loss_func(xy)
+    grad_xy = grad_func(xy)
 
     # line_searcher = LogSpaceLineSearcher(
     #     loss_function=_local_loss,
@@ -161,7 +178,7 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
     line_searcher = BacktrackingLineSearcher(
         # Scipy searcher is not stable enough, breaks on numerical errors
         # with small steps
-        loss_function=_local_loss,
+        loss_function=loss_func,
         max_iters=1000)
 
     # direction_calculator = WarmStartedCGNewton(
@@ -190,7 +207,7 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
     # direction_calculator = ExactDiagPreconditionedCGNewton(
     direction_calculator  = CGNewton(
         # warm start causes issues if null space changes b/w iterations
-        hessian_function=_local_hessian,
+        hessian_function=hess_func,
         rtol_termination=lambda x, g: min(0.5, np.linalg.norm(g)**0.5), #,**2),
         max_cg_iters=None,
         # minres=True, # less stable, needs more stringent termination,
@@ -236,7 +253,7 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
 
     for newton_iterations in range(1000):
 
-        grad_xy = _local_grad(xy)
+        grad_xy = grad_func(xy)
 
         logger.info(
             'Iteration %d, current loss %.2e, current inf norm grad %.2e',
@@ -353,6 +370,12 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
     print('Newton-CG iterations', newton_iterations)
     print('DirectionCalculator statistics', direction_calculator.statistics)
     print('LineSearcher statistics', line_searcher.statistics)
+
+    if NULLSPACE:
+        x, y_null = xy[:n], xy[n:]
+        xy = np.empty(n+m)
+        xy[:n] = x
+        xy[n:] = y0 + nullspace_projector @ y_null
 
     if not HSDE_REFINEMENT:
         # switch to refinement
