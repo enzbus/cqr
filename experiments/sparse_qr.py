@@ -57,11 +57,11 @@ plt.show()
 
 m, n = mat.shape
 
-for i in range(0):
+for i in range(1):
 
     # permute rows
-    sparsity = row_permute(sparsity, w, weighter_mult = 0.)
-    print(f'HOW MANY BELOW {int(count_below(sparsity))}')
+    # sparsity = row_permute(sparsity, w, weighter_mult = 0.)
+    # print(f'HOW MANY BELOW {int(count_below(sparsity))}')
     # plt.imshow(sparsity)
     # plt.show()
 
