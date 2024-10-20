@@ -130,7 +130,7 @@ class CGNewton(DenseNewton):
     def __init__(
             self, hessian_function,
             rtol_termination=nocedal_wright_termination, max_cg_iters=None,
-            regularizer=0., minres=False):
+            regularizer=0., minres=False, regularizer_callback=None):
         """Initialize with function to calculate Hessian.
 
         :param hessian_function: Function that returns the Hessian. We support
@@ -151,6 +151,7 @@ class CGNewton(DenseNewton):
         self._max_cg_iters = max_cg_iters
         self._regularizer = regularizer
         self._minres = minres
+        self._regularizer_callback = regularizer_callback
         self._statistics = {'HESSIAN_MATMULS':  0}
         super().__init__(hessian_function=hessian_function)
 
@@ -171,7 +172,13 @@ class CGNewton(DenseNewton):
         def _counter(_):
             nonlocal iteration_counter
             iteration_counter += 1
-        current_hessian = self._hessian_function(current_point)
+        if self._regularizer_callback is not None:
+            current_hessian = self._hessian_function(
+                current_point,
+                regularizer=self._regularizer_callback(
+                    current_point, current_gradient))
+        else:
+            current_hessian = self._hessian_function(current_point)
         if self._regularizer > 0.:
             orig_hessian = current_hessian
             current_hessian = sp.sparse.linalg.LinearOperator(

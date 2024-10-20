@@ -156,11 +156,15 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
         loss_func = ns_model.loss
         grad_func = ns_model.gradient
         hess_func = ns_model.hessian
+        residual_func = ns_model.residual
+        derivative_residual_func = ns_model.derivative_residual
     else:
         xy = np.zeros(n+m)
         loss_func = _local_loss
         grad_func = _local_grad
         hess_func = _local_hessian
+        residual_func = _local_residual
+        derivative_residual_func = _local_derivative_residual
 
     loss_xy = loss_func(xy)
     grad_xy = grad_func(xy)
@@ -210,6 +214,7 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
         hessian_function=hess_func,
         rtol_termination=lambda x, g: min(0.5, np.linalg.norm(g)**0.5), #,**2),
         max_cg_iters=None,
+        regularizer_callback=lambda current_point, current_gradient: np.linalg.norm(current_gradient)**.5,
         # minres=True, # less stable, needs more stringent termination,
         # and/or better logic to transition to refinement, but it is a bit faster
         # it seems
@@ -231,10 +236,10 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
 
     # LSMR seems better than LSQR and CG, however need to count matrix evals
     # direction_calculator = LSMRLevenbergMarquardt(
-    #     residual_function=_local_residual,
-    #     derivative_residual_function=_local_derivative_residual,
-    #     warm_start=True, # also doesn't work with warm start
-    #     )
+    #      residual_function=residual_func,
+    #      derivative_residual_function=derivative_residual_func,
+    #      # warm_start=True, # also doesn't work with warm start
+    #      )
 
     # direction_calculator = DenseNewton( #WarmStartedCGNewton(
     #     hessian_function=_local_hessian,

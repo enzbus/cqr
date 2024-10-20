@@ -58,6 +58,71 @@ class NullSpaceModel:
         return (y_loss + s_loss_zero + s_loss_nonneg + gap_loss
             ) / 2.
 
+    def residual(self, variable):
+        x = variable[:self.n]
+        y_null = variable[self.n:]
+        y = self.y0 + self.nullspace_projector @ y_null
+        s = -self.matrix @ x + self.b
+        y_loss = np.linalg.norm(np.minimum(y[self.zero:], 0.))**2
+        s_loss_zero = np.linalg.norm(s[:self.zero])**2
+        s_loss_nonneg = np.linalg.norm(np.minimum(s[self.zero:], 0.))**2
+        gap_loss = (self.c.T @ x + self.b.T @ y)**2
+        return np.concatenate([y_loss, s_loss_zero, s_loss_nonneg, [gap_loss]])
+
+    def derivative_residual(self, variable):
+
+        x = variable[:self.n]
+        y_null = variable[self.n:]
+        y = self.y0 + self.nullspace_projector @ y_null
+        s = -self.matrix @ x + self.b
+        y_error = np.minimum(y[self.zero:self.zero+self.nonneg], 0.)
+        s_error = np.copy(s)
+        s_error[self.zero:self.zero+self.nonneg] = np.minimum(
+            s[self.zero:self.zero+self.nonneg], 0.)
+        gap = self.c.T @ x + self.b.T @ y
+
+        # this is DProj
+        s_mask = np.ones(self.m, dtype=float)
+        s_mask[self.zero:] = s_error[self.zero:] < 0.
+        y_mask = np.zeros(self.m, dtype=float)
+        y_mask[self.zero:] = y_error < 0.
+        def _matvec(dxy):
+
+            # decompose direction
+            dx = dxy[:n]
+            dy = dxy[n:]
+
+            # compose result
+            dr = np.empty(n + 2 * m - zero + 1, dtype=float)
+            dr[:m-zero] = y_mask * dy[zero:]
+            dr[m-zero:m+n-zero] = matrix.T @ dy
+            dr[-1-m:-1] = s_mask * (-(matrix @ dx))
+            dr[-1] = pridua @ dxy
+
+            return dr
+
+        def _rmatvec(dr):
+
+            # decompose direction
+            dy_err = dr[:m-zero]
+            ddua_res = dr[m-zero:m+n-zero]
+            ds_err = dr[-1-m:-1]
+            dgap = dr[-1]
+
+            # compose result
+            dxy = np.zeros(n + m, dtype=float)
+            dxy[-(m-zero):] += y_mask * dy_err
+            dxy[-m:] += matrix @ ddua_res
+            dxy[:n] -= matrix.T @ (s_mask * ds_err)
+            dxy += dgap * pridua
+
+            return dxy
+
+        return sp.sparse.linalg.LinearOperator(
+            shape=(2 * m - zero + 1, m),
+            matvec = _matvec,
+            rmatvec = _rmatvec)
+
     def gradient(self, variable):
         x = variable[:self.n]
         y_null = variable[self.n:]
@@ -77,7 +142,7 @@ class NullSpaceModel:
         gradient[self.n:] += gap * self.b_proj
         return gradient
 
-    def hessian(self, variable): #, regularizer = 0.):
+    def hessian(self, variable, regularizer = 0.):
         x = variable[:self.n]
         y_null = variable[self.n:]
         y = self.y0 + self.nullspace_projector @ y_null
@@ -93,6 +158,11 @@ class NullSpaceModel:
         s_mask[self.zero:] = s_error[self.zero:] < 0.
         y_mask = np.zeros(self.m, dtype=float)
         y_mask[self.zero:] = y_error < 0.
+
+        s_mask += regularizer
+        y_mask += regularizer
+        s_mask *= s_mask
+        y_mask *= y_mask
 
         def _matvec(dvar):
             result = np.empty_like(dvar)
