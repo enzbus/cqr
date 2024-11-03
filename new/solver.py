@@ -252,7 +252,18 @@ class Solver:
         result = sp.optimize.least_squares(
             self.newres, np.zeros(self.m-1),
             jac=self.newjacobian, method='lm')
-        # print(result)
+        print(result)
+        
+        if result.cost > 1e-12:
+            # infeasible; for convenience we just set this here,
+            # will have to check which is valid and maybe throw exceptions
+            print('infeasibility certificate')
+            self.infeasibility_certificate = -self.newres(result.x)[:self.m]
+            print(self.infeasibility_certificate)
+            # assert np.min(self.infeasibility_certificate) >= -1e-6
+            # assert np.allclose(self.matrix.T @ self.infeasibility_certificate, 0.)
+            # assert self.b.T @ self.infeasibility_certificate < 0.
+
         var_reduced = result.x
         var = self.var0 + self.gap_NS @ var_reduced
         self.x_transf = var[:self.n]

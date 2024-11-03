@@ -79,6 +79,16 @@ class TestSolverClass(TestCase):
         solver = Solver(matrix, b, c, 0, len(b))
         self.check_solution_valid(matrix, b, c, solver.x, solver.y)
 
+    def _base_test_infeasible_from_cvxpy(self, cvxpy_problem_obj):
+        matrix, b, c = self.make_program_from_cvxpy(cvxpy_problem_obj)
+        solver = Solver(matrix, b, c, 0, len(b))
+        cert = solver.infeasibility_certificate
+        self.assertLess(b.T @ cert, 0)
+        cert /= np.abs(b.T @ cert) # normalize
+        self.assertGreater(np.min(cert), -1e-6)
+        self.assertTrue(np.allclose(matrix.T @ cert, 0., atol=1e-6, rtol=1e-6))
+        self.assertLess(b.T @ cert, 0)
+
     def _base_test_solvable_from_cvxpy(self, cvxpy_problem_obj):
         matrix, b, c = self.make_program_from_cvxpy(cvxpy_problem_obj)
         self._base_test_solvable(matrix, b, c)
@@ -86,6 +96,23 @@ class TestSolverClass(TestCase):
     def _base_test_solvable_from_matrix(self, matrix):
         b, c = self.make_program_from_matrix(matrix)
         self._base_test_solvable(matrix, b, c)
+
+    def test_simple_infeasible(self):
+        """Simple primal infeasible."""
+        x = cp.Variable(5)
+        probl = cp.Problem(
+            cp.Minimize(cp.norm1(x @ np.random.randn(5,10))),
+            [x >= 0, x[3]<=-1.])
+        self._base_test_infeasible_from_cvxpy(probl)
+
+    def test_more_difficult_infeasible(self):
+        """More difficult primal infeasible."""
+        np.random.randn(0)
+        x = cp.Variable(5)
+        probl = cp.Problem(
+            cp.Minimize(cp.norm1(x @ np.random.randn(5,10))),
+            [np.random.randn(20,5) @ x >= 10])
+        self._base_test_infeasible_from_cvxpy(probl)
 
     def test_from_cvxpy_redundant_constraints(self):
         """Test simple CVXPY problem with redundant constraints."""
@@ -155,6 +182,8 @@ class TestSolverClass(TestCase):
         matrix = np.concatenate([matrix.T, [matrix.sum(1)]], axis=0).T
         # matrix = matrix[[0,2,1]]
         self._base_test_solvable_from_matrix(matrix)
+
+
 
 
     # def test(self):
