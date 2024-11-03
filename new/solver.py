@@ -76,8 +76,10 @@ class Solver:
 
         self._qr_transform_program_data()
         self._qr_transform_dual_space()
+        self._qr_transform_gap()
 
-        self.toy_solve()
+        # self.toy_solve()
+        self.new_toy_solve()
         # self.x_transf, self.y = self.solve_program_cvxpy(
         #     self.matrix_qr_transf, b, self.c_qr_transf)
         self._invert_qr_transform_dual_space()
@@ -156,8 +158,6 @@ class Solver:
             #    "Cost vector is not in the span of the program matrix!")
         self.x = result
 
-    
-
     def _qr_transform_dual_space(self):
         """Apply QR transformation to dual space."""
         self.y0 = self.matrix_qr_transf @ -self.c_qr_transf
@@ -172,6 +172,40 @@ class Solver:
     def _invert_qr_transform_dual_space(self):
         """Apply QR transformation to dual space."""
         self.y = self.y0 + self.nullspace_projector @ self.y_reduced
+
+    def _qr_transform_gap(self):
+        """Apply QR transformation to zero-gap residual."""
+        Q, R = np.linalg.qr(np.concatenate(
+            [self.c_qr_transf, self.b_reduced]).reshape((self.m,1)), mode='complete')
+        self.gap_NS = Q[:, 1:]
+        self.var0 = - self.b0 * np.concatenate(
+            [self.c_qr_transf, self.b_reduced]) / np.linalg.norm(np.concatenate([self.c_qr_transf, self.b_reduced]))**2
+
+    def newres(self, var_reduced):
+        """Residual using gap QR transform."""
+        var = self.var0 + self.gap_NS @ var_reduced
+        x = var[:self.n]
+        y_reduced = var[self.n:]
+        if self.m <= self.n:
+            return self.pri_res(x)
+        return np.concatenate(
+            [self.pri_res(x), self.dua_res(y_reduced)])
+
+    def newjacobian(self, var_reduced):
+        var = self.var0 + self.gap_NS @ var_reduced
+        x = var[:self.n]
+        y_reduced = var[self.n:]
+        s_active = 1. * ((self.b - self.matrix_qr_transf @ x) < 0.)
+        y_active = 1. * ((self.y0 + self.nullspace_projector @ y_reduced) < 0.)
+        if self.m <= self.n:
+            result = np.block(
+                [[-np.diag(s_active) @ self.matrix_qr_transf]])
+        else:
+            result = np.block(
+                [[-np.diag(s_active) @ self.matrix_qr_transf, np.zeros((self.m, self.m-self.n))],
+                [np.zeros((self.m, self.n)), np.diag(y_active) @ self.nullspace_projector],
+                ])    
+        return result @ self.gap_NS
 
     def pri_res(self, x):
         return np.minimum(self.b - self.matrix_qr_transf @ x, 0.)
@@ -211,6 +245,16 @@ class Solver:
             self.res, np.zeros(self.m),
             jac=self.jacobian, method='lm')
         var = result.x
+        self.x_transf = var[:self.n]
+        self.y_reduced = var[self.n:]
+
+    def new_toy_solve(self):
+        result = sp.optimize.least_squares(
+            self.newres, np.zeros(self.m-1),
+            jac=self.newjacobian, method='lm')
+        # print(result)
+        var_reduced = result.x
+        var = self.var0 + self.gap_NS @ var_reduced
         self.x_transf = var[:self.n]
         self.y_reduced = var[self.n:]
 
