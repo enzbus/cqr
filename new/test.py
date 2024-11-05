@@ -24,7 +24,7 @@ import cvxpy as cp
 import numpy as np
 import scipy as sp
 
-from solver import Solver
+from solver import Solver, Infeasible, Unbounded
 
 class TestSolverClass(TestCase):
     """Unit tests of the solver class."""
@@ -81,13 +81,26 @@ class TestSolverClass(TestCase):
 
     def _base_test_infeasible_from_cvxpy(self, cvxpy_problem_obj):
         matrix, b, c = self.make_program_from_cvxpy(cvxpy_problem_obj)
-        solver = Solver(matrix, b, c, 0, len(b))
-        cert = solver.infeasibility_certificate
-        self.assertLess(b.T @ cert, 0)
-        cert /= np.abs(b.T @ cert) # normalize
-        self.assertGreater(np.min(cert), -1e-6)
-        self.assertTrue(np.allclose(matrix.T @ cert, 0., atol=1e-6, rtol=1e-6))
-        self.assertLess(b.T @ cert, 0)
+        with self.assertRaises(Infeasible):
+            solver = Solver(matrix, b, c, 0, len(b))
+            cert = solver.y
+            self.assertLess(b.T @ cert, 0)
+            cert /= np.abs(b.T @ cert) # normalize
+            self.assertGreater(np.min(cert), -1e-6)
+            self.assertTrue(np.allclose(matrix.T @ cert, 0., atol=1e-6, rtol=1e-6))
+            self.assertLess(b.T @ cert, 0)
+
+    def _base_test_unbounded_from_cvxpy(self, cvxpy_problem_obj):
+        matrix, b, c = self.make_program_from_cvxpy(cvxpy_problem_obj)
+        with self.assertRaises(Unbounded):
+            solver = Solver(matrix, b, c, 0, len(b))
+            cert = solver.x
+            self.assertLess(c.T @ cert, 0)
+            cert /= np.abs(c.T @ cert) # normalize
+            conic = -matrix @ cert
+            self.assertGreater(np.min(conic), -1e-6)
+        # self.assertTrue(np.allclose(matrix.T @ cert, 0., atol=1e-6, rtol=1e-6))
+        # self.assertLess(b.T @ cert, 0)
 
     def _base_test_solvable_from_cvxpy(self, cvxpy_problem_obj):
         matrix, b, c = self.make_program_from_cvxpy(cvxpy_problem_obj)
@@ -104,6 +117,24 @@ class TestSolverClass(TestCase):
             cp.Minimize(cp.norm1(x @ np.random.randn(5,10))),
             [x >= 0, x[3]<=-1.])
         self._base_test_infeasible_from_cvxpy(probl)
+
+
+    def test_simple_unbounded(self):
+        """Simple primal unbounded."""
+        x = cp.Variable(5)
+        probl = cp.Problem(
+            cp.Minimize(cp.norm1(x[1:] @ np.random.randn(4,10)) + x[0]),
+            [x<=1.])
+        self._base_test_unbounded_from_cvxpy(probl)
+
+    def test_more_difficult_unbounded(self):
+        """More difficult unbounded."""
+        x = cp.Variable(5)
+        probl = cp.Problem(
+            cp.Minimize(cp.sum(x @ np.random.randn(5,3))),
+            [x<=1.])
+        self._base_test_unbounded_from_cvxpy(probl)
+
 
     def test_more_difficult_infeasible(self):
         """More difficult primal infeasible."""

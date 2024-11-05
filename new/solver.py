@@ -257,9 +257,28 @@ class Solver:
         if result.cost > 1e-12:
             # infeasible; for convenience we just set this here,
             # will have to check which is valid and maybe throw exceptions
-            print('infeasibility certificate')
-            self.infeasibility_certificate = -self.newres(result.x)[:self.m]
-            print(self.infeasibility_certificate)
+            self.y = -self.newres(result.x)[:self.m]
+            if np.linalg.norm(self.y)**2 > 1e-12:
+                print('infeasibility certificate')
+                print(self.y)
+                raise Infeasible()
+
+            s_certificate = -self.newres(result.x)[self.m:]
+            if np.linalg.norm(s_certificate)**2 > 1e-12:
+                print('unboundedness certificate')
+                self.x_transf = - self.matrix_qr_transf.T @ s_certificate
+                self.invert_qr_transform()
+                raise Unbounded()
+
+            # breakpoint()
+
+            # var = self.var0 + self.gap_NS @ result.x
+            # y_reduced = var[self.n:]
+            # y = self.y0 + self.nullspace_projector @ y_reduced
+            # elf.unboundedness_certificate = - (self.matrix.T @ y + self.c)
+            
+            # self.invert_qr_transform()
+
             # assert np.min(self.infeasibility_certificate) >= -1e-6
             # assert np.allclose(self.matrix.T @ self.infeasibility_certificate, 0.)
             # assert self.b.T @ self.infeasibility_certificate < 0.
