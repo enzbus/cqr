@@ -95,6 +95,7 @@ class TestSolverClass(TestCase):
         with self.assertRaises(Unbounded):
             solver = Solver(matrix, b, c, 0, len(b))
             cert = solver.x
+            print(cert)
             self.assertLess(c.T @ cert, 0)
             cert /= np.abs(c.T @ cert) # normalize
             conic = -matrix @ cert

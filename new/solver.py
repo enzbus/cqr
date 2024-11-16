@@ -162,7 +162,7 @@ class Solver:
         """Apply QR transformation to dual space."""
         self.y0 = self.matrix_qr_transf @ -self.c_qr_transf
         if self.m <= self.n:
-            if not np.all(self.y0 >= 1e-12):
+            if not np.allclose(self.dual_cone_project(self.y0), self.y0):
                 raise Unbounded("There is no feasible dual vector.")
         # diff = self.y - self.y0
         # self.y_reduced = self.nullspace_projector.T @ diff
@@ -181,72 +181,126 @@ class Solver:
         self.var0 = - self.b0 * np.concatenate(
             [self.c_qr_transf, self.b_reduced]) / np.linalg.norm(np.concatenate([self.c_qr_transf, self.b_reduced]))**2
 
+
+    def cone_project(self, s):
+        """Project on program cone."""
+        return np.maximum(s, 0.)
+
+    def identity_minus_cone_project(self, s):
+        """Identity minus projection on program cone."""
+        return s - self.cone_project(s)
+
+    def pri_err(self, x):
+        """Error on primal cone."""
+        s = self.b - self.matrix_qr_transf @ x
+        return self.identity_minus_cone_project(s)
+
+    def dual_cone_project(self, y):
+        """Project on dual of program cone."""
+        return np.maximum(y, 0.)
+
+    def identity_minus_dual_cone_project(self, y):
+        """Identity minus projection on dual of program cone."""
+        return y - self.dual_cone_project(y)
+
+    def dua_err(self, y_reduced):
+        """Error on dual cone."""
+        y = self.y0 + self.nullspace_projector @ y_reduced
+        return self.identity_minus_dual_cone_project(y)
+
     def newres(self, var_reduced):
         """Residual using gap QR transform."""
         var = self.var0 + self.gap_NS @ var_reduced
         x = var[:self.n]
         y_reduced = var[self.n:]
         if self.m <= self.n:
-            return self.pri_res(x)
+            return self.pri_err(x)
         return np.concatenate(
-            [self.pri_res(x), self.dua_res(y_reduced)])
+            [self.pri_err(x), self.dua_err(y_reduced)])
+
+    def cone_project_derivative(self, s):
+        """Derivative of projection on program cone."""
+        return np.diag(1 * (s >= 0.))
+
+    def identity_minus_cone_project_derivative(self, s):
+        """Identity minus derivative of projection on program cone."""
+        return np.eye(self.m) - self.cone_project_derivative(s)
+
+    def dual_cone_project_derivative(self, y):
+        """Derivative of projection on program cone."""
+        return np.diag(1 * (y >= 0.))
+
+    def identity_minus_dual_cone_project_derivative(self, y):
+        """Identity minus derivative of projection on dual of program cone."""
+        return np.eye(
+            self.m - self.zero) - self.dual_cone_project_derivative(y)
 
     def newjacobian(self, var_reduced):
+        """Jacobian of the residual using gap QR transform."""
         var = self.var0 + self.gap_NS @ var_reduced
         x = var[:self.n]
         y_reduced = var[self.n:]
-        s_active = 1. * ((self.b - self.matrix_qr_transf @ x) < 0.)
-        y_active = 1. * ((self.y0 + self.nullspace_projector @ y_reduced) < 0.)
+        s = self.b - self.matrix_qr_transf @ x
+        y = self.y0 + self.nullspace_projector @ y_reduced
+
         if self.m <= self.n:
             result = np.block(
-                [[-np.diag(s_active) @ self.matrix_qr_transf]])
+                [[
+                    -self.identity_minus_cone_project_derivative(
+                        s) @ self.matrix_qr_transf]])
         else:
             result = np.block(
-                [[-np.diag(s_active) @ self.matrix_qr_transf, np.zeros((self.m, self.m-self.n))],
-                [np.zeros((self.m, self.n)), np.diag(y_active) @ self.nullspace_projector],
-                ])    
+                [[-self.identity_minus_cone_project_derivative(
+                    s) @ self.matrix_qr_transf,
+                    np.zeros((self.m, self.m-self.n))],
+                [
+                    np.zeros((self.m-self.zero, self.n)),
+                    self.identity_minus_dual_cone_project_derivative(
+                        y) @ self.nullspace_projector[self.zero:]],
+                ])
+
+        # print('\n' *5)
+        # print(np.linalg.svd(result @ self.gap_NS)[1])
+        # print('\n' * 5)
+
         return result @ self.gap_NS
 
-    def pri_res(self, x):
-        return np.minimum(self.b - self.matrix_qr_transf @ x, 0.)
 
-    def dua_res(self, y_reduced):
-        return np.minimum(self.y0 + self.nullspace_projector @ y_reduced, 0.)
 
-    def gap(self, x, y_reduced):
-        return self.c_qr_transf.T @ x + self.b_reduced @ y_reduced + self.b0
+    # def gap(self, x, y_reduced):
+    #     return self.c_qr_transf.T @ x + self.b_reduced @ y_reduced + self.b0
 
-    def res(self, var):
-        x = var[:self.n]
-        y_reduced = var[self.n:]
-        if self.m <= self.n:
-            return np.concatenate(
-                [self.pri_res(x), [self.gap(x,y_reduced)]])
-        return np.concatenate(
-            [self.pri_res(x), self.dua_res(y_reduced), [self.gap(x,y_reduced)]])
+    # def res(self, var):
+    #     x = var[:self.n]
+    #     y_reduced = var[self.n:]
+    #     if self.m <= self.n:
+    #         return np.concatenate(
+    #             [self.pri_res(x), [self.gap(x,y_reduced)]])
+    #     return np.concatenate(
+    #         [self.pri_res(x), self.dua_res(y_reduced), [self.gap(x,y_reduced)]])
 
-    def jacobian(self, var):
-        x = var[:self.n]
-        y_reduced = var[self.n:]
-        s_active = 1. * ((self.b - self.matrix_qr_transf @ x) < 0.)
-        y_active = 1. * ((self.y0 + self.nullspace_projector @ y_reduced) < 0.)
-        if self.m <= self.n:
-            return np.block(
-                [[-np.diag(s_active) @ self.matrix_qr_transf],
-                [self.c_qr_transf.reshape(1,self.m)]])
-        return np.block(
-            [[-np.diag(s_active) @ self.matrix_qr_transf, np.zeros((self.m, self.m-self.n))],
-            [np.zeros((self.m, self.n)), np.diag(y_active) @ self.nullspace_projector],
-            [self.c_qr_transf.reshape(1,self.n), self.b_reduced.reshape(1, self.m-self.n)] 
-            ])    
+    # def jacobian(self, var):
+    #     x = var[:self.n]
+    #     y_reduced = var[self.n:]
+    #     s_active = 1. * ((self.b - self.matrix_qr_transf @ x) < 0.)
+    #     y_active = 1. * ((self.y0 + self.nullspace_projector @ y_reduced) < 0.)
+    #     if self.m <= self.n:
+    #         return np.block(
+    #             [[-np.diag(s_active) @ self.matrix_qr_transf],
+    #             [self.c_qr_transf.reshape(1,self.m)]])
+    #     return np.block(
+    #         [[-np.diag(s_active) @ self.matrix_qr_transf, np.zeros((self.m, self.m-self.n))],
+    #         [np.zeros((self.m, self.n)), np.diag(y_active) @ self.nullspace_projector],
+    #         [self.c_qr_transf.reshape(1,self.n), self.b_reduced.reshape(1, self.m-self.n)] 
+    #         ])    
 
-    def toy_solve(self):
-        result = sp.optimize.least_squares(
-            self.res, np.zeros(self.m),
-            jac=self.jacobian, method='lm')
-        var = result.x
-        self.x_transf = var[:self.n]
-        self.y_reduced = var[self.n:]
+    # def toy_solve(self):
+    #     result = sp.optimize.least_squares(
+    #         self.res, np.zeros(self.m),
+    #         jac=self.jacobian, method='lm')
+    #     var = result.x
+    #     self.x_transf = var[:self.n]
+    #     self.y_reduced = var[self.n:]
 
     def new_toy_solve(self):
         result = sp.optimize.least_squares(
