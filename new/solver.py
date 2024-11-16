@@ -227,7 +227,7 @@ class Solver:
         return np.eye(self.m) - self.cone_project_derivative(s)
 
     def dual_cone_project_derivative(self, y):
-        """Derivative of projection on program cone."""
+        """Derivative of projection on dual of program cone."""
         return np.diag(1 * (y >= 0.))
 
     def identity_minus_dual_cone_project_derivative(self, y):

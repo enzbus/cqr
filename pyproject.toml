@@ -15,7 +15,8 @@ dev = [
     "build", "twine", "pylint", "isort", "autopep8", "docformatter", "cvxpy-base",
     "diff_cover"]
 test = [
-    "cvxpy-base", 'coverage[toml]', 'ecos']
+    "cvxpy-base<1.6", # changed solver interface with 1.6
+    'coverage[toml]', 'ecos']
 
 [build-system]
 requires = ["setuptools"]#, "cmake"]
