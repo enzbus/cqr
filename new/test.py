@@ -110,7 +110,7 @@ class TestSolverClass(TestCase):
         We both check that CVXPY with default solver returns same status
         (optimal/infeasible/unbounded) and that the solution or
         certificate is valid. We don't look at the CVXPY solution or
-        certificate.
+        certificate (only the CVXPY status).
         """
         assert zero + nonneg == len(b)
         solver = Solver(
@@ -149,9 +149,10 @@ class TestSolverClass(TestCase):
         c = -matrix.T @ y
         return b, c
 
-    def _base_test_solvable_from_matrix(self, matrix):
-        b, c = self.make_program_from_matrix(matrix, zero=0)
-        self.check_solve(matrix, b, c, zero=0, nonneg=len(b))
+    def _base_test_from_matrix(self, matrix, zero):
+        assert zero <= matrix.shape[0]
+        b, c = self.make_program_from_matrix(matrix, zero=zero)
+        self.check_solve(matrix, b, c, zero=zero, nonneg=len(b)-zero)
 
     ###
     # Simple corner case tests
@@ -162,21 +163,24 @@ class TestSolverClass(TestCase):
         np.random.seed(0)
         print('\nm<n, matrix full rank\n')
         matrix = np.random.randn(2, 5)
-        self._base_test_solvable_from_matrix(matrix)
+        for zero in range(matrix.shape[0]+1):
+            self._base_test_from_matrix(matrix, zero=zero)
 
     def test_m_equal_n_full_rank_(self):
         """M=n, matrix full rank."""
         print('\nm=n, matrix full rank\n')
         np.random.seed(0)
         matrix = np.random.randn(3, 3)
-        self._base_test_solvable_from_matrix(matrix)
+        for zero in range(matrix.shape[0]+1):
+            self._base_test_from_matrix(matrix, zero=zero)
 
     def test_m_greater_n_full_rank_(self):
         """M>n, matrix full rank."""
         np.random.seed(0)
         print('\nm>n, matrix full rank\n')
         matrix = np.random.randn(5, 2)
-        self._base_test_solvable_from_matrix(matrix)
+        for zero in range(matrix.shape[0]+1):
+            self._base_test_from_matrix(matrix, zero=zero)
 
     def test_m_less_n_rank_deficient(self):
         """M<n, matrix rank deficient."""
@@ -185,7 +189,8 @@ class TestSolverClass(TestCase):
         matrix = np.random.randn(2, 5)
         matrix = np.concatenate([matrix, [matrix.sum(0)]], axis=0)
         matrix = matrix[[0, 2, 1]]
-        self._base_test_solvable_from_matrix(matrix)
+        for zero in range(matrix.shape[0]+1):
+            self._base_test_from_matrix(matrix, zero=zero)
 
     def test_m_equal_n_rank_deficient(self):
         """M=n, matrix rank deficient."""
@@ -194,7 +199,8 @@ class TestSolverClass(TestCase):
         matrix = np.random.randn(2, 3)
         matrix = np.concatenate([matrix, [matrix.sum(0)]], axis=0)
         matrix = matrix[[0, 2, 1]]
-        self._base_test_solvable_from_matrix(matrix)
+        for zero in range(matrix.shape[0]+1):
+            self._base_test_from_matrix(matrix, zero=zero)
 
     def test_m_greater_n_rank_deficient(self):
         """M>n, matrix rank deficient."""
@@ -203,7 +209,8 @@ class TestSolverClass(TestCase):
         matrix = np.random.randn(5, 2)
         matrix = np.concatenate([matrix.T, [matrix.sum(1)]], axis=0).T
         # matrix = matrix[[0,2,1]]
-        self._base_test_solvable_from_matrix(matrix)
+        for zero in range(matrix.shape[0]+1):
+            self._base_test_from_matrix(matrix, zero=zero)
 
     ###
     # Specify program as CVXPY object, reduce to code above
@@ -266,7 +273,7 @@ class TestSolverClass(TestCase):
         x = cp.Variable(5)
         probl = cp.Problem(
             cp.Minimize(cp.norm1(x @ np.random.randn(5, 10))),
-            [x >= 0, x <= 1.,  x <= 1.]) # redundant constraints
+            [x >= 0, x <= 1., x <= 1.]) # redundant constraints
         self.check_solve_from_cvxpy(probl)
 
     def test_from_cvxpy_unused_variable(self):

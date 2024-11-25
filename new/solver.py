@@ -69,6 +69,8 @@ class Solver:
         assert len(c) == self.n
         self.c = np.array(c, dtype=float)
 
+        print(f'Program: m={self.m}, n={self.n}, zero={self.zero}, nonneg={self.nonneg}')
+
         # process initial guess
         self.x = np.empty(self.n, dtype=float)
         self.y = np.empty(self.m, dtype=float)
@@ -90,6 +92,8 @@ class Solver:
             self.status = 'Infeasible'
         except Unbounded:
             self.status = 'Unbounded'
+
+        print('Resulting status:', self.status)
 
     def backsolve_r(self, vector):
         """Simple triangular solve with matrix R."""
@@ -238,7 +242,8 @@ class Solver:
 
     def cone_project_derivative(self, s):
         """Derivative of projection on program cone."""
-        return np.diag(np.concatenate([np.zeros(self.zero), 1 * (s >= 0.)]))
+        return np.diag(
+            np.concatenate([np.zeros(self.zero), 1 * (s[self.zero:] >= 0.)]))
 
     def identity_minus_cone_project_derivative(self, s):
         """Identity minus derivative of projection on program cone."""
