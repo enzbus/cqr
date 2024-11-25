@@ -46,11 +46,11 @@ class Solver:
     :type zero: int
     :param nonneg: Size of the non-negative cone.
     :type nonneg: int
-    :param x0: Initial guess of the primal variable. Default None, equivalent
-        to zero vector.
+    :param x0: Initial guess of the primal variable. Default None,
+        equivalent to zero vector.
     :type x0: np.array or None.
-    :param y0: Initial guess of the dual variable. Default None, equivalent
-        to zero vector.
+    :param y0: Initial guess of the dual variable. Default None,
+        equivalent to zero vector.
     :type y0: np.array or None.
     """
 
@@ -105,8 +105,8 @@ class Solver:
         :param x0: Initial guess of the primal variable. Default None,
             equivalent to zero vector.
         :type x0: np.array or None.
-        :param y0: Initial guess of the dual variable. Default None, equivalent
-            to zero vector.
+        :param y0: Initial guess of the dual variable. Default None,
+            equivalent to zero vector.
         :type y0: np.array or None.
         """
 
@@ -250,7 +250,7 @@ class Solver:
 
     def identity_minus_dual_cone_project_derivative_nozero(self, y):
         """Identity minus derivative of projection on dual of program cone.
-        
+
         (Skip zeros.)
         """
         return np.eye(
