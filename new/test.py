@@ -245,6 +245,20 @@ class TestSolverClass(TestCase):
     # Check correct by specifying CVXPY programs
     ###
 
+    def test_simple_redundant_x(self):
+        """Check simple with redundant x variable."""
+        x = cp.Variable(5)
+        c = np.zeros(5)
+        c[:-2] = 1.
+        probl = cp.Problem(
+            cp.Minimize(c.T @ x),
+            [cp.abs(x) <= 1])
+        self.check_solve_from_cvxpy(probl)
+        probl = cp.Problem(
+            cp.Minimize(c.T @ x),
+            [x <= 1, x >= -1])
+        self.check_solve_from_cvxpy(probl)
+
     def test_simple_infeasible(self):
         """Simple primal infeasible."""
         x = cp.Variable(5)
@@ -264,10 +278,22 @@ class TestSolverClass(TestCase):
     def test_more_difficult_unbounded(self):
         """More difficult unbounded."""
         x = cp.Variable(5)
+        np.random.seed(0)
         probl = cp.Problem(
             cp.Minimize(cp.sum(x @ np.random.randn(5, 3))),
             [x <= 1.])
         self.check_solve_from_cvxpy(probl)
+        np.random.seed(1)
+        probl = cp.Problem(
+            cp.Minimize(cp.sum(x @ np.random.randn(5, 3))),
+            [x <= 1., x[2] == 0.])
+        self.check_solve_from_cvxpy(probl)
+        np.random.seed(2)
+        probl = cp.Problem(
+            cp.Minimize(cp.sum(x @ np.random.randn(5, 3))),
+            [x[:-1] <= 1., x[-1] == 0.])
+        self.check_solve_from_cvxpy(probl)
+
 
     def test_more_difficult_infeasible(self):
         """More difficult primal infeasible."""

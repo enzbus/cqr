@@ -174,8 +174,8 @@ class Solver:
                     self.dual_cone_project_basic(self.y0),
                     self.y0):
 
-                # TODO: check this logic
-                s_certificate = self.dual_cone_project_basic(-self.y0)
+                # TODO: double check this logic
+                s_certificate = self.cone_project(-self.y0)
                 self.x_transf = - self.matrix_qr_transf.T @ s_certificate
                 self.invert_qr_transform()
                 print('Unboundedness certificate', self.x)
@@ -343,6 +343,8 @@ class Solver:
                 raise Infeasible()
 
             s_certificate = -self.newres(result.x)[self.m:]
+            if self.zero > 0:
+                s_certificate = np.concatenate([np.zeros(self.zero), s_certificate])
             if np.linalg.norm(s_certificate)**2 > 1e-12:
                 print('unboundedness certificate')
                 self.x_transf = - self.matrix_qr_transf.T @ s_certificate
