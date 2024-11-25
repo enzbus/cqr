@@ -46,17 +46,25 @@ class TestSolverClass(TestCase):
     # Logic to check solution or certificate validity
     ###
 
+    def _y_in_cone(self, y, zero):
+        self.assertTrue(
+            np.allclose(_dual_cone_project(y, zero), y)#, atol=5e-5, rtol=1e-5)
+        )
+
+    def _s_in_cone(self, s, zero):
+        self.assertTrue(
+            np.allclose(_cone_project(s, zero), s)#, atol=5e-5, rtol=1e-5)
+        )
+
     def check_solution_valid(self, matrix, b, c, x, y, zero):
         """Check a cone program solution is valid."""
         # dual cone error
-        self.assertTrue(
-            np.allclose(_dual_cone_project(y, zero), y)
-        )
-        s = b - matrix @ x
+        self._y_in_cone(y, zero)
+
         # primal cone error
-        self.assertTrue(
-            np.allclose(_cone_project(s, zero), s)
-        )
+        s = b - matrix @ x
+        self._s_in_cone(s, zero)
+
         # gap error
         self.assertTrue(
             np.isclose(c.T @ x, -b.T @ y) #, atol=1e-6, rtol=1e-6)
@@ -75,9 +83,7 @@ class TestSolverClass(TestCase):
         y /= np.abs(b.T @ y) # normalize
         self.assertTrue(np.isclose(b.T @ y, -1))
         # dual cone error
-        self.assertTrue(
-            np.allclose(_dual_cone_project(y, zero), y)
-        )
+        self._y_in_cone(y, zero)
         # print(matrix.T @ y)
         self.assertTrue(
             np.allclose(matrix.T @ y, 0., atol=1e-6, rtol=1e-6)
@@ -89,9 +95,7 @@ class TestSolverClass(TestCase):
         self.assertLess(c.T @ x, 0)
         x /=  np.abs(c.T @ x) # normalize
         conic = -matrix @ x
-        self.assertTrue(
-            np.allclose(_cone_project(conic, zero), conic)
-        )
+        self._s_in_cone(conic, zero)
 
     @staticmethod
     def solve_program_cvxpy(matrix, b, c, zero):
@@ -293,7 +297,6 @@ class TestSolverClass(TestCase):
             cp.Minimize(cp.sum(x @ np.random.randn(5, 3))),
             [x[:-1] <= 1., x[-1] == 0.])
         self.check_solve_from_cvxpy(probl)
-
 
     def test_more_difficult_infeasible(self):
         """More difficult primal infeasible."""

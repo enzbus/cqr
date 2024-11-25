@@ -85,12 +85,15 @@ class Solver:
             self.new_toy_solve()
             # self.x_transf, self.y = self.solve_program_cvxpy(
             #     self.matrix_qr_transf, b, self.c_qr_transf)
+            self.decide_solution_or_certificate()
+            self._invert_qr_transform_gap()
             self._invert_qr_transform_dual_space()
             self.invert_qr_transform()
             self.status = 'Optimal'
         except Infeasible:
             self.status = 'Infeasible'
         except Unbounded:
+            self.invert_qr_transform()
             self.status = 'Unbounded'
 
         print('Resulting status:', self.status)
@@ -186,7 +189,7 @@ class Solver:
         self.b_reduced = self.b @ self.nullspace_projector
 
     def _invert_qr_transform_dual_space(self):
-        """Apply QR transformation to dual space."""
+        """Invert QR transformation of dual space."""
         self.y = self.y0 + self.nullspace_projector @ self.y_reduced
 
     def _qr_transform_gap(self):
@@ -197,6 +200,12 @@ class Solver:
         self.var0 = - self.b0 * np.concatenate(
             [self.c_qr_transf, self.b_reduced]) / np.linalg.norm(
                 np.concatenate([self.c_qr_transf, self.b_reduced]))**2
+
+    def _invert_qr_transform_gap(self):
+        """Invert QR transformation of zero-gap residual."""
+        var = self.var0 + self.gap_NS @ self.var_reduced
+        self.x_transf = var[:self.n]
+        self.y_reduced = var[self.n:]
 
     def cone_project(self, s):
         """Project on program cone."""
@@ -291,6 +300,23 @@ class Solver:
 
         return result @ self.gap_NS
 
+    ###
+    # For Newton methods
+    ###
+
+    def newton_loss(self, var_reduced):
+        return np.linalg.norm(self.newres(var_reduced)) ** 2 / 2.
+
+    def newton_gradient(self, var_reduced):
+        return self.newjacobian(var_reduced).T @ self.newres(var_reduced)
+
+    def newton_hessian(self, var_reduced):
+        _jac = self.newjacobian(var_reduced)
+        return sp.sparse.linalg.LinearOperator(
+            shape = (len(var_reduced), len(var_reduced)),
+            matvec = lambda x: _jac.T @ (_jac @ x)
+        )
+
     # def gap(self, x, y_reduced):
     #     return self.c_qr_transf.T @ x + self.b_reduced @ y_reduced + self.b0
 
@@ -326,29 +352,116 @@ class Solver:
     #     self.x_transf = var[:self.n]
     #     self.y_reduced = var[self.n:]
 
+    @staticmethod
+    def inexact_levemberg_marquardt(
+            residual, jacobian, x0, max_iter=1000, max_ls=100):
+        """Inexact Levemberg-Marquardt solver."""
+        cur_x = np.copy(x0)
+        cur_residual = residual(cur_x)
+        cur_loss = np.linalg.norm(cur_residual)
+        cur_jacobian = jacobian(cur_x)
+        for i in range(max_iter):
+            _ = sp.sparse.linalg.lsqr(
+                cur_jacobian, -cur_residual, atol=0., btol=0.)
+            print(_[1:-1])
+            step = _[0]
+            for j in range(max_ls):
+                new_x = cur_x + step / (2**j)
+                new_residual = residual(new_x)
+                new_loss = np.linalg.norm(new_residual)
+                if new_loss < cur_loss:
+                    cur_x = new_x
+                    cur_residual = new_residual
+                    cur_loss = new_loss
+                    break
+            else:
+                break
+            # convergence check
+            cur_jacobian = jacobian(cur_x)
+            cur_gradient = cur_jacobian.T @ cur_residual
+            if np.max(np.abs(cur_gradient)) < 1e-12:
+                break
+            # breakpoint()
+        return np.array(cur_x, dtype=float)
+
     def new_toy_solve(self):
+        """Solve by LM."""
+        self.var_reduced = self.inexact_levemberg_marquardt(
+            self.newres, self.newjacobian, np.zeros(self.m-1))
+
+    def old_toy_solve(self):
         result = sp.optimize.least_squares(
             self.newres, np.zeros(self.m-1),
             jac=self.newjacobian, method='lm',
             ftol=1e-15, xtol=1e-15, gtol=1e-15,)
         print(result)
+        self.var_reduced = result.x
 
-        if result.cost > 1e-12:
+        # opt_loss = result.cost
+
+        # result = sp.optimize.fmin_ncg(
+        #     f=self.newton_loss,
+        #     x0=np.zeros(self.m-1),
+        #     fprime=self.newton_gradient,
+        #     fhess=self.newton_hessian,
+        #     disp=True,
+        #     full_output=True,
+        #     avextol=1e-16,
+        #     #self.newres, np.zeros(self.m-1),
+        #     #jac=self.newjacobian, method='lm',
+        #     #ftol=1e-15, xtol=1e-15, gtol=1e-15,
+        #     )
+        # print(result)
+
+        # opt_var_reduced = result[0]
+        # opt_loss = result[1]
+
+        # exit(0)
+
+        # result = sp.optimize.fmin_l_bfgs_b(
+        #     func=self.newton_loss,
+        #     x0=np.zeros(self.m-1),
+        #     fprime=self.newton_gradient,
+        #     # fhess=self.newton_hessian,
+        #     # disp=True,
+        #     factr=0.1,
+        #     pgtol=1e-16,
+        #     # full_output=True,
+        #     # avextol=1e-16,
+        #     #self.newres, np.zeros(self.m-1),
+        #     #jac=self.newjacobian, method='lm',
+        #     #ftol=1e-15, xtol=1e-15, gtol=1e-15,
+        #     )
+        # print(result)
+
+        # opt_var_reduced = result[0]
+        # opt_loss = result[1]
+
+    def decide_solution_or_certificate(self):
+        """Decide if solution or certificate."""
+
+        residual = self.newres(self.var_reduced)
+        sqloss = np.linalg.norm(residual)**2/2.
+
+        print("sq norm of residual", sqloss)
+        print("sq norm of jac times residual",
+            np.linalg.norm(self.newjacobian(self.var_reduced).T @ residual)**2/2.)
+
+        if sqloss > 1e-12:
             # infeasible; for convenience we just set this here,
             # will have to check which is valid and maybe throw exceptions
-            self.y = -self.newres(result.x)[:self.m]
+            self.y = -residual[:self.m]
             if np.linalg.norm(self.y)**2 > 1e-12:
                 print('infeasibility certificate')
                 print(self.y)
                 raise Infeasible()
 
-            s_certificate = -self.newres(result.x)[self.m:]
+            s_certificate = -residual[self.m:]
             if self.zero > 0:
                 s_certificate = np.concatenate([np.zeros(self.zero), s_certificate])
             if np.linalg.norm(s_certificate)**2 > 1e-12:
                 print('unboundedness certificate')
                 self.x_transf = - self.matrix_qr_transf.T @ s_certificate
-                self.invert_qr_transform()
                 raise Unbounded()
 
             # breakpoint()
@@ -363,8 +476,3 @@ class Solver:
             # assert np.min(self.infeasibility_certificate) >= -1e-6
             # assert np.allclose(self.matrix.T @ self.infeasibility_certificate, 0.)
             # assert self.b.T @ self.infeasibility_certificate < 0.
-
-        var_reduced = result.x
-        var = self.var0 + self.gap_NS @ var_reduced
-        self.x_transf = var[:self.n]
-        self.y_reduced = var[self.n:]
