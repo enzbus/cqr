@@ -55,7 +55,7 @@ class Solver:
     """
 
     def __init__(self, matrix, b, c, zero, nonneg, x0=None, y0=None):
-        
+
         # process program data
         self.matrix = sp.sparse.csc_matrix(matrix)
         self.m, self.n = matrix.shape
@@ -74,17 +74,22 @@ class Solver:
         self.y = np.empty(self.m, dtype=float)
         self.update_variables(x0=x0, y0=y0)
 
-        self._qr_transform_program_data()
-        self._qr_transform_dual_space()
-        self._qr_transform_gap()
+        try:
+            self._qr_transform_program_data()
+            self._qr_transform_dual_space()
+            self._qr_transform_gap()
 
-        # self.toy_solve()
-        self.new_toy_solve()
-        # self.x_transf, self.y = self.solve_program_cvxpy(
-        #     self.matrix_qr_transf, b, self.c_qr_transf)
-        self._invert_qr_transform_dual_space()
-        self.invert_qr_transform()
-
+            # self.toy_solve()
+            self.new_toy_solve()
+            # self.x_transf, self.y = self.solve_program_cvxpy(
+            #     self.matrix_qr_transf, b, self.c_qr_transf)
+            self._invert_qr_transform_dual_space()
+            self.invert_qr_transform()
+            self.status = 'Optimal'
+        except Infeasible:
+            self.status = 'Infeasible'
+        except Unbounded:
+            self.status = 'Unbounded'
 
     def backsolve_r(self, vector):
         """Simple triangular solve with matrix R."""
@@ -93,7 +98,7 @@ class Solver:
             raise Unbounded(
                 "Cost vector is not in the span of the program matrix!")
         return result
-        
+
     def update_variables(self, x0=None, y0=None):
         """Update initial values of the primal and dual variables.
 
@@ -124,7 +129,6 @@ class Solver:
     #     constr = [b - A @ x >= 0]
     #     cp.Problem(cp.Minimize(x.T @ c), constr).solve()
     #     return x.value, constr[0].dual_value
-
 
     def _qr_transform_program_data(self):
         """Apply QR decomposition to equilibrated program data."""
@@ -162,7 +166,15 @@ class Solver:
         """Apply QR transformation to dual space."""
         self.y0 = self.matrix_qr_transf @ -self.c_qr_transf
         if self.m <= self.n:
-            if not np.allclose(self.dual_cone_project(self.y0), self.y0):
+            if not np.allclose(
+                    self.dual_cone_project_basic(self.y0),
+                    self.y0):
+
+                # TODO: check this logic
+                s_certificate = self.dual_cone_project_basic(-self.y0)
+                self.x_transf = - self.matrix_qr_transf.T @ s_certificate
+                self.invert_qr_transform()
+                print('Unboundedness certificate', self.x)
                 raise Unbounded("There is no feasible dual vector.")
         # diff = self.y - self.y0
         # self.y_reduced = self.nullspace_projector.T @ diff
@@ -176,15 +188,21 @@ class Solver:
     def _qr_transform_gap(self):
         """Apply QR transformation to zero-gap residual."""
         Q, R = np.linalg.qr(np.concatenate(
-            [self.c_qr_transf, self.b_reduced]).reshape((self.m,1)), mode='complete')
+            [self.c_qr_transf, self.b_reduced]).reshape((self.m, 1)), mode='complete')
         self.gap_NS = Q[:, 1:]
         self.var0 = - self.b0 * np.concatenate(
-            [self.c_qr_transf, self.b_reduced]) / np.linalg.norm(np.concatenate([self.c_qr_transf, self.b_reduced]))**2
-
+            [self.c_qr_transf, self.b_reduced]) / np.linalg.norm(
+                np.concatenate([self.c_qr_transf, self.b_reduced]))**2
 
     def cone_project(self, s):
         """Project on program cone."""
-        return np.maximum(s, 0.)
+        return np.concatenate([
+            np.zeros(self.zero), np.maximum(s[self.zero:], 0.)])
+
+    def dual_cone_project_basic(self, y):
+        """Project on dual of program cone."""
+        return np.concatenate([
+            y[:self.zero], np.maximum(y[self.zero:], 0.)])
 
     def identity_minus_cone_project(self, s):
         """Identity minus projection on program cone."""
@@ -195,18 +213,18 @@ class Solver:
         s = self.b - self.matrix_qr_transf @ x
         return self.identity_minus_cone_project(s)
 
-    def dual_cone_project(self, y):
-        """Project on dual of program cone."""
-        return np.maximum(y, 0.)
+    def dual_cone_project_nozero(self, y):
+        """Project on dual of program cone, skip zeros."""
+        return np.maximum(y[self.zero:], 0.)
 
-    def identity_minus_dual_cone_project(self, y):
-        """Identity minus projection on dual of program cone."""
-        return y - self.dual_cone_project(y)
+    def identity_minus_dual_cone_project_nozero(self, y):
+        """Identity minus projection on dual of program cone, skip zeros."""
+        return y[self.zero:] - self.dual_cone_project_nozero(y)
 
     def dua_err(self, y_reduced):
         """Error on dual cone."""
         y = self.y0 + self.nullspace_projector @ y_reduced
-        return self.identity_minus_dual_cone_project(y)
+        return self.identity_minus_dual_cone_project_nozero(y)
 
     def newres(self, var_reduced):
         """Residual using gap QR transform."""
@@ -220,20 +238,23 @@ class Solver:
 
     def cone_project_derivative(self, s):
         """Derivative of projection on program cone."""
-        return np.diag(1 * (s >= 0.))
+        return np.diag(np.concatenate([np.zeros(self.zero), 1 * (s >= 0.)]))
 
     def identity_minus_cone_project_derivative(self, s):
         """Identity minus derivative of projection on program cone."""
         return np.eye(self.m) - self.cone_project_derivative(s)
 
-    def dual_cone_project_derivative(self, y):
-        """Derivative of projection on dual of program cone."""
-        return np.diag(1 * (y >= 0.))
+    def dual_cone_project_derivative_nozero(self, y):
+        """Derivative of projection on dual of program cone, skip zeros."""
+        return np.diag( 1 * (y[self.zero:] >= 0.))
 
-    def identity_minus_dual_cone_project_derivative(self, y):
-        """Identity minus derivative of projection on dual of program cone."""
+    def identity_minus_dual_cone_project_derivative_nozero(self, y):
+        """Identity minus derivative of projection on dual of program cone.
+        
+        (Skip zeros.)
+        """
         return np.eye(
-            self.m - self.zero) - self.dual_cone_project_derivative(y)
+            self.m - self.zero) - self.dual_cone_project_derivative_nozero(y)
 
     def newjacobian(self, var_reduced):
         """Jacobian of the residual using gap QR transform."""
@@ -255,7 +276,7 @@ class Solver:
                     np.zeros((self.m, self.m-self.n))],
                 [
                     np.zeros((self.m-self.zero, self.n)),
-                    self.identity_minus_dual_cone_project_derivative(
+                    self.identity_minus_dual_cone_project_derivative_nozero(
                         y) @ self.nullspace_projector[self.zero:]],
                 ])
 
@@ -264,8 +285,6 @@ class Solver:
         # print('\n' * 5)
 
         return result @ self.gap_NS
-
-
 
     # def gap(self, x, y_reduced):
     #     return self.c_qr_transf.T @ x + self.b_reduced @ y_reduced + self.b0
@@ -291,8 +310,8 @@ class Solver:
     #     return np.block(
     #         [[-np.diag(s_active) @ self.matrix_qr_transf, np.zeros((self.m, self.m-self.n))],
     #         [np.zeros((self.m, self.n)), np.diag(y_active) @ self.nullspace_projector],
-    #         [self.c_qr_transf.reshape(1,self.n), self.b_reduced.reshape(1, self.m-self.n)] 
-    #         ])    
+    #         [self.c_qr_transf.reshape(1,self.n), self.b_reduced.reshape(1, self.m-self.n)]
+    #         ])
 
     # def toy_solve(self):
     #     result = sp.optimize.least_squares(
@@ -307,7 +326,7 @@ class Solver:
             self.newres, np.zeros(self.m-1),
             jac=self.newjacobian, method='lm')
         print(result)
-        
+
         if result.cost > 1e-12:
             # infeasible; for convenience we just set this here,
             # will have to check which is valid and maybe throw exceptions
@@ -330,7 +349,7 @@ class Solver:
             # y_reduced = var[self.n:]
             # y = self.y0 + self.nullspace_projector @ y_reduced
             # elf.unboundedness_certificate = - (self.matrix.T @ y + self.c)
-            
+
             # self.invert_qr_transform()
 
             # assert np.min(self.infeasibility_certificate) >= -1e-6
@@ -341,5 +360,3 @@ class Solver:
         var = self.var0 + self.gap_NS @ var_reduced
         self.x_transf = var[:self.n]
         self.y_reduced = var[self.n:]
-
-        

@@ -26,13 +26,26 @@ import scipy as sp
 
 from solver import Solver, Infeasible, Unbounded
 
+
+# Simple implementation of cone projection for tests
+
+def _cone_project(s, zero=0):
+    """Project on program cone."""
+    return np.concatenate([
+        np.zeros(zero), np.maximum(s[zero:], 0.)])
+
+def _dual_cone_project(y, zero=0):
+    """Project on dual of program cone."""
+    return np.concatenate([
+        y[:zero], np.maximum(y[zero:], 0.)])
+
 class TestSolverClass(TestCase):
     """Unit tests of the solver class."""
 
     @staticmethod
     def make_program_from_matrix(matrix, seed=0):
         """Make simple LP program."""
-        m,n = matrix.shape
+        m, n = matrix.shape
         np.random.seed(seed)
         z = np.random.randn(m)
         y = np.maximum(z, 0.)
@@ -52,13 +65,49 @@ class TestSolverClass(TestCase):
         # the eq components are data['A'] and data['b']
         return data['G'], data['h'], data['c']
 
-    def check_solution_valid(self, matrix, b, c, x, y):
-        """Check a LP solution is valid."""
-        self.assertGreater(np.min(y), -1e-6)
+    def check_solution_valid(self, matrix, b, c, x, y, **kwargs):
+        """Check a cone program solution is valid."""
+        # dual cone error
+        self.assertTrue(
+            np.allclose(_dual_cone_project(y, **kwargs), y)
+        )
         s = b - matrix @ x
-        self.assertGreater(np.min(s), -1e-6)
-        self.assertTrue(np.isclose(c.T @ x + b.T @ y, 0., atol=1e-6, rtol=1e-6))
-        self.assertTrue(np.allclose(c, - matrix.T @ y, atol=1e-6, rtol=1e-6))
+        # primal cone error
+        self.assertTrue(
+            np.allclose(_cone_project(s, **kwargs), s)
+        )
+        # gap error
+        self.assertTrue(
+            np.isclose(c.T @ x, -b.T @ y) #, atol=1e-6, rtol=1e-6)
+            )
+        # dual error
+        self.assertTrue(
+            np.allclose(c, - matrix.T @ y) #, atol=1e-6, rtol=1e-6)
+            )
+
+    def check_infeasibility_certificate_valid(self, matrix, b, y, **kwargs):
+        """Check primal infeasibility certificate is valid."""
+        y = np.copy(y)
+        self.assertLess(b.T @ y, 0)
+        y /= np.abs(b.T @ y) # normalize
+        self.assertTrue(np.isclose(b.T @ y, -1))
+        # dual cone error
+        self.assertTrue(
+            np.allclose(_dual_cone_project(y, **kwargs), y)
+        )
+        self.assertTrue(
+            np.allclose(matrix.T @ y, 0.)#, atol=1e-6, rtol=1e-6)
+            )
+
+    def check_unboundedness_certificate_valid(self, matrix, c, x, **kwargs):
+        """Check primal unboundedness certificate is valid."""
+        x = np.copy(x)
+        self.assertLess(c.T @ x, 0)
+        x /=  np.abs(c.T @ x) # normalize
+        conic = -matrix @ x
+        self.assertTrue(
+            np.allclose(_cone_project(conic, **kwargs), conic)
+        )
 
     @staticmethod
     def solve_program_cvxpy(A, b, c):
@@ -72,36 +121,25 @@ class TestSolverClass(TestCase):
     def _base_test_solvable(self, matrix, b, c):
         x, y = self.solve_program_cvxpy(matrix, b, c)
         self.check_solution_valid(matrix, b, c, x, y)
-        # print('real solution x')
-        # print(x)
-        # print('real solution y')
-        # print(y)
         solver = Solver(matrix, b, c, 0, len(b))
+        self.assertEqual(solver.status, 'Optimal')
         self.check_solution_valid(matrix, b, c, solver.x, solver.y)
 
     def _base_test_infeasible_from_cvxpy(self, cvxpy_problem_obj):
         matrix, b, c = self.make_program_from_cvxpy(cvxpy_problem_obj)
-        with self.assertRaises(Infeasible):
-            solver = Solver(matrix, b, c, 0, len(b))
-            cert = solver.y
-            self.assertLess(b.T @ cert, 0)
-            cert /= np.abs(b.T @ cert) # normalize
-            self.assertGreater(np.min(cert), -1e-6)
-            self.assertTrue(np.allclose(matrix.T @ cert, 0., atol=1e-6, rtol=1e-6))
-            self.assertLess(b.T @ cert, 0)
+        solver = Solver(matrix, b, c, 0, len(b))
+        self.assertEqual(solver.status, 'Infeasible')
+        self.check_infeasibility_certificate_valid(
+            matrix, b, solver.y
+        )
 
     def _base_test_unbounded_from_cvxpy(self, cvxpy_problem_obj):
         matrix, b, c = self.make_program_from_cvxpy(cvxpy_problem_obj)
-        with self.assertRaises(Unbounded):
-            solver = Solver(matrix, b, c, 0, len(b))
-            cert = solver.x
-            print(cert)
-            self.assertLess(c.T @ cert, 0)
-            cert /= np.abs(c.T @ cert) # normalize
-            conic = -matrix @ cert
-            self.assertGreater(np.min(conic), -1e-6)
-        # self.assertTrue(np.allclose(matrix.T @ cert, 0., atol=1e-6, rtol=1e-6))
-        # self.assertLess(b.T @ cert, 0)
+        solver = Solver(matrix, b, c, 0, len(b))
+        self.assertEqual(solver.status, 'Unbounded')
+        self.check_unboundedness_certificate_valid(
+            matrix, c, solver.x
+        )
 
     def _base_test_solvable_from_cvxpy(self, cvxpy_problem_obj):
         matrix, b, c = self.make_program_from_cvxpy(cvxpy_problem_obj)
@@ -115,51 +153,49 @@ class TestSolverClass(TestCase):
         """Simple primal infeasible."""
         x = cp.Variable(5)
         probl = cp.Problem(
-            cp.Minimize(cp.norm1(x @ np.random.randn(5,10))),
-            [x >= 0, x[3]<=-1.])
+            cp.Minimize(cp.norm1(x @ np.random.randn(5, 10))),
+            [x >= 0, x[3] <= -1.])
         self._base_test_infeasible_from_cvxpy(probl)
-
 
     def test_simple_unbounded(self):
         """Simple primal unbounded."""
         x = cp.Variable(5)
         probl = cp.Problem(
-            cp.Minimize(cp.norm1(x[1:] @ np.random.randn(4,10)) + x[0]),
-            [x<=1.])
+            cp.Minimize(cp.norm1(x[1:] @ np.random.randn(4, 10)) + x[0]),
+            [x <= 1.])
         self._base_test_unbounded_from_cvxpy(probl)
 
     def test_more_difficult_unbounded(self):
         """More difficult unbounded."""
         x = cp.Variable(5)
         probl = cp.Problem(
-            cp.Minimize(cp.sum(x @ np.random.randn(5,3))),
-            [x<=1.])
+            cp.Minimize(cp.sum(x @ np.random.randn(5, 3))),
+            [x <= 1.])
         self._base_test_unbounded_from_cvxpy(probl)
-
 
     def test_more_difficult_infeasible(self):
         """More difficult primal infeasible."""
         np.random.randn(0)
         x = cp.Variable(5)
         probl = cp.Problem(
-            cp.Minimize(cp.norm1(x @ np.random.randn(5,10))),
-            [np.random.randn(20,5) @ x >= 10])
+            cp.Minimize(cp.norm1(x @ np.random.randn(5, 10))),
+            [np.random.randn(20, 5) @ x >= 10])
         self._base_test_infeasible_from_cvxpy(probl)
 
     def test_from_cvxpy_redundant_constraints(self):
         """Test simple CVXPY problem with redundant constraints."""
         x = cp.Variable(5)
         probl = cp.Problem(
-            cp.Minimize(cp.norm1(x @ np.random.randn(5,10))),
-            [x >= 0, x<=1.,  x<=1.]) # redundant constraints
+            cp.Minimize(cp.norm1(x @ np.random.randn(5, 10))),
+            [x >= 0, x <= 1.,  x <= 1.]) # redundant constraints
         self._base_test_solvable_from_cvxpy(probl)
 
     def test_from_cvxpy_unused_variable(self):
         """Test simple CVXPY problem with unused variable."""
         x = cp.Variable(5)
         probl = cp.Problem(
-            cp.Minimize(cp.norm1(x[2:] @ np.random.randn(3,10))),
-            [x[2:] >= 0, x[2:]<=1.])
+            cp.Minimize(cp.norm1(x[2:] @ np.random.randn(3, 10))),
+            [x[2:] >= 0, x[2:] <= 1.])
         self._base_test_solvable_from_cvxpy(probl)
 
     def test_m_less_n_full_rank_(self):
@@ -169,14 +205,12 @@ class TestSolverClass(TestCase):
         matrix = np.random.randn(2, 5)
         self._base_test_solvable_from_matrix(matrix)
 
-
     def test_m_equal_n_full_rank_(self):
         """m=n, matrix full rank."""
         print('\nm=n, matrix full rank\n')
         np.random.seed(0)
         matrix = np.random.randn(3, 3)
         self._base_test_solvable_from_matrix(matrix)
-
 
     def test_m_greater_n_full_rank_(self):
         """m>n, matrix full rank."""
@@ -185,16 +219,14 @@ class TestSolverClass(TestCase):
         matrix = np.random.randn(5, 2)
         self._base_test_solvable_from_matrix(matrix)
 
-
     def test_m_less_n_rank_deficient(self):
         """m<n, matrix rank deficient."""
         print('\nm<n, matrix rank deficient\n')
         np.random.seed(0)
         matrix = np.random.randn(2, 5)
         matrix = np.concatenate([matrix, [matrix.sum(0)]], axis=0)
-        matrix = matrix[[0,2,1]]
+        matrix = matrix[[0, 2, 1]]
         self._base_test_solvable_from_matrix(matrix)
-
 
     def test_m_equal_n_rank_deficient(self):
         """m=n, matrix rank deficient."""
@@ -202,9 +234,8 @@ class TestSolverClass(TestCase):
         np.random.seed(0)
         matrix = np.random.randn(2, 3)
         matrix = np.concatenate([matrix, [matrix.sum(0)]], axis=0)
-        matrix = matrix[[0,2,1]]
+        matrix = matrix[[0, 2, 1]]
         self._base_test_solvable_from_matrix(matrix)
-
 
     def test_m_greater_n_rank_deficient(self):
         """m>n, matrix rank deficient."""
@@ -214,9 +245,6 @@ class TestSolverClass(TestCase):
         matrix = np.concatenate([matrix.T, [matrix.sum(1)]], axis=0).T
         # matrix = matrix[[0,2,1]]
         self._base_test_solvable_from_matrix(matrix)
-
-
-
 
     # def test(self):
     #     matrix = np.random.randn(2,5)
