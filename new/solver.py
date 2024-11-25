@@ -329,7 +329,8 @@ class Solver:
     def new_toy_solve(self):
         result = sp.optimize.least_squares(
             self.newres, np.zeros(self.m-1),
-            jac=self.newjacobian, method='lm')
+            jac=self.newjacobian, method='lm',
+            ftol=1e-15, xtol=1e-15, gtol=1e-15,)
         print(result)
 
         if result.cost > 1e-12:
