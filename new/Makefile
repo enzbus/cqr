@@ -8,7 +8,7 @@ endif
 .PHONY: clean test
 
 test: env
-	env/bin/python test.py
+	$(BINDIR)/python test.py
 
 env:
 	python -m venv --system-site-packages env
