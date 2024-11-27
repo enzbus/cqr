@@ -441,12 +441,21 @@ class Solver:
             # has small effect but seems to help a little
             cur_hessian = cur_jacobian.T @ cur_jacobian
             # + sp.sparse.linalg.aslinearoperator(sp.sparse.eye(len(cur_gradient)) * damp)
-            _ = sp.sparse.linalg.cg(
-                A = cur_hessian,
-                b = -cur_gradient,
-                rtol= min(0.5, np.linalg.norm(cur_gradient)**0.5),
-                callback=_counter,
-            )
+            sp_version = [int(el) for el in sp.__version__.split('.')]
+            if sp_version >= [1,12]:
+                _ = sp.sparse.linalg.cg(
+                    A = cur_hessian,
+                    b = -cur_gradient,
+                    rtol= min(0.5, np.linalg.norm(cur_gradient)**0.5),
+                    callback=_counter,
+                )
+            else:
+                _ = sp.sparse.linalg.cg(
+                    A = cur_hessian,
+                    b = -cur_gradient,
+                    tol= min(0.5, np.linalg.norm(cur_gradient)**0.5),
+                    callback=_counter,
+                )
             step = _[0]
             for j in range(max_ls):
                 step_len = 0.9**j
