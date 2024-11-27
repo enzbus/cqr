@@ -27,6 +27,8 @@ Experiments (new features, ...) should be done as subclasses.
 import numpy as np
 import scipy as sp
 
+from equilibrate import hsde_ruiz_equilibration
+
 class Unbounded(Exception):
     """Program unbounded."""
 
@@ -71,12 +73,13 @@ class Solver:
 
         print(f'Program: m={self.m}, n={self.n}, zero={self.zero}, nonneg={self.nonneg}')
 
-        # process initial guess
+        # TODO: process initial guess
         self.x = np.empty(self.n, dtype=float)
         self.y = np.empty(self.m, dtype=float)
         self.update_variables(x0=x0, y0=y0)
 
         try:
+            self._equilibrate()
             self._qr_transform_program_data()
             self._qr_transform_dual_space()
             self._qr_transform_gap()
@@ -88,13 +91,15 @@ class Solver:
             self.decide_solution_or_certificate()
             self._invert_qr_transform_gap()
             self._invert_qr_transform_dual_space()
-            self.invert_qr_transform()
+            self._invert_qr_transform()
             self.status = 'Optimal'
         except Infeasible:
             self.status = 'Infeasible'
         except Unbounded:
-            self.invert_qr_transform()
+            self._invert_qr_transform()
             self.status = 'Unbounded'
+
+        self._invert_equilibrate()
 
         print('Resulting status:', self.status)
 
@@ -137,37 +142,55 @@ class Solver:
     #     cp.Problem(cp.Minimize(x.T @ c), constr).solve()
     #     return x.value, constr[0].dual_value
 
+    def _equilibrate(self):
+        """Apply Ruiz equilibration to program data."""
+        self.equil_d, self.equil_e, self.equil_sigma, self.equil_rho, \
+        self.matrix_ruiz_equil, self.b_ruiz_equil, self.c_ruiz_equil = \
+            hsde_ruiz_equilibration(
+                self.matrix, self.b, self.c, dimensions={
+                'zero': self.zero, 'nonneg': self.nonneg, 'second_order': []})
+
+    def _invert_equilibrate(self):
+        """Invert Ruiz equlibration."""
+        self.x = self.x_equil if hasattr(self, 'x_equil') else np.zeros(self.n)
+        self.y = self.y_equil if hasattr(self, 'y_equil') else np.zeros(self.m)
+
+        self.x = (self.equil_e * self.x) / self.equil_sigma
+        self.y = (self.equil_d * self.y) / self.equil_rho
+
     def _qr_transform_program_data(self):
         """Apply QR decomposition to equilibrated program data."""
         # assert self.m > self.n, "Case m <= n not yet implemented."
 
-        q, r = np.linalg.qr(self.matrix.todense(), mode='complete')
-        print('diagonal of R')
-        print(np.diag(r))
+        q, r = np.linalg.qr(self.matrix_ruiz_equil.todense(), mode='complete')
+        # print('diagonal of R')
+        # print(np.diag(r))
         self.matrix_qr_transf = q[:, :self.n].A
         self.nullspace_projector = q[:, self.n:].A
         self.r = r[:self.n].A
         # breakpoint()
 
-        print('c')
-        print(self.c)
-        self.c_qr_transf = self.backsolve_r(self.c)
-        print('c transf')
-        print(self.c_qr_transf)
+        # print('c')
+        # print(self.c)
+        self.c_qr_transf = self.backsolve_r(self.c_ruiz_equil)
+        # print('c transf')
+        # print(self.c_qr_transf)
         # breakpoint()
 
-        # self.sigma_qr = np.linalg.norm(
-        #     self.b) #/ np.mean(np.linalg.norm(matrix_transf, axis=1))
-        # self.b_qr_transf = self.b/self.sigma_qr
+        # TODO: unclear if this helps
+        # self.sigma_qr = np.linalg.norm(self.b_ruiz_equil)
+        # self.b_qr_transf = self.b_ruiz_equilb/self.sigma_qr
+        self.sigma_qr = 1.
+        self.b_qr_transf = self.b_ruiz_equil
 
-    def invert_qr_transform(self):
+    def _invert_qr_transform(self):
         """Simple triangular solve with matrix R."""
         result = np.linalg.lstsq(self.r, self.x_transf, rcond=None)[0]
         if not np.allclose(self.r @ result, self.x_transf):
             raise Exception
             #raise Unbounded(
             #    "Cost vector is not in the span of the program matrix!")
-        self.x = result
+        self.x_equil = result * self.sigma_qr
 
     def _qr_transform_dual_space(self):
         """Apply QR transformation to dual space."""
@@ -180,17 +203,16 @@ class Solver:
                 # TODO: double check this logic
                 s_certificate = self.cone_project(-self.y0)
                 self.x_transf = - self.matrix_qr_transf.T @ s_certificate
-                self.invert_qr_transform()
-                print('Unboundedness certificate', self.x)
+                # print('Unboundedness certificate', self.x)
                 raise Unbounded("There is no feasible dual vector.")
         # diff = self.y - self.y0
         # self.y_reduced = self.nullspace_projector.T @ diff
-        self.b0 = self.b @ self.y0
-        self.b_reduced = self.b @ self.nullspace_projector
+        self.b0 = self.b_qr_transf @ self.y0
+        self.b_reduced = self.b_qr_transf @ self.nullspace_projector
 
     def _invert_qr_transform_dual_space(self):
         """Invert QR transformation of dual space."""
-        self.y = self.y0 + self.nullspace_projector @ self.y_reduced
+        self.y_equil = self.y0 + self.nullspace_projector @ self.y_reduced
 
     def _qr_transform_gap(self):
         """Apply QR transformation to zero-gap residual."""
@@ -223,7 +245,7 @@ class Solver:
 
     def pri_err(self, x):
         """Error on primal cone."""
-        s = self.b - self.matrix_qr_transf @ x
+        s = self.b_qr_transf - self.matrix_qr_transf @ x
         return self.identity_minus_cone_project(s)
 
     def dual_cone_project_nozero(self, y):
@@ -275,7 +297,7 @@ class Solver:
         var = self.var0 + self.gap_NS @ var_reduced
         x = var[:self.n]
         y_reduced = var[self.n:]
-        s = self.b - self.matrix_qr_transf @ x
+        s = self.b_qr_transf - self.matrix_qr_transf @ x
         y = self.y0 + self.nullspace_projector @ y_reduced
 
         if self.m <= self.n:
@@ -299,6 +321,51 @@ class Solver:
         # print('\n' * 5)
 
         return result @ self.gap_NS
+
+    def newjacobian_linop(self, var_reduced):
+        """Jacobian as LinearOperator."""
+        var = self.var0 + self.gap_NS @ var_reduced
+        x = var[:self.n]
+        y_reduced = var[self.n:]
+        s = self.b_qr_transf - self.matrix_qr_transf @ x
+        y = self.y0 + self.nullspace_projector @ y_reduced
+
+        s_derivative = self.identity_minus_cone_project_derivative(s)
+
+        if self.m <= self.n:
+            def matvec(dvar_reduced):
+                return -s_derivative @ (
+                    self.matrix_qr_transf @ (self.gap_NS @ dvar_reduced))
+            def rmatvec(dres):
+                return -self.gap_NS.T @ (
+                    self.matrix_qr_transf.T @ (s_derivative.T @ dres))
+            return sp.sparse.linalg.LinearOperator(
+                shape=(self.m, self.m-1),
+                matvec=matvec,
+                rmatvec=rmatvec,
+            )
+        else:
+            y_derivative = self.identity_minus_dual_cone_project_derivative_nozero(y)
+            def matvec(dvar_reduced):
+                _ = self.gap_NS @ dvar_reduced
+                dx = _[:self.n]
+                dy_reduced = _[self.n:]
+                dres0 = -s_derivative @ (self.matrix_qr_transf @ dx)
+                dres1 = y_derivative @ (self.nullspace_projector[self.zero:] @ dy_reduced)
+                return np.concatenate([dres0, dres1])
+            def rmatvec(dres):
+                dres0 = dres[:self.m]
+                dres1 = dres[self.m:]
+                dx = - self.matrix_qr_transf.T @ (s_derivative.T @ dres0)
+                dy_reduced = self.nullspace_projector[self.zero:].T @ (y_derivative.T @ dres1)
+                dvar_reduced = np.concatenate([dx, dy_reduced])
+                return self.gap_NS.T @ dvar_reduced
+
+            return sp.sparse.linalg.LinearOperator(
+                shape=(2*self.m-self.zero, self.m-1),
+                matvec=matvec,
+                rmatvec=rmatvec,
+            )
 
     ###
     # For Newton methods
@@ -354,40 +421,62 @@ class Solver:
 
     @staticmethod
     def inexact_levemberg_marquardt(
-            residual, jacobian, x0, max_iter=1000, max_ls=100):
+            residual, jacobian, x0, max_iter=100000, max_ls=200, eps=1e-12): #,
+            # damp=1e-4):
         """Inexact Levemberg-Marquardt solver."""
         cur_x = np.copy(x0)
         cur_residual = residual(cur_x)
         cur_loss = np.linalg.norm(cur_residual)
         cur_jacobian = jacobian(cur_x)
+        TOTAL_CG_ITER = 0
+        def _counter(_):
+            nonlocal TOTAL_CG_ITER
+            TOTAL_CG_ITER += 1
+        TOTAL_BACK_TRACKS = 0
         for i in range(max_iter):
-            _ = sp.sparse.linalg.lsqr(
-                cur_jacobian, -cur_residual, atol=0., btol=0.)
-            print(_[1:-1])
+            # print("cur_loss", cur_loss)
+            cur_gradient = cur_jacobian.T @ cur_residual
+            # TODO: in solver_new I was doing extra regularization inside
+            # the cone projection in between the two residual jacobian;
+            # has small effect but seems to help a little
+            cur_hessian = cur_jacobian.T @ cur_jacobian
+            # + sp.sparse.linalg.aslinearoperator(sp.sparse.eye(len(cur_gradient)) * damp)
+            _ = sp.sparse.linalg.cg(
+                A = cur_hessian,
+                b = -cur_gradient,
+                rtol= min(0.5, np.linalg.norm(cur_gradient)**0.5),
+                callback=_counter,
+            )
             step = _[0]
             for j in range(max_ls):
-                new_x = cur_x + step / (2**j)
+                step_len = 0.9**j
+                new_x = cur_x + step * step_len
                 new_residual = residual(new_x)
                 new_loss = np.linalg.norm(new_residual)
                 if new_loss < cur_loss:
                     cur_x = new_x
                     cur_residual = new_residual
                     cur_loss = new_loss
+                    # print(f'done {j} back-tracks')
+                    TOTAL_BACK_TRACKS += j
                     break
             else:
                 break
             # convergence check
             cur_jacobian = jacobian(cur_x)
             cur_gradient = cur_jacobian.T @ cur_residual
-            if np.max(np.abs(cur_gradient)) < 1e-12:
+            if np.max(np.abs(cur_gradient)) < eps:
                 break
             # breakpoint()
+        print('iters', i)
+        print('total CG iters', TOTAL_CG_ITER)
+        print('total backtracks', TOTAL_BACK_TRACKS)
         return np.array(cur_x, dtype=float)
 
     def new_toy_solve(self):
         """Solve by LM."""
         self.var_reduced = self.inexact_levemberg_marquardt(
-            self.newres, self.newjacobian, np.zeros(self.m-1))
+            self.newres, self.newjacobian_linop, np.zeros(self.m-1))
 
     def old_toy_solve(self):
         result = sp.optimize.least_squares(
@@ -450,17 +539,17 @@ class Solver:
         if sqloss > 1e-12:
             # infeasible; for convenience we just set this here,
             # will have to check which is valid and maybe throw exceptions
-            self.y = -residual[:self.m]
-            if np.linalg.norm(self.y)**2 > 1e-12:
-                print('infeasibility certificate')
-                print(self.y)
+            self.y_equil = -residual[:self.m]
+            if np.linalg.norm(self.y_equil)**2 > 1e-12:
+                # print('infeasibility certificate')
+                # print(self.y_equil)
                 raise Infeasible()
 
             s_certificate = -residual[self.m:]
             if self.zero > 0:
                 s_certificate = np.concatenate([np.zeros(self.zero), s_certificate])
             if np.linalg.norm(s_certificate)**2 > 1e-12:
-                print('unboundedness certificate')
+                # print('unboundedness certificate')
                 self.x_transf = - self.matrix_qr_transf.T @ s_certificate
                 raise Unbounded()
 

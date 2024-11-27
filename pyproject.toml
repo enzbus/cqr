@@ -15,7 +15,7 @@ dev = [
     "build", "twine", "pylint", "isort", "autopep8", "docformatter", "cvxpy-base",
     "diff_cover"]
 test = [
-    "cvxpy-base<1.6", # changed solver interface with 1.6
+    "cvxpy-base",
     'coverage[toml]', 'ecos']
 
 [build-system]

@@ -76,6 +76,9 @@ class Solver(ConicSolver):
     SUPPORTED_CONSTRAINTS = [Zero, NonNeg, SOC]
     REQUIRES_CONSTR = False
 
+    def import_solver(self):
+        import project_euromir
+
     def name(self):
         return "PROJECT_EUROMIR"
 

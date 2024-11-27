@@ -4,3 +4,4 @@ cvxpy
 matplotlib
 ecos
 docformatter
+scs
