@@ -1,3 +1,10 @@
+ENVDIR        = env
+BINDIR        = $(ENVDIR)/bin
+
+ifeq ($(OS), Windows_NT)
+    BINDIR=$(ENVDIR)/Scripts
+endif
+
 .PHONY: clean test
 
 test: env
@@ -5,11 +12,11 @@ test: env
 
 env:
 	python -m venv --system-site-packages env
-	env/bin/pip install -r requirements.txt
+	$(BINDIR)/pip install -r requirements.txt
 
 fix:
-	env/bin/python -m autopep8 -i *.py
-	env/bin/python -m docformatter -i *.py
+	$(BINDIR)/python -m autopep8 -i *.py
+	$(BINDIR)/python -m docformatter -i *.py
 
 
 clean:
