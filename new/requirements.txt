@@ -4,3 +4,4 @@ cvxpy
 ecos
 docformatter
 scs
+pyspqr

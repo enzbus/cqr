@@ -121,24 +121,26 @@ class TestSolverClass(TestCase):
         certificate (only the CVXPY status).
         """
         assert zero + nonneg == len(b)
-        solver = Solver(
-            sp.sparse.csc_matrix(matrix, copy=True),
-            np.array(b, copy=True), np.array(c, copy=True),
-            zero=zero, nonneg=nonneg)
-        status, _, _ = self.solve_program_cvxpy(
-            sp.sparse.csc_matrix(matrix, copy=True),
-            np.array(b, copy=True), np.array(c, copy=True), zero=zero)
-        if solver.status == 'Optimal':
-            self.assertIn(status, ['optimal', 'optimal_inaccurate'])
-            self.check_solution_valid(matrix, b, c, solver.x, solver.y, zero=zero)
-        elif solver.status == 'Infeasible':
-            self.assertIn(status, ['infeasible', 'infeasible_inaccurate'])
-            self.check_infeasibility_certificate_valid(matrix, b, solver.y, zero = zero)
-        elif solver.status == 'Unbounded':
-            self.assertIn(status, ['unbounded', 'unbounded_inaccurate'])
-            self.check_unboundedness_certificate_valid(matrix, c, solver.x, zero=zero)
-        else:
-            raise ValueError('Unknown solver status!')
+        for qr in ['NUMPY', 'PYSPQR']:
+            with self.subTest(qr=qr):
+                solver = Solver(
+                    sp.sparse.csc_matrix(matrix, copy=True),
+                    np.array(b, copy=True), np.array(c, copy=True),
+                    zero=zero, nonneg=nonneg, qr=qr)
+                status, _, _ = self.solve_program_cvxpy(
+                    sp.sparse.csc_matrix(matrix, copy=True),
+                    np.array(b, copy=True), np.array(c, copy=True), zero=zero)
+                if solver.status == 'Optimal':
+                    self.assertIn(status, ['optimal', 'optimal_inaccurate'])
+                    self.check_solution_valid(matrix, b, c, solver.x, solver.y, zero=zero)
+                elif solver.status == 'Infeasible':
+                    self.assertIn(status, ['infeasible', 'infeasible_inaccurate'])
+                    self.check_infeasibility_certificate_valid(matrix, b, solver.y, zero = zero)
+                elif solver.status == 'Unbounded':
+                    self.assertIn(status, ['unbounded', 'unbounded_inaccurate'])
+                    self.check_unboundedness_certificate_valid(matrix, c, solver.x, zero=zero)
+                else:
+                    raise ValueError('Unknown solver status!')
 
     ###
     # Logic to create program and check it

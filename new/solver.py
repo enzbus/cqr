@@ -29,6 +29,8 @@ import scipy as sp
 
 from equilibrate import hsde_ruiz_equilibration
 
+from pyspqr import qr
+
 class Unbounded(Exception):
     """Program unbounded."""
 
@@ -56,7 +58,8 @@ class Solver:
     :type y0: np.array or None.
     """
 
-    def __init__(self, matrix, b, c, zero, nonneg, x0=None, y0=None):
+    def __init__(
+            self, matrix, b, c, zero, nonneg, x0=None, y0=None, qr='NUMPY'):
 
         # process program data
         self.matrix = sp.sparse.csc_matrix(matrix)
@@ -70,6 +73,8 @@ class Solver:
         self.b = np.array(b, dtype=float)
         assert len(c) == self.n
         self.c = np.array(c, dtype=float)
+        assert qr in ['NUMPY', 'PYSPQR']
+        self.qr = qr
 
         print(f'Program: m={self.m}, n={self.n}, zero={self.zero}, nonneg={self.nonneg}')
 
@@ -103,12 +108,31 @@ class Solver:
 
         print('Resulting status:', self.status)
 
-    def backsolve_r(self, vector):
+    def backsolve_r(self, vector, transpose=True):
         """Simple triangular solve with matrix R."""
-        result = np.linalg.lstsq(self.r.T, vector, rcond=None)[0]
-        if not np.allclose(self.r.T @ result, vector):
-            raise Unbounded(
-                "Cost vector is not in the span of the program matrix!")
+        if transpose: # forward transform c
+            r = self.r.T
+        else: # backward tranform x
+            r = self.r
+
+        # TODO: handle all degeneracies here
+        # try:
+        #     result = sp.linalg.solve_triangular(r, vector, lower=transpose)
+        #     ...
+        # except np.linalg.LinAlgError:
+        #
+
+        # TODO: this case can be handled much more efficiently
+        result = np.linalg.lstsq(r, vector, rcond=None)[0]
+
+        if not np.allclose(r @ result, vector):
+            if transpose:
+                # TODO: make sure this tested, what do we need to set on exit?
+                raise Unbounded(
+                    "Cost vector is not in the span of the program matrix!")
+            else:
+                # TODO: figure out when this happens
+                raise Exception('Solver error.')
         return result
 
     def update_variables(self, x0=None, y0=None):
@@ -133,15 +157,6 @@ class Solver:
             assert len(y0) == self.m
             self.y[:] = np.array(y0, dtype=float)
 
-    # @staticmethod
-    # def solve_program_cvxpy(A, b, c):
-    #     """Solve simple LP with CVXPY."""
-    #     m, n = A.shape
-    #     x = cp.Variable(n)
-    #     constr = [b - A @ x >= 0]
-    #     cp.Problem(cp.Minimize(x.T @ c), constr).solve()
-    #     return x.value, constr[0].dual_value
-
     def _equilibrate(self):
         """Apply Ruiz equilibration to program data."""
         self.equil_d, self.equil_e, self.equil_sigma, self.equil_rho, \
@@ -149,6 +164,8 @@ class Solver:
             hsde_ruiz_equilibration(
                 self.matrix, self.b, self.c, dimensions={
                 'zero': self.zero, 'nonneg': self.nonneg, 'second_order': []})
+
+        # TODO: propagate x and y
 
     def _invert_equilibrate(self):
         """Invert Ruiz equlibration."""
@@ -158,24 +175,44 @@ class Solver:
         self.x = (self.equil_e * self.x) / self.equil_sigma
         self.y = (self.equil_d * self.y) / self.equil_rho
 
-    def _qr_transform_program_data(self):
+    def _qr_transform_program_data_pyspqr(self):
         """Apply QR decomposition to equilibrated program data."""
-        # assert self.m > self.n, "Case m <= n not yet implemented."
+
+        q, r, e = qr(self.matrix_ruiz_equil)
+        shape1 = min(self.n, self.m)
+        self.matrix_qr_transf = sp.sparse.linalg.LinearOperator(
+            shape=(self.m, shape1),
+            matvec = lambda x: q @ np.concatenate([x, np.zeros(self.m-shape1)]),
+            rmatvec = lambda y: (
+                q.T @ np.array(y, copy=True).reshape(y.size))[:shape1],
+        )
+        shape2 =  max(self.m - self.n, 0)
+        self.nullspace_projector = sp.sparse.linalg.LinearOperator(
+            shape=(self.m, shape2),
+            matvec = lambda x: q @ np.concatenate([np.zeros(self.m-shape2), x]),
+            rmatvec = lambda y: (
+                q.T @ np.array(y, copy=True).reshape(y.size))[self.m-shape2:]
+        )
+        self.r = (r.todense() @ e)[:self.n]
+
+    def _qr_transform_program_data_numpy(self):
+        """Apply QR decomposition to equilibrated program data."""
 
         q, r = np.linalg.qr(self.matrix_ruiz_equil.todense(), mode='complete')
-        # print('diagonal of R')
-        # print(np.diag(r))
         self.matrix_qr_transf = q[:, :self.n].A
         self.nullspace_projector = q[:, self.n:].A
         self.r = r[:self.n].A
-        # breakpoint()
 
-        # print('c')
-        # print(self.c)
+    def _qr_transform_program_data(self):
+        """Delegate to either Numpy or PySPQR, create constants."""
+        if self.qr == 'NUMPY':
+            self._qr_transform_program_data_numpy()
+        elif self.qr == 'PYSPQR':
+            self._qr_transform_program_data_pyspqr()
+        else:
+            raise SyntaxError('Wrong qr setting!')
+
         self.c_qr_transf = self.backsolve_r(self.c_ruiz_equil)
-        # print('c transf')
-        # print(self.c_qr_transf)
-        # breakpoint()
 
         # TODO: unclear if this helps
         # self.sigma_qr = np.linalg.norm(self.b_ruiz_equil)
@@ -183,13 +220,12 @@ class Solver:
         self.sigma_qr = 1.
         self.b_qr_transf = self.b_ruiz_equil
 
+        # TODO: propagate x_equil
+
     def _invert_qr_transform(self):
         """Simple triangular solve with matrix R."""
-        result = np.linalg.lstsq(self.r, self.x_transf, rcond=None)[0]
-        if not np.allclose(self.r @ result, self.x_transf):
-            raise Exception
-            #raise Unbounded(
-            #    "Cost vector is not in the span of the program matrix!")
+        result = self.backsolve_r(
+            vector = self.x_transf, transpose=False)
         self.x_equil = result * self.sigma_qr
 
     def _qr_transform_dual_space(self):
@@ -210,18 +246,48 @@ class Solver:
         self.b0 = self.b_qr_transf @ self.y0
         self.b_reduced = self.b_qr_transf @ self.nullspace_projector
 
+        # TODO: propagate y_equil
+
     def _invert_qr_transform_dual_space(self):
         """Invert QR transformation of dual space."""
         self.y_equil = self.y0 + self.nullspace_projector @ self.y_reduced
 
-    def _qr_transform_gap(self):
+    def _qr_transform_gap_pyspqr(self):
         """Apply QR transformation to zero-gap residual."""
-        Q, R = np.linalg.qr(np.concatenate(
-            [self.c_qr_transf, self.b_reduced]).reshape((self.m, 1)), mode='complete')
+        mat = np.concatenate([
+            self.c_qr_transf, self.b_reduced]).reshape((self.m, 1))
+        mat = sp.sparse.csc_matrix(mat)
+        q, r, e = qr(mat)
+
+        self.gap_NS = sp.sparse.linalg.LinearOperator(
+            shape = (self.m, self.m-1),
+            matvec = lambda var_reduced: q @ np.concatenate(
+                [[0.], var_reduced]),
+            rmatvec = lambda var: (q.T @ var)[1:]
+        )
+
+    def _qr_transform_gap_numpy(self):
+        """Apply QR transformation to zero-gap residual."""
+        Q, R = np.linalg.qr(
+            np.concatenate(
+                [self.c_qr_transf, self.b_reduced]).reshape((self.m, 1)),
+                mode='complete')
         self.gap_NS = Q[:, 1:]
+
+    def _qr_transform_gap(self):
+        """Delegate to either Numpy or PySPQR, create constants."""
+        if self.qr == 'NUMPY':
+            self._qr_transform_gap_numpy()
+        elif self.qr == 'PYSPQR':
+            self._qr_transform_gap_pyspqr()
+        else:
+            raise SyntaxError('Wrong qr setting!')
+
         self.var0 = - self.b0 * np.concatenate(
             [self.c_qr_transf, self.b_reduced]) / np.linalg.norm(
                 np.concatenate([self.c_qr_transf, self.b_reduced]))**2
+
+        # TODO: propagate x_transf and y_reduced
 
     def _invert_qr_transform_gap(self):
         """Invert QR transformation of zero-gap residual."""
@@ -323,41 +389,54 @@ class Solver:
         return result @ self.gap_NS
 
     def newjacobian_linop(self, var_reduced):
-        """Jacobian as LinearOperator."""
+        """Jacobian of the residual function."""
+        return self.coneproje_linop(var_reduced) @ self.newjacobian_linop_nocones()
+
+    def coneproje_linop(self, var_reduced):
+        """Jacobian of the cone projections.."""
         var = self.var0 + self.gap_NS @ var_reduced
         x = var[:self.n]
-        y_reduced = var[self.n:]
         s = self.b_qr_transf - self.matrix_qr_transf @ x
-        y = self.y0 + self.nullspace_projector @ y_reduced
-
         s_derivative = self.identity_minus_cone_project_derivative(s)
 
         if self.m <= self.n:
+            return sp.sparse.linalg.aslinearoperator(s_derivative)
+        else:
+            y_reduced = var[self.n:]
+            y = self.y0 + self.nullspace_projector @ y_reduced
+            y_derivative = self.identity_minus_dual_cone_project_derivative_nozero(y)
+            return sp.sparse.linalg.aslinearoperator(sp.sparse.bmat([
+                [s_derivative, None],
+                [None, y_derivative]
+            ]))
+
+    def newjacobian_linop_nocones(self):
+        """Linear component of the Jacobian of the residual function."""
+
+        if self.m <= self.n:
             def matvec(dvar_reduced):
-                return -s_derivative @ (
-                    self.matrix_qr_transf @ (self.gap_NS @ dvar_reduced))
+                return -(self.matrix_qr_transf @ (self.gap_NS @ dvar_reduced))
             def rmatvec(dres):
-                return -self.gap_NS.T @ (
-                    self.matrix_qr_transf.T @ (s_derivative.T @ dres))
+                return -self.gap_NS.T @ (self.matrix_qr_transf.T @ dres)
             return sp.sparse.linalg.LinearOperator(
                 shape=(self.m, self.m-1),
                 matvec=matvec,
                 rmatvec=rmatvec,
             )
         else:
-            y_derivative = self.identity_minus_dual_cone_project_derivative_nozero(y)
             def matvec(dvar_reduced):
                 _ = self.gap_NS @ dvar_reduced
                 dx = _[:self.n]
                 dy_reduced = _[self.n:]
-                dres0 = -s_derivative @ (self.matrix_qr_transf @ dx)
-                dres1 = y_derivative @ (self.nullspace_projector[self.zero:] @ dy_reduced)
+                dres0 = - (self.matrix_qr_transf @ dx)
+                dres1 = (self.nullspace_projector @ dy_reduced)[self.zero:]
                 return np.concatenate([dres0, dres1])
             def rmatvec(dres):
                 dres0 = dres[:self.m]
                 dres1 = dres[self.m:]
-                dx = - self.matrix_qr_transf.T @ (s_derivative.T @ dres0)
-                dy_reduced = self.nullspace_projector[self.zero:].T @ (y_derivative.T @ dres1)
+                dx = -(self.matrix_qr_transf.T  @ dres0)
+                dy_reduced = self.nullspace_projector.T @ np.concatenate(
+                    [np.zeros(self.zero), dres1])
                 dvar_reduced = np.concatenate([dx, dy_reduced])
                 return self.gap_NS.T @ dvar_reduced
 
@@ -372,57 +451,22 @@ class Solver:
     ###
 
     def newton_loss(self, var_reduced):
+        """Loss used for Newton iterations."""
         return np.linalg.norm(self.newres(var_reduced)) ** 2 / 2.
 
     def newton_gradient(self, var_reduced):
-        return self.newjacobian(var_reduced).T @ self.newres(var_reduced)
+        """Gradient used for Newton iterations."""
+        return self.newjacobian_linop(var_reduced).T @ self.newres(var_reduced)
 
     def newton_hessian(self, var_reduced):
-        _jac = self.newjacobian(var_reduced)
-        return sp.sparse.linalg.LinearOperator(
-            shape = (len(var_reduced), len(var_reduced)),
-            matvec = lambda x: _jac.T @ (_jac @ x)
-        )
-
-    # def gap(self, x, y_reduced):
-    #     return self.c_qr_transf.T @ x + self.b_reduced @ y_reduced + self.b0
-
-    # def res(self, var):
-    #     x = var[:self.n]
-    #     y_reduced = var[self.n:]
-    #     if self.m <= self.n:
-    #         return np.concatenate(
-    #             [self.pri_res(x), [self.gap(x,y_reduced)]])
-    #     return np.concatenate(
-    #         [self.pri_res(x), self.dua_res(y_reduced), [self.gap(x,y_reduced)]])
-
-    # def jacobian(self, var):
-    #     x = var[:self.n]
-    #     y_reduced = var[self.n:]
-    #     s_active = 1. * ((self.b - self.matrix_qr_transf @ x) < 0.)
-    #     y_active = 1. * ((self.y0 + self.nullspace_projector @ y_reduced) < 0.)
-    #     if self.m <= self.n:
-    #         return np.block(
-    #             [[-np.diag(s_active) @ self.matrix_qr_transf],
-    #             [self.c_qr_transf.reshape(1,self.m)]])
-    #     return np.block(
-    #         [[-np.diag(s_active) @ self.matrix_qr_transf, np.zeros((self.m, self.m-self.n))],
-    #         [np.zeros((self.m, self.n)), np.diag(y_active) @ self.nullspace_projector],
-    #         [self.c_qr_transf.reshape(1,self.n), self.b_reduced.reshape(1, self.m-self.n)]
-    #         ])
-
-    # def toy_solve(self):
-    #     result = sp.optimize.least_squares(
-    #         self.res, np.zeros(self.m),
-    #         jac=self.jacobian, method='lm')
-    #     var = result.x
-    #     self.x_transf = var[:self.n]
-    #     self.y_reduced = var[self.n:]
+        """Hessian used for Newton iterations."""
+        _jac = self.newjacobian_linop(var_reduced)
+        return _jac.T @ _jac
 
     @staticmethod
     def inexact_levemberg_marquardt(
-            residual, jacobian, x0, max_iter=100000, max_ls=200, eps=1e-12): #,
-            # damp=1e-4):
+            residual, jacobian, x0, max_iter=100000, max_ls=200, eps=1e-12,
+            damp=0.):
         """Inexact Levemberg-Marquardt solver."""
         cur_x = np.copy(x0)
         cur_residual = residual(cur_x)
@@ -440,7 +484,9 @@ class Solver:
             # the cone projection in between the two residual jacobian;
             # has small effect but seems to help a little
             cur_hessian = cur_jacobian.T @ cur_jacobian
-            # + sp.sparse.linalg.aslinearoperator(sp.sparse.eye(len(cur_gradient)) * damp)
+            if damp > 0.:
+                cur_hessian += sp.sparse.linalg.aslinearoperator(
+                    sp.sparse.eye(len(cur_gradient)) * damp)
 
             # fallback for Scipy < 1.12 doesn't work; forcing >= 1.12 for
             # now, I won't use this function anyway
@@ -451,6 +497,7 @@ class Solver:
                 b = -cur_gradient,
                 rtol= min(0.5, np.linalg.norm(cur_gradient)**0.5),
                 callback=_counter,
+                # maxiter=30,
             )
             # else:
             #     _ = sp.sparse.linalg.cg(
@@ -546,7 +593,7 @@ class Solver:
 
         print("sq norm of residual", sqloss)
         print("sq norm of jac times residual",
-            np.linalg.norm(self.newjacobian(self.var_reduced).T @ residual)**2/2.)
+            np.linalg.norm(self.newjacobian_linop(self.var_reduced).T @ residual)**2/2.)
 
         if sqloss > 1e-12:
             # infeasible; for convenience we just set this here,
