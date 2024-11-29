@@ -13,6 +13,7 @@ test: env
 
 env:
 	python -m venv --system-site-packages env
+	$(BINDIR)/pip install --upgrade pip
 	$(BINDIR)/pip install --editable .[test]
 
 fix:
