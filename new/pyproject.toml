@@ -13,7 +13,7 @@ dependencies = [
 [project.optional-dependencies]
 docs = ["sphinx"]
 dev = [
-    "build", "twine", "pylint", "isort", "autopep8", "docformatter", "cvxpy-base",
+    "build", "twine", "pylint", "isort", "autopep8", "docformatter",
     "diff_cover"]
 test = [
     "cvxpy",
