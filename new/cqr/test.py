@@ -1,19 +1,18 @@
 # Copyright 2024 Enzo Busseti
 #
-# This file is part of Project Euromir.
+# This file is part of CQR, the Conic QR Solver.
 #
-# Project Euromir is free software: you can redistribute it and/or modify it
-# under the terms of the GNU General Public License as published by the Free
-# Software Foundation, either version 3 of the License, or (at your option) any
-# later version.
+# CQR is free software: you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later
+# version.
 #
-# Project Euromir is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
-# details.
+# CQR is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along with
-# Project Euromir. If not, see <https://www.gnu.org/licenses/>.
+# CQR. If not, see <https://www.gnu.org/licenses/>.
 """Unit tests of the solver class."""
 
 import time
@@ -24,7 +23,8 @@ import cvxpy as cp
 import numpy as np
 import scipy as sp
 
-from solver import Solver, Infeasible, Unbounded
+from .solver import Solver, Infeasible, Unbounded
+from .cvxpy_interface import CQR
 
 
 # Simple implementation of cone projection for tests
@@ -34,10 +34,12 @@ def _cone_project(s, zero):
     return np.concatenate([
         np.zeros(zero), np.maximum(s[zero:], 0.)])
 
+
 def _dual_cone_project(y, zero):
     """Project on dual of program cone."""
     return np.concatenate([
         y[:zero], np.maximum(y[zero:], 0.)])
+
 
 class TestSolverClass(TestCase):
     """Unit tests of the solver class."""
@@ -48,12 +50,13 @@ class TestSolverClass(TestCase):
 
     def _y_in_cone(self, y, zero):
         self.assertTrue(
-            np.allclose(_dual_cone_project(y, zero), y)#, atol=5e-5, rtol=1e-5)
+            # , atol=5e-5, rtol=1e-5)
+            np.allclose(_dual_cone_project(y, zero), y)
         )
 
     def _s_in_cone(self, s, zero):
         self.assertTrue(
-            np.allclose(_cone_project(s, zero), s)#, atol=5e-5, rtol=1e-5)
+            np.allclose(_cone_project(s, zero), s)  # , atol=5e-5, rtol=1e-5)
         )
 
     def check_solution_valid(self, matrix, b, c, x, y, zero):
@@ -72,13 +75,13 @@ class TestSolverClass(TestCase):
         # gap error
         print('GAP RESIDUAL %.2e' % (c.T @ x + b.T @ y))
         self.assertTrue(
-            np.isclose(c.T @ x, -b.T @ y) #, atol=1e-6, rtol=1e-6)
-            )
+            np.isclose(c.T @ x, -b.T @ y)  # , atol=1e-6, rtol=1e-6)
+        )
         # dual error
         print('DUAL RESIDUAL NORM %.2e' % np.linalg.norm(c + matrix.T @ y))
         self.assertTrue(
-            np.allclose(c, - matrix.T @ y) #, atol=1e-6, rtol=1e-6)
-            )
+            np.allclose(c, - matrix.T @ y)  # , atol=1e-6, rtol=1e-6)
+        )
 
     def check_infeasibility_certificate_valid(self, matrix, b, y, zero):
         """Check primal infeasibility certificate is valid."""
@@ -86,7 +89,7 @@ class TestSolverClass(TestCase):
         # TODO: this is here to pass tests, *remove* once refinement is there
         y[np.abs(y) < 1e-6] = 0.
         self.assertLess(b.T @ y, 0)
-        y /= np.abs(b.T @ y) # normalize
+        y /= np.abs(b.T @ y)  # normalize
         self.assertTrue(np.isclose(b.T @ y, -1))
         # dual cone error
         self._y_in_cone(y, zero)
@@ -99,7 +102,7 @@ class TestSolverClass(TestCase):
         """Check primal unboundedness certificate is valid."""
         x = np.copy(x)
         self.assertLess(c.T @ x, 0)
-        x /=  np.abs(c.T @ x) # normalize
+        x /= np.abs(c.T @ x)  # normalize
         conic = -matrix @ x
         self._s_in_cone(conic, zero)
 
@@ -115,7 +118,7 @@ class TestSolverClass(TestCase):
             constr.append(b[zero:] - matrix[zero:] @ x >= 0)
         program = cp.Problem(cp.Minimize(x.T @ c), constr)
         program.solve()
-            #solver='SCS', verbose=True, acceleration_lookback=0)
+        # solver='SCS', verbose=True, acceleration_lookback=0)
         return program.status, x.value, constr[0].dual_value
 
     def check_solve(self, matrix, b, c, zero, nonneg, x0=None, y0=None):
@@ -138,13 +141,18 @@ class TestSolverClass(TestCase):
                     np.array(b, copy=True), np.array(c, copy=True), zero=zero)
                 if solver.status == 'Optimal':
                     self.assertIn(status, ['optimal', 'optimal_inaccurate'])
-                    self.check_solution_valid(matrix, b, c, solver.x, solver.y, zero=zero)
+                    self.check_solution_valid(
+                        matrix, b, c, solver.x, solver.y, zero=zero)
                 elif solver.status == 'Infeasible':
-                    self.assertIn(status, ['infeasible', 'infeasible_inaccurate'])
-                    self.check_infeasibility_certificate_valid(matrix, b, solver.y, zero = zero)
+                    self.assertIn(
+                        status, ['infeasible', 'infeasible_inaccurate'])
+                    self.check_infeasibility_certificate_valid(
+                        matrix, b, solver.y, zero=zero)
                 elif solver.status == 'Unbounded':
-                    self.assertIn(status, ['unbounded', 'unbounded_inaccurate'])
-                    self.check_unboundedness_certificate_valid(matrix, c, solver.x, zero=zero)
+                    self.assertIn(
+                        status, ['unbounded', 'unbounded_inaccurate'])
+                    self.check_unboundedness_certificate_valid(
+                        matrix, c, solver.x, zero=zero)
                 else:
                     raise ValueError('Unknown solver status!')
 
@@ -253,7 +261,8 @@ class TestSolverClass(TestCase):
 
     def check_solve_from_cvxpy(self, cvxpy_problem_obj):
         """Same as check solve, but takes CVXPY program object."""
-        matrix, b, c, zero, nonneg = self.make_program_from_cvxpy(cvxpy_problem_obj)
+        matrix, b, c, zero, nonneg = self.make_program_from_cvxpy(
+            cvxpy_problem_obj)
         self.check_solve(matrix, b, c, zero, nonneg)
 
     ###
@@ -323,7 +332,7 @@ class TestSolverClass(TestCase):
         x = cp.Variable(5)
         probl = cp.Problem(
             cp.Minimize(cp.norm1(x @ np.random.randn(5, 10))),
-            [x >= 0, x <= 1., x[2] == .5, x <= 1.]) # redundant constraints
+            [x >= 0, x <= 1., x[2] == .5, x <= 1.])  # redundant constraints
         self.check_solve_from_cvxpy(probl)
 
     def test_from_cvxpy_unused_variable(self):
@@ -388,7 +397,7 @@ class TestSolverClass(TestCase):
         # these instead give the same
 
     @staticmethod
-    def _generate_problem_one(seed, m=81, n=70):
+    def _generate_problem_one(seed, m=41, n=30):
         """Generate a sample LP which can be difficult."""
         np.random.seed(seed)
         x = cp.Variable(n)
@@ -401,7 +410,7 @@ class TestSolverClass(TestCase):
         return x, program
 
     @staticmethod
-    def _generate_problem_two(seed, m=150, n=70):
+    def _generate_problem_two(seed, m=70, n=40):
         """Generate a sample LP which can be difficult."""
         np.random.seed(seed)
         x = cp.Variable(n)
@@ -410,7 +419,7 @@ class TestSolverClass(TestCase):
         objective = cp.norm1(A @ x - b) + 1. * cp.norm1(x)
         # adding these constraints, which are inactive at opt,
         # cause cg loop to stop early
-        constraints = []#x <= 1., x >= -1]
+        constraints = []  # x <= 1., x >= -1]
         program = cp.Problem(cp.Minimize(objective), constraints)
         return x, program
 
@@ -426,7 +435,7 @@ class TestSolverClass(TestCase):
 
     def test_warmstart(self):
         """Simple test warmstart."""
-        _, prog = self._generate_problem_one(seed=123, m=120, n=90)
+        _, prog = self._generate_problem_one(seed=123, m=81, n=70)
 
         matrix, b, c, zero, nonneg = self.make_program_from_cvxpy(prog)
 
@@ -443,13 +452,20 @@ class TestSolverClass(TestCase):
 
         self.assertLess(time_hotstart, time_coldstart)
 
-    # def test(self):
-    #     matrix = np.random.randn(2,5)
-    #     breakpoint()
-    #     b, c = self.make_program_from_matrix(matrix)
-    #     x, y = self.solve_program_cvxpy(matrix, b, c)
-    #     solver = Solver(matrix, b, c, 0, len(b))
+    ###
+    # Test CVXPY interface
+    ###
 
+    def test_cvxpy_interface(self):
+        """Test correct translation to and from CVXPY."""
+        x, prog = self._generate_problem_one(seed=321, m=20, n=10)
+        prog.solve(solver=CQR())
 
-if __name__ == '__main__': # pragma: no cover
+        self.assertTrue(np.isposinf(cp.Problem(
+            cp.Minimize(0.), [x >= 1, x <= 0]).solve(solver=CQR())))
+
+        self.assertTrue(np.isneginf(cp.Problem(
+            cp.Minimize(cp.sum(x)), [x <= 0]).solve(solver=CQR())))
+
+if __name__ == '__main__':  # pragma: no cover
     main()

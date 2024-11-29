@@ -1,19 +1,18 @@
 # Copyright 2024 Enzo Busseti
 #
-# This file is part of Project Euromir.
+# This file is part of CQR, the Conic QR Solver.
 #
-# Project Euromir is free software: you can redistribute it and/or modify it
-# under the terms of the GNU General Public License as published by the Free
-# Software Foundation, either version 3 of the License, or (at your option) any
-# later version.
+# CQR is free software: you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later
+# version.
 #
-# Project Euromir is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-# FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more
-# details.
+# CQR is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along with
-# Project Euromir. If not, see <https://www.gnu.org/licenses/>.
+# CQR. If not, see <https://www.gnu.org/licenses/>.
 """Solver class.
 
 Idea:
@@ -27,15 +26,18 @@ Experiments (new features, ...) should be done as subclasses.
 import numpy as np
 import scipy as sp
 
-from equilibrate import hsde_ruiz_equilibration
+from .equilibrate import hsde_ruiz_equilibration
 
 from pyspqr import qr
+
 
 class Unbounded(Exception):
     """Program unbounded."""
 
+
 class Infeasible(Exception):
     """Program infeasible."""
+
 
 class Solver:
     """Solver class.
@@ -118,9 +120,9 @@ class Solver:
 
     def backsolve_r(self, vector, transpose=True):
         """Simple triangular solve with matrix R."""
-        if transpose: # forward transform c
+        if transpose:  # forward transform c
             r = self.r.T
-        else: # backward tranform x
+        else:  # backward tranform x
             r = self.r
 
         # TODO: handle all degeneracies here
@@ -168,10 +170,10 @@ class Solver:
     def _equilibrate(self):
         """Apply Ruiz equilibration to program data."""
         self.equil_d, self.equil_e, self.equil_sigma, self.equil_rho, \
-        self.matrix_ruiz_equil, self.b_ruiz_equil, self.c_ruiz_equil = \
+            self.matrix_ruiz_equil, self.b_ruiz_equil, self.c_ruiz_equil = \
             hsde_ruiz_equilibration(
                 self.matrix, self.b, self.c, dimensions={
-                'zero': self.zero, 'nonneg': self.nonneg, 'second_order': []},
+                    'zero': self.zero, 'nonneg': self.nonneg, 'second_order': []},
                 max_iters=25)
 
         self.x_equil = self.equil_sigma * (self.x / self.equil_e)
@@ -180,8 +182,10 @@ class Solver:
     def _invert_equilibrate(self):
         """Invert Ruiz equlibration."""
         # TODO: make sure with certificates you always return something
-        x_equil = self.x_equil if hasattr(self, 'x_equil') else np.zeros(self.n)
-        y_equil = self.y_equil if hasattr(self, 'y_equil') else np.zeros(self.m)
+        x_equil = self.x_equil if hasattr(
+            self, 'x_equil') else np.zeros(self.n)
+        y_equil = self.y_equil if hasattr(
+            self, 'y_equil') else np.zeros(self.m)
 
         self.x = (self.equil_e * x_equil) / self.equil_sigma
         self.y = (self.equil_d * y_equil) / self.equil_rho
@@ -193,15 +197,15 @@ class Solver:
         shape1 = min(self.n, self.m)
         self.matrix_qr_transf = sp.sparse.linalg.LinearOperator(
             shape=(self.m, shape1),
-            matvec = lambda x: q @ np.concatenate([x, np.zeros(self.m-shape1)]),
-            rmatvec = lambda y: (
+            matvec=lambda x: q @ np.concatenate([x, np.zeros(self.m-shape1)]),
+            rmatvec=lambda y: (
                 q.T @ np.array(y, copy=True).reshape(y.size))[:shape1],
         )
-        shape2 =  max(self.m - self.n, 0)
+        shape2 = max(self.m - self.n, 0)
         self.nullspace_projector = sp.sparse.linalg.LinearOperator(
             shape=(self.m, shape2),
-            matvec = lambda x: q @ np.concatenate([np.zeros(self.m-shape2), x]),
-            rmatvec = lambda y: (
+            matvec=lambda x: q @ np.concatenate([np.zeros(self.m-shape2), x]),
+            rmatvec=lambda y: (
                 q.T @ np.array(y, copy=True).reshape(y.size))[self.m-shape2:]
         )
         self.r = (r.todense() @ e)[:self.n]
@@ -237,7 +241,7 @@ class Solver:
     def _invert_qr_transform(self):
         """Simple triangular solve with matrix R."""
         result = self.backsolve_r(
-            vector = self.x_transf, transpose=False)
+            vector=self.x_transf, transpose=False)
         self.x_equil = result * self.sigma_qr
 
     def _qr_transform_dual_space(self):
@@ -273,10 +277,10 @@ class Solver:
         q, r, e = qr(mat)
 
         self.gap_NS = sp.sparse.linalg.LinearOperator(
-            shape = (self.m, self.m-1),
-            matvec = lambda var_reduced: q @ np.concatenate(
+            shape=(self.m, self.m-1),
+            matvec=lambda var_reduced: q @ np.concatenate(
                 [[0.], var_reduced]),
-            rmatvec = lambda var: (q.T @ var)[1:]
+            rmatvec=lambda var: (q.T @ var)[1:]
         )
 
     def _qr_transform_gap_numpy(self):
@@ -284,7 +288,7 @@ class Solver:
         Q, R = np.linalg.qr(
             np.concatenate(
                 [self.c_qr_transf, self.b_reduced]).reshape((self.m, 1)),
-                mode='complete')
+            mode='complete')
         self.gap_NS = Q[:, 1:]
 
     def _qr_transform_gap(self):
@@ -356,7 +360,7 @@ class Solver:
         """Derivative of projection on program cone."""
         if self.verbose:
             old_s_active = self.s_active if hasattr(
-            self, 's_active') else np.ones(self.m-self.zero)
+                self, 's_active') else np.ones(self.m-self.zero)
             self.s_active = 1. * (s[self.zero:] >= 0.)
             print('s_act_chgs=%d' % np.sum(
                 np.abs(self.s_active - old_s_active)), end='\t')
@@ -371,11 +375,11 @@ class Solver:
         """Derivative of projection on dual of program cone, skip zeros."""
         if self.verbose:
             old_y_active = self.y_active if hasattr(
-            self, 'y_active') else np.ones(self.m-self.zero)
+                self, 'y_active') else np.ones(self.m-self.zero)
             self.y_active = 1. * (y[self.zero:] >= 0.)
             print('y_act_chgs=%d' % np.sum(
                 np.abs(self.y_active - old_y_active)), end='\t')
-        return sp.sparse.diags( 1 * (y[self.zero:] >= 0.))
+        return sp.sparse.diags(1 * (y[self.zero:] >= 0.))
 
     def identity_minus_dual_cone_project_derivative_nozero(self, y):
         """Identity minus derivative of projection on dual of program cone.
@@ -403,11 +407,11 @@ class Solver:
                 [[-self.identity_minus_cone_project_derivative(
                     s) @ self.matrix_qr_transf,
                     np.zeros((self.m, self.m-self.n))],
-                [
+                 [
                     np.zeros((self.m-self.zero, self.n)),
                     self.identity_minus_dual_cone_project_derivative_nozero(
                         y) @ self.nullspace_projector[self.zero:]],
-                ])
+                 ])
 
         # print('\n' *5)
         # print(np.linalg.svd(result @ self.gap_NS)[1])
@@ -431,7 +435,8 @@ class Solver:
         else:
             y_reduced = var[self.n:]
             y = self.y0 + self.nullspace_projector @ y_reduced
-            y_derivative = self.identity_minus_dual_cone_project_derivative_nozero(y)
+            y_derivative = self.identity_minus_dual_cone_project_derivative_nozero(
+                y)
             return sp.sparse.linalg.aslinearoperator(sp.sparse.bmat([
                 [s_derivative, None],
                 [None, y_derivative]
@@ -443,6 +448,7 @@ class Solver:
         if self.m <= self.n:
             def matvec(dvar_reduced):
                 return -(self.matrix_qr_transf @ (self.gap_NS @ dvar_reduced))
+
             def rmatvec(dres):
                 return -self.gap_NS.T @ (self.matrix_qr_transf.T @ dres)
             return sp.sparse.linalg.LinearOperator(
@@ -458,6 +464,7 @@ class Solver:
                 dres0 = - (self.matrix_qr_transf @ dx)
                 dres1 = (self.nullspace_projector @ dy_reduced)[self.zero:]
                 return np.concatenate([dres0, dres1])
+
             def rmatvec(dres):
                 dres0 = dres[:self.m]
                 dres1 = dres[self.m:]
@@ -492,14 +499,15 @@ class Solver:
 
     # @staticmethod
     def inexact_levemberg_marquardt(self,
-            residual, jacobian, x0, max_iter=100000, max_ls=200, eps=1e-12,
-            damp=0.):
+                                    residual, jacobian, x0, max_iter=100000, max_ls=200, eps=1e-12,
+                                    damp=0.):
         """Inexact Levemberg-Marquardt solver."""
         cur_x = np.copy(x0)
         cur_residual = residual(cur_x)
         cur_loss = np.linalg.norm(cur_residual)
         cur_jacobian = jacobian(cur_x)
         TOTAL_CG_ITER = 0
+
         def _counter(_):
             nonlocal TOTAL_CG_ITER
             TOTAL_CG_ITER += 1
@@ -507,7 +515,8 @@ class Solver:
         for i in range(max_iter):
             if self.verbose:
                 print("it=%d" % i, end='\t')
-                print("loss=%.2e" % cur_loss, end='\t')
+                print("cvx_loss=%.2e" % np.linalg.norm(
+                    self.newres(cur_x)), end='\t')
                 print("ref_loss=%.2e" % np.linalg.norm(
                     self.refinement_residual(cur_x)), end='\t')
             cur_gradient = cur_jacobian.T @ cur_residual
@@ -521,13 +530,13 @@ class Solver:
 
             # fallback for Scipy < 1.12 doesn't work; forcing >= 1.12 for
             # now, I won't use this function anyway
-            #sp_version = [int(el) for el in sp.__version__.split('.')]
+            # sp_version = [int(el) for el in sp.__version__.split('.')]
             # if sp_version >= [1,12]:
             olditers = int(TOTAL_CG_ITER)
             _ = sp.sparse.linalg.cg(
-                A = cur_hessian,
-                b = -cur_gradient,
-                rtol= min(0.5, np.linalg.norm(cur_gradient)**0.5),
+                A=cur_hessian,
+                b=-cur_gradient,
+                rtol=min(0.5, np.linalg.norm(cur_gradient)**0.5),
                 callback=_counter,
                 # maxiter=30,
             )
@@ -604,7 +613,8 @@ class Solver:
 
         matrix1 = np.hstack([self.matrix_qr_transf, self.nullspace_projector])
         matrix1[self.zero:] = z_derivative_nozero @ matrix1[self.zero:]
-        matrix2 = np.hstack([np.zeros((self.m, self.n)), self.nullspace_projector])
+        matrix2 = np.hstack(
+            [np.zeros((self.m, self.n)), self.nullspace_projector])
         return (matrix1 - matrix2) @ self.gap_NS
 
     def _refine(self):
@@ -617,17 +627,23 @@ class Solver:
         """Basic refinement."""
 
         print('Refinement loss at end of main loop',
-            np.linalg.norm(self.refinement_residual(self.var_reduced)))
+              np.linalg.norm(self.refinement_residual(self.var_reduced)))
 
         self._refine()
-        self._refine()
-        self._refine()
+        # self._refine()
+        # self._refine()
 
         print('Refinement loss after refine',
-            np.linalg.norm(self.refinement_residual(self.var_reduced)))
+              np.linalg.norm(self.refinement_residual(self.var_reduced)))
 
     def new_toy_solve(self):
         """Solve by LM."""
+
+        # breakpoint()
+        # _ = self.inexact_levemberg_marquardt(self.refinement_residual, self.refinement_jacobian, self.var_reduced, eps=1e-15, max_iter=10)
+        # self.var_reduced = self.inexact_levemberg_marquardt(self.newres, self.newjacobian_linop, self.var_reduced, max_iter=10)
+        # breakpoint()
+
         self.var_reduced = self.inexact_levemberg_marquardt(
             self.newres, self.newjacobian_linop, self.var_reduced)
 
@@ -695,7 +711,7 @@ class Solver:
 
         print("sq norm of residual", sqloss)
         print("sq norm of jac times residual",
-            np.linalg.norm(self.newjacobian_linop(self.var_reduced).T @ residual)**2/2.)
+              np.linalg.norm(self.newjacobian_linop(self.var_reduced).T @ residual)**2/2.)
 
         if sqloss > 1e-12:
             # infeasible; for convenience we just set this here,
@@ -708,7 +724,8 @@ class Solver:
 
             s_certificate = -residual[self.m:]
             if self.zero > 0:
-                s_certificate = np.concatenate([np.zeros(self.zero), s_certificate])
+                s_certificate = np.concatenate(
+                    [np.zeros(self.zero), s_certificate])
             if np.linalg.norm(s_certificate)**2 > 1e-12:
                 # print('unboundedness certificate')
                 self.x_transf = - self.matrix_qr_transf.T @ s_certificate
@@ -727,6 +744,6 @@ class Solver:
             # assert np.allclose(self.matrix.T @ self.infeasibility_certificate, 0.)
             # assert self.b.T @ self.infeasibility_certificate < 0.
 
-        else: # for now we only refine solutions
+        else:  # for now we only refine solutions
             if self.qr == 'NUMPY' and self.m > self.n:
                 self.refine()

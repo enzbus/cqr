@@ -8,15 +8,15 @@ endif
 .PHONY: clean test
 
 test: env
-	$(BINDIR)/python test.py
+	$(BINDIR)/python -m cqr.test
 
 env:
 	python -m venv --system-site-packages env
 	$(BINDIR)/pip install -r requirements.txt
 
 fix:
-	$(BINDIR)/python -m autopep8 -i *.py
-	$(BINDIR)/python -m docformatter -i *.py
+	$(BINDIR)/python -m autopep8 -i cqr/*.py
+	$(BINDIR)/python -m docformatter -i cqr/*.py
 
 
 clean:
