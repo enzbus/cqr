@@ -1,9 +1,15 @@
 ENVDIR        = env
 PROJECT       = cqr
 BINDIR        = $(ENVDIR)/bin
+VENV_OPTS     =
 
 ifeq ($(OS), Windows_NT)
     BINDIR=$(ENVDIR)/Scripts
+else
+	UNAME_S := $(shell uname -s)
+	ifeq ($(UNAME_S),Linux)
+		VENV_OPTS += --system-site-packages
+	endif
 endif
 
 .PHONY: clean test dist
@@ -12,7 +18,7 @@ test: env
 	$(BINDIR)/python -m cqr.test
 
 env:
-	python -m venv --system-site-packages env
+	python -m venv $(VENV_OPTS) $(ENVDIR)
 	$(BINDIR)/pip install --upgrade pip
 	$(BINDIR)/pip install --editable .[test]
 
