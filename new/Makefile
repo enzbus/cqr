@@ -2,9 +2,11 @@ ENVDIR        = env
 PROJECT       = cqr
 BINDIR        = $(ENVDIR)/bin
 VENV_OPTS     =
+PIP_OPTS      = --editable
 
 ifeq ($(OS), Windows_NT)
-    BINDIR=$(ENVDIR)/Scripts
+    BINDIR = $(ENVDIR)/Scripts
+    PIP_OPTS =
 else
 	UNAME_S := $(shell uname -s)
 	ifeq ($(UNAME_S),Linux)
@@ -19,8 +21,7 @@ test: env
 
 env:
 	python -m venv $(VENV_OPTS) $(ENVDIR)
-	$(BINDIR)/pip install --upgrade pip
-	$(BINDIR)/pip install --editable .[test]
+	$(BINDIR)/pip install $(PIP_OPTS) .[test]
 
 fix:
 	$(BINDIR)/python -m autopep8 -i cqr/*.py
