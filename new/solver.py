@@ -59,7 +59,8 @@ class Solver:
     """
 
     def __init__(
-            self, matrix, b, c, zero, nonneg, x0=None, y0=None, qr='NUMPY'):
+            self, matrix, b, c, zero, nonneg, x0=None, y0=None, qr='NUMPY',
+            verbose=True):
 
         # process program data
         self.matrix = sp.sparse.csc_matrix(matrix)
@@ -75,8 +76,12 @@ class Solver:
         self.c = np.array(c, dtype=float)
         assert qr in ['NUMPY', 'PYSPQR']
         self.qr = qr
+        self.verbose = verbose
 
-        print(f'Program: m={self.m}, n={self.n}, zero={self.zero}, nonneg={self.nonneg}')
+        if self.verbose:
+            print(
+                f'Program: m={self.m}, n={self.n}, nnz={self.matrix.nnz},'
+                f' zero={self.zero}, nonneg={self.nonneg}')
 
         self.x = np.zeros(self.n) if x0 is None else np.array(x0)
         assert len(self.x) == self.n
@@ -166,7 +171,8 @@ class Solver:
         self.matrix_ruiz_equil, self.b_ruiz_equil, self.c_ruiz_equil = \
             hsde_ruiz_equilibration(
                 self.matrix, self.b, self.c, dimensions={
-                'zero': self.zero, 'nonneg': self.nonneg, 'second_order': []})
+                'zero': self.zero, 'nonneg': self.nonneg, 'second_order': []},
+                max_iters=25)
 
         self.x_equil = self.equil_sigma * (self.x / self.equil_e)
         self.y_equil = self.equil_rho * (self.y / self.equil_d)
@@ -348,23 +354,35 @@ class Solver:
 
     def cone_project_derivative(self, s):
         """Derivative of projection on program cone."""
-        return np.diag(
+        if self.verbose:
+            old_s_active = self.s_active if hasattr(
+            self, 's_active') else np.ones(self.m-self.zero)
+            self.s_active = 1. * (s[self.zero:] >= 0.)
+            print('s_act_chgs=%d' % np.sum(
+                np.abs(self.s_active - old_s_active)), end='\t')
+        return sp.sparse.diags(
             np.concatenate([np.zeros(self.zero), 1 * (s[self.zero:] >= 0.)]))
 
     def identity_minus_cone_project_derivative(self, s):
         """Identity minus derivative of projection on program cone."""
-        return np.eye(self.m) - self.cone_project_derivative(s)
+        return sp.sparse.eye(self.m) - self.cone_project_derivative(s)
 
     def dual_cone_project_derivative_nozero(self, y):
         """Derivative of projection on dual of program cone, skip zeros."""
-        return np.diag( 1 * (y[self.zero:] >= 0.))
+        if self.verbose:
+            old_y_active = self.y_active if hasattr(
+            self, 'y_active') else np.ones(self.m-self.zero)
+            self.y_active = 1. * (y[self.zero:] >= 0.)
+            print('y_act_chgs=%d' % np.sum(
+                np.abs(self.y_active - old_y_active)), end='\t')
+        return sp.sparse.diags( 1 * (y[self.zero:] >= 0.))
 
     def identity_minus_dual_cone_project_derivative_nozero(self, y):
         """Identity minus derivative of projection on dual of program cone.
 
         (Skip zeros.)
         """
-        return np.eye(
+        return sp.sparse.eye(
             self.m - self.zero) - self.dual_cone_project_derivative_nozero(y)
 
     def newjacobian(self, var_reduced):
@@ -472,8 +490,8 @@ class Solver:
         _jac = self.newjacobian_linop(var_reduced)
         return _jac.T @ _jac
 
-    @staticmethod
-    def inexact_levemberg_marquardt(
+    # @staticmethod
+    def inexact_levemberg_marquardt(self,
             residual, jacobian, x0, max_iter=100000, max_ls=200, eps=1e-12,
             damp=0.):
         """Inexact Levemberg-Marquardt solver."""
@@ -487,12 +505,16 @@ class Solver:
             TOTAL_CG_ITER += 1
         TOTAL_BACK_TRACKS = 0
         for i in range(max_iter):
-            # print("cur_loss", cur_loss)
+            if self.verbose:
+                print("it=%d" % i, end='\t')
+                print("loss=%.2e" % cur_loss, end='\t')
+                print("ref_loss=%.2e" % np.linalg.norm(
+                    self.refinement_residual(cur_x)), end='\t')
             cur_gradient = cur_jacobian.T @ cur_residual
-            # TODO: in solver_new I was doing extra regularization inside
-            # the cone projection in between the two residual jacobian;
-            # has small effect but seems to help a little
             cur_hessian = cur_jacobian.T @ cur_jacobian
+            # in solver_new I was doing extra regularization inside
+            # the cone projection in between the two residual jacobian;
+            # with new formulation this should have same effect
             if damp > 0.:
                 cur_hessian += sp.sparse.linalg.aslinearoperator(
                     sp.sparse.eye(len(cur_gradient)) * damp)
@@ -501,6 +523,7 @@ class Solver:
             # now, I won't use this function anyway
             #sp_version = [int(el) for el in sp.__version__.split('.')]
             # if sp_version >= [1,12]:
+            olditers = int(TOTAL_CG_ITER)
             _ = sp.sparse.linalg.cg(
                 A = cur_hessian,
                 b = -cur_gradient,
@@ -508,6 +531,8 @@ class Solver:
                 callback=_counter,
                 # maxiter=30,
             )
+            if self.verbose:
+                print('cg_iters=%d' % (TOTAL_CG_ITER - olditers), end='\t')
             # else:
             #     _ = sp.sparse.linalg.cg(
             #         A = cur_hessian,
@@ -525,26 +550,94 @@ class Solver:
                     cur_x = new_x
                     cur_residual = new_residual
                     cur_loss = new_loss
-                    # print(f'done {j} back-tracks')
+                    if self.verbose:
+                        print(f'btrcks={j}', end='\n')
                     TOTAL_BACK_TRACKS += j
                     break
             else:
+                if self.verbose:
+                    print(
+                        'Line search failed, exiting.'
+                    )
                 break
             # convergence check
             cur_jacobian = jacobian(cur_x)
             cur_gradient = cur_jacobian.T @ cur_residual
+
             if np.max(np.abs(cur_gradient)) < eps:
+                if self.verbose:
+                    print(
+                        'Converged, cur_gradient norm_inf=%.2e' %
+                        np.max(np.abs(cur_gradient)))
                 break
-            # breakpoint()
         print('iters', i)
         print('total CG iters', TOTAL_CG_ITER)
         print('total backtracks', TOTAL_BACK_TRACKS)
         return np.array(cur_x, dtype=float)
 
+    def refinement_residual(self, var_reduced):
+        """Residual for refinement."""
+
+        var = self.var0 + self.gap_NS @ var_reduced
+        x_transf = var[:self.n]
+        s = self.b_qr_transf - self.matrix_qr_transf @ x_transf
+        y_reduced = var[self.n:]
+        y = self.y0 + self.nullspace_projector @ y_reduced
+        return self.dual_cone_project_basic(y - s) - y
+
+    def refinement_jacobian(self, var_reduced):
+        """Jacobian of the refinement residual."""
+
+        # TODO: consider also other case
+        assert self.m > self.n
+
+        # for now dense only
+        assert self.qr == 'NUMPY'
+
+        var = self.var0 + self.gap_NS @ var_reduced
+        x_transf = var[:self.n]
+        s = self.b_qr_transf - self.matrix_qr_transf @ x_transf
+        y_reduced = var[self.n:]
+        y = self.y0 + self.nullspace_projector @ y_reduced
+        z = y-s
+        z_derivative_nozero = self.dual_cone_project_derivative_nozero(z)
+
+        matrix1 = np.hstack([self.matrix_qr_transf, self.nullspace_projector])
+        matrix1[self.zero:] = z_derivative_nozero @ matrix1[self.zero:]
+        matrix2 = np.hstack([np.zeros((self.m, self.n)), self.nullspace_projector])
+        return (matrix1 - matrix2) @ self.gap_NS
+
+    def _refine(self):
+        """Refine with new formulation."""
+        self.var_reduced = self.inexact_levemberg_marquardt(
+            self.refinement_residual, self.refinement_jacobian,
+            self.var_reduced, eps=1e-15)
+
+    def refine(self):
+        """Basic refinement."""
+
+        print('Refinement loss at end of main loop',
+            np.linalg.norm(self.refinement_residual(self.var_reduced)))
+
+        self._refine()
+        self._refine()
+        self._refine()
+
+        print('Refinement loss after refine',
+            np.linalg.norm(self.refinement_residual(self.var_reduced)))
+
     def new_toy_solve(self):
         """Solve by LM."""
         self.var_reduced = self.inexact_levemberg_marquardt(
             self.newres, self.newjacobian_linop, self.var_reduced)
+
+        # breakpoint()
+        # for i in range(10):
+        #     print( sp.optimize.check_grad(self.refinement_residual, self.refinement_jacobian, np.random.randn(self.m-1)))
+        # breakpoint()
+
+        # J = self.refinement_jacobian(self.var_reduced); r = self.refinement_residual(self.var_reduced); step = sp.sparse.linalg.lsqr(J, -r)[0]
+        # breakpoint()
 
     def old_toy_solve(self):
         result = sp.optimize.least_squares(
@@ -633,3 +726,7 @@ class Solver:
             # assert np.min(self.infeasibility_certificate) >= -1e-6
             # assert np.allclose(self.matrix.T @ self.infeasibility_certificate, 0.)
             # assert self.b.T @ self.infeasibility_certificate < 0.
+
+        else: # for now we only refine solutions
+            if self.qr == 'NUMPY' and self.m > self.n:
+                self.refine()

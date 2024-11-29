@@ -59,17 +59,23 @@ class TestSolverClass(TestCase):
     def check_solution_valid(self, matrix, b, c, x, y, zero):
         """Check a cone program solution is valid."""
         # dual cone error
+        print('DUAL CONE RESIDUAL NORM %.2e' % np.linalg.norm(
+            _dual_cone_project(y, zero) - y))
         self._y_in_cone(y, zero)
 
         # primal cone error
         s = b - matrix @ x
+        print('PRIMAL CONE RESIDUAL NORM %.2e' % np.linalg.norm(
+            _cone_project(s, zero) - s))
         self._s_in_cone(s, zero)
 
         # gap error
+        print('GAP RESIDUAL %.2e' % (c.T @ x + b.T @ y))
         self.assertTrue(
             np.isclose(c.T @ x, -b.T @ y) #, atol=1e-6, rtol=1e-6)
             )
         # dual error
+        print('DUAL RESIDUAL NORM %.2e' % np.linalg.norm(c + matrix.T @ y))
         self.assertTrue(
             np.allclose(c, - matrix.T @ y) #, atol=1e-6, rtol=1e-6)
             )
@@ -112,7 +118,7 @@ class TestSolverClass(TestCase):
             #solver='SCS', verbose=True, acceleration_lookback=0)
         return program.status, x.value, constr[0].dual_value
 
-    def check_solve(self, matrix, b, c, zero, nonneg):
+    def check_solve(self, matrix, b, c, zero, nonneg, x0=None, y0=None):
         """Check solution or certificate is correct.
 
         We both check that CVXPY with default solver returns same status
@@ -126,14 +132,7 @@ class TestSolverClass(TestCase):
                 solver = Solver(
                     sp.sparse.csc_matrix(matrix, copy=True),
                     np.array(b, copy=True), np.array(c, copy=True),
-                    zero=zero, nonneg=nonneg, qr=qr)
-                # TODO: branch out into test specific for warmstart
-                solver1 = Solver(
-                    sp.sparse.csc_matrix(matrix, copy=True),
-                    np.array(b, copy=True), np.array(c, copy=True),
-                    zero=zero, nonneg=nonneg, qr=qr,
-                    x0=solver.x + np.random.randn(len(c))*1e-10,
-                    y0=solver.y + np.random.randn(len(b))*1e-10,)
+                    zero=zero, nonneg=nonneg, qr=qr, x0=x0, y0=y0)
                 status, _, _ = self.solve_program_cvxpy(
                     sp.sparse.csc_matrix(matrix, copy=True),
                     np.array(b, copy=True), np.array(c, copy=True), zero=zero)
@@ -148,6 +147,8 @@ class TestSolverClass(TestCase):
                     self.check_unboundedness_certificate_valid(matrix, c, solver.x, zero=zero)
                 else:
                     raise ValueError('Unknown solver status!')
+
+        return solver.status, solver.x, solver.y,
 
     ###
     # Logic to create program and check it
@@ -387,9 +388,9 @@ class TestSolverClass(TestCase):
         # these instead give the same
 
     @staticmethod
-    def _generate_problem_one(seed):
+    def _generate_problem_one(seed, m=81, n=70):
+        """Generate a sample LP which can be difficult."""
         np.random.seed(seed)
-        m, n = 81, 70
         x = cp.Variable(n)
         A = np.random.randn(m, n)
         b = np.random.randn(m)
@@ -400,9 +401,9 @@ class TestSolverClass(TestCase):
         return x, program
 
     @staticmethod
-    def _generate_problem_two(seed):
+    def _generate_problem_two(seed, m=150, n=70):
+        """Generate a sample LP which can be difficult."""
         np.random.seed(seed)
-        m, n = 150, 70
         x = cp.Variable(n)
         A = np.random.randn(m, n)
         b = np.random.randn(m)
@@ -422,6 +423,26 @@ class TestSolverClass(TestCase):
         for seed in range(1):
             _, prog = self._generate_problem_two(seed)
             self.check_solve_from_cvxpy(prog)
+
+    def test_warmstart(self):
+        """Simple test warmstart."""
+        _, prog = self._generate_problem_one(seed=123, m=120, n=90)
+
+        matrix, b, c, zero, nonneg = self.make_program_from_cvxpy(prog)
+
+        s = time.time()
+        status, x, y = self.check_solve(matrix, b, c, zero, nonneg)
+        time_coldstart = time.time() - s
+
+        x += np.random.randn(len(x)) * 1e-7
+        y += np.random.randn(len(y)) * 1e-7
+
+        s = time.time()
+        self.check_solve(matrix, b, c, zero, nonneg, x0=x, y0=y)
+        time_hotstart = time.time() - s
+
+        self.assertLess(time_hotstart, time_coldstart)
+
     # def test(self):
     #     matrix = np.random.randn(2,5)
     #     breakpoint()
