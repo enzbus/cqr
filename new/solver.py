@@ -78,10 +78,13 @@ class Solver:
 
         print(f'Program: m={self.m}, n={self.n}, zero={self.zero}, nonneg={self.nonneg}')
 
-        # TODO: process initial guess
-        self.x = np.empty(self.n, dtype=float)
-        self.y = np.empty(self.m, dtype=float)
-        self.update_variables(x0=x0, y0=y0)
+        self.x = np.zeros(self.n) if x0 is None else np.array(x0)
+        assert len(self.x) == self.n
+        self.y = np.zeros(self.m) if y0 is None else np.array(y0)
+        assert len(self.y) == self.m
+
+        # self.y = np.empty(self.m, dtype=float)
+        # self.update_variables(x0=x0, y0=y0)
 
         try:
             self._equilibrate()
@@ -135,27 +138,27 @@ class Solver:
                 raise Exception('Solver error.')
         return result
 
-    def update_variables(self, x0=None, y0=None):
-        """Update initial values of the primal and dual variables.
+    # def update_variables(self, x0=None, y0=None):
+    #     """Update initial values of the primal and dual variables.
 
-        :param x0: Initial guess of the primal variable. Default None,
-            equivalent to zero vector.
-        :type x0: np.array or None.
-        :param y0: Initial guess of the dual variable. Default None,
-            equivalent to zero vector.
-        :type y0: np.array or None.
-        """
+    #     :param x0: Initial guess of the primal variable. Default None,
+    #         equivalent to zero vector.
+    #     :type x0: np.array or None.
+    #     :param y0: Initial guess of the dual variable. Default None,
+    #         equivalent to zero vector.
+    #     :type y0: np.array or None.
+    #     """
 
-        if x0 is None:
-            self.x[:] = np.zeros(self.n, dtype=float)
-        else:
-            assert len(x0) == self.n
-            self.x[:] = np.array(x0, dtype=float)
-        if y0 is None:
-            self.y[:] = np.zeros(self.m, dtype=float)
-        else:
-            assert len(y0) == self.m
-            self.y[:] = np.array(y0, dtype=float)
+    #     if x0 is None:
+    #         self.x[:] = np.zeros(self.n, dtype=float)
+    #     else:
+    #         assert len(x0) == self.n
+    #         self.x[:] = np.array(x0, dtype=float)
+    #     if y0 is None:
+    #         self.y[:] = np.zeros(self.m, dtype=float)
+    #     else:
+    #         assert len(y0) == self.m
+    #         self.y[:] = np.array(y0, dtype=float)
 
     def _equilibrate(self):
         """Apply Ruiz equilibration to program data."""
@@ -165,15 +168,17 @@ class Solver:
                 self.matrix, self.b, self.c, dimensions={
                 'zero': self.zero, 'nonneg': self.nonneg, 'second_order': []})
 
-        # TODO: propagate x and y
+        self.x_equil = self.equil_sigma * (self.x / self.equil_e)
+        self.y_equil = self.equil_rho * (self.y / self.equil_d)
 
     def _invert_equilibrate(self):
         """Invert Ruiz equlibration."""
-        self.x = self.x_equil if hasattr(self, 'x_equil') else np.zeros(self.n)
-        self.y = self.y_equil if hasattr(self, 'y_equil') else np.zeros(self.m)
+        # TODO: make sure with certificates you always return something
+        x_equil = self.x_equil if hasattr(self, 'x_equil') else np.zeros(self.n)
+        y_equil = self.y_equil if hasattr(self, 'y_equil') else np.zeros(self.m)
 
-        self.x = (self.equil_e * self.x) / self.equil_sigma
-        self.y = (self.equil_d * self.y) / self.equil_rho
+        self.x = (self.equil_e * x_equil) / self.equil_sigma
+        self.y = (self.equil_d * y_equil) / self.equil_rho
 
     def _qr_transform_program_data_pyspqr(self):
         """Apply QR decomposition to equilibrated program data."""
@@ -220,7 +225,8 @@ class Solver:
         self.sigma_qr = 1.
         self.b_qr_transf = self.b_ruiz_equil
 
-        # TODO: propagate x_equil
+        # TODO: what happens in degenerate cases here?
+        self.x_transf = self.r @ (self.x_equil / self.sigma_qr)
 
     def _invert_qr_transform(self):
         """Simple triangular solve with matrix R."""
@@ -246,7 +252,8 @@ class Solver:
         self.b0 = self.b_qr_transf @ self.y0
         self.b_reduced = self.b_qr_transf @ self.nullspace_projector
 
-        # TODO: propagate y_equil
+        # propagate y_equil
+        self.y_reduced = self.nullspace_projector.T @ self.y_equil
 
     def _invert_qr_transform_dual_space(self):
         """Invert QR transformation of dual space."""
@@ -287,7 +294,9 @@ class Solver:
             [self.c_qr_transf, self.b_reduced]) / np.linalg.norm(
                 np.concatenate([self.c_qr_transf, self.b_reduced]))**2
 
-        # TODO: propagate x_transf and y_reduced
+        # propagate x_transf and y_reduced
+        var = np.concatenate([self.x_transf, self.y_reduced])
+        self.var_reduced = self.gap_NS.T @ var
 
     def _invert_qr_transform_gap(self):
         """Invert QR transformation of zero-gap residual."""
@@ -535,7 +544,7 @@ class Solver:
     def new_toy_solve(self):
         """Solve by LM."""
         self.var_reduced = self.inexact_levemberg_marquardt(
-            self.newres, self.newjacobian_linop, np.zeros(self.m-1))
+            self.newres, self.newjacobian_linop, self.var_reduced)
 
     def old_toy_solve(self):
         result = sp.optimize.least_squares(

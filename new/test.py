@@ -127,6 +127,13 @@ class TestSolverClass(TestCase):
                     sp.sparse.csc_matrix(matrix, copy=True),
                     np.array(b, copy=True), np.array(c, copy=True),
                     zero=zero, nonneg=nonneg, qr=qr)
+                # TODO: branch out into test specific for warmstart
+                solver1 = Solver(
+                    sp.sparse.csc_matrix(matrix, copy=True),
+                    np.array(b, copy=True), np.array(c, copy=True),
+                    zero=zero, nonneg=nonneg, qr=qr,
+                    x0=solver.x + np.random.randn(len(c))*1e-10,
+                    y0=solver.y + np.random.randn(len(b))*1e-10,)
                 status, _, _ = self.solve_program_cvxpy(
                     sp.sparse.csc_matrix(matrix, copy=True),
                     np.array(b, copy=True), np.array(c, copy=True), zero=zero)
