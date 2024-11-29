@@ -1,0 +1,69 @@
+[project]
+name = 'cqr'
+version = '0.0.1'
+readme = 'README.rst'
+requires-python = '>=3.8'
+license = {text = "GPLv3"}
+authors = [{name = 'Enzo Busseti', email = 'enzo.busseti@gmail.com'}]
+dependencies = [
+    "numpy",
+    "scipy >= 1.12",
+    "pyspqr"]
+
+[project.optional-dependencies]
+docs = ["sphinx"]
+dev = [
+    "build", "twine", "pylint", "isort", "autopep8", "docformatter", "cvxpy-base",
+    "diff_cover"]
+test = [
+    "cvxpy",
+    'coverage[toml]', 'ecos', 'scs']
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["cqr"]
+
+[tool.coverage.report]
+fail_under = 99
+
+[tool.coverage.run]
+omit = ["*/site-packages/*", "*/dist-packages/*"]
+
+[tool.diff_cover]
+# this will be superflous once we push coverage to 100
+compare_branch = "origin/master"
+fail_under = 99
+
+[tool.diff_quality]
+# this will be superflous once we push pylint score to 10
+compare_branch = "origin/master"
+fail_under = 99
+
+[tool.autopep8]
+# these have been selected by hand, whitespaces and empty lines
+select = ["W291","W292","W293","W391","E231","E225","E303"]
+
+[tool.docformatter]
+# tweaked to remove whitespaces and other simple fixes
+wrap-summaries = 0
+wrap-descriptions = 0
+tab-width = 4
+
+[tool.pylint.main]
+fail-under = 9.75
+jobs = 0 # multiprocessing pylint
+max-line-length = 79 # PEP8 default
+load-plugins =["pylint.extensions.docparams", "pylint.extensions.docstyle"]
+
+[tool.pylint.parameter_documentation]
+# we require docstrings of public methods to document everything
+accept-no-param-doc = false
+accept-no-raise-doc = false
+accept-no-return-doc = false
+accept-no-yields-doc = false
+
+[tool.pylint.'MESSAGE CONTROL'] # check updates for the spelling of this
+enable=["useless-suppression"] # flag useless pylint pragmas

@@ -12,7 +12,7 @@ test: env
 
 env:
 	python -m venv --system-site-packages env
-	$(BINDIR)/pip install -r requirements.txt
+	$(BINDIR)/pip install --editable .[test]
 
 fix:
 	$(BINDIR)/python -m autopep8 -i cqr/*.py
