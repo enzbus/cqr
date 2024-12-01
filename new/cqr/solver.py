@@ -27,6 +27,7 @@ import numpy as np
 import scipy as sp
 
 from .equilibrate import hsde_ruiz_equilibration
+from .cones import second_order_project
 
 from pyspqr import qr
 
@@ -61,17 +62,20 @@ class Solver:
     """
 
     def __init__(
-            self, matrix, b, c, zero, nonneg, x0=None, y0=None, qr='NUMPY',
-            verbose=True):
+            self, matrix, b, c, zero, nonneg, soc=(), x0=None, y0=None,
+            qr='NUMPY', verbose=True):
 
         # process program data
         self.matrix = sp.sparse.csc_matrix(matrix)
         self.m, self.n = matrix.shape
         assert zero >= 0
         assert nonneg >= 0
-        assert zero + nonneg == self.m
+        for soc_dim in soc:
+            assert soc_dim > 1
+        assert zero + nonneg + sum(soc) == self.m
         self.zero = zero
         self.nonneg = nonneg
+        self.soc = soc
         assert len(b) == self.m
         self.b = np.array(b, dtype=float)
         assert len(c) == self.n
@@ -314,15 +318,26 @@ class Solver:
         self.x_transf = var[:self.n]
         self.y_reduced = var[self.n:]
 
+    def self_dual_cone_project(self, conic_var):
+        """Project on self-dual cones."""
+        result = np.empty_like(conic_var)
+        result[:self.nonneg] = np.maximum(conic_var[:self.nonneg], 0.)
+        cur = self.nonneg
+        for soc_dim in self.soc:
+            second_order_project(
+                conic_var[cur:cur+soc_dim], result[cur:cur+soc_dim])
+            cur += soc_dim
+        return result
+
     def cone_project(self, s):
         """Project on program cone."""
         return np.concatenate([
-            np.zeros(self.zero), np.maximum(s[self.zero:], 0.)])
+            np.zeros(self.zero), self.self_dual_cone_project(s[self.zero:])])
 
     def dual_cone_project_basic(self, y):
         """Project on dual of program cone."""
         return np.concatenate([
-            y[:self.zero], np.maximum(y[self.zero:], 0.)])
+            y[:self.zero], self.self_dual_cone_project(y[self.zero:])])
 
     def identity_minus_cone_project(self, s):
         """Identity minus projection on program cone."""
@@ -335,7 +350,7 @@ class Solver:
 
     def dual_cone_project_nozero(self, y):
         """Project on dual of program cone, skip zeros."""
-        return np.maximum(y[self.zero:], 0.)
+        return self.self_dual_cone_project(y[self.zero:])
 
     def identity_minus_dual_cone_project_nozero(self, y):
         """Identity minus projection on dual of program cone, skip zeros."""
@@ -356,6 +371,20 @@ class Solver:
         return np.concatenate(
             [self.pri_err(x), self.dua_err(y_reduced)])
 
+    def self_dual_cone_project_derivative(self, conic_var):
+        """Derivative of projection on self-dual cones."""
+        # TODO: add SOC here
+        active = 1. * (conic_var >= 0.)
+
+        def internal_matvec(d_conic_var):
+            return d_conic_var * active
+
+        return sp.sparse.linalg.LinearOperator(
+            shape=(len(conic_var), len(conic_var)),
+            matvec=internal_matvec,
+            rmatvec=internal_matvec
+        )
+
     def cone_project_derivative(self, s):
         """Derivative of projection on program cone."""
         if self.verbose:
@@ -364,12 +393,35 @@ class Solver:
             self.s_active = 1. * (s[self.zero:] >= 0.)
             print('s_act_chgs=%d' % np.sum(
                 np.abs(self.s_active - old_s_active)), end='\t')
-        return sp.sparse.diags(
-            np.concatenate([np.zeros(self.zero), 1 * (s[self.zero:] >= 0.)]))
+
+        internal_derivative = self.self_dual_cone_project_derivative(
+            s[self.zero:])
+
+        return sp.sparse.linalg.LinearOperator(
+            shape=(self.m, self.m),
+            matvec = lambda s: np.concatenate([
+                np.zeros(self.zero),
+                internal_derivative @ s[self.zero:]
+            ]),
+            rmatvec = lambda s: np.concatenate([
+                np.zeros(self.zero),
+                internal_derivative.T @ s[self.zero:]
+            ])
+        )
+
+        # result = sp.sparse.block_diag(
+        #     [sp.sparse.csc_matrix((self.zero, self.zero), dtype=float),
+        #     self.self_dual_cone_project_derivative(s[self.zero:])
+        #     ])
+        # breakpoint()
+        # raise Exception
+        # return sp.sparse.diags(
+        #     np.concatenate([np.zeros(self.zero), 1 * (s[self.zero:] >= 0.)]))
 
     def identity_minus_cone_project_derivative(self, s):
         """Identity minus derivative of projection on program cone."""
-        return sp.sparse.eye(self.m) - self.cone_project_derivative(s)
+        return sp.sparse.linalg.aslinearoperator(
+            sp.sparse.eye(self.m)) - self.cone_project_derivative(s)
 
     def dual_cone_project_derivative_nozero(self, y):
         """Derivative of projection on dual of program cone, skip zeros."""
@@ -379,15 +431,15 @@ class Solver:
             self.y_active = 1. * (y[self.zero:] >= 0.)
             print('y_act_chgs=%d' % np.sum(
                 np.abs(self.y_active - old_y_active)), end='\t')
-        return sp.sparse.diags(1 * (y[self.zero:] >= 0.))
+        return self.self_dual_cone_project_derivative(y[self.zero:])
 
     def identity_minus_dual_cone_project_derivative_nozero(self, y):
         """Identity minus derivative of projection on dual of program cone.
 
         (Skip zeros.)
         """
-        return sp.sparse.eye(
-            self.m - self.zero) - self.dual_cone_project_derivative_nozero(y)
+        return sp.sparse.linalg.aslinearoperator(sp.sparse.eye(
+            self.m - self.zero)) - self.dual_cone_project_derivative_nozero(y)
 
     def newjacobian(self, var_reduced):
         """Jacobian of the residual using gap QR transform."""
@@ -437,10 +489,25 @@ class Solver:
             y = self.y0 + self.nullspace_projector @ y_reduced
             y_derivative = self.identity_minus_dual_cone_project_derivative_nozero(
                 y)
-            return sp.sparse.linalg.aslinearoperator(sp.sparse.bmat([
-                [s_derivative, None],
-                [None, y_derivative]
-            ]))
+            return sp.sparse.linalg.LinearOperator(
+                shape =(self.m*2 - self.zero, self.m*2 - self.zero),
+                matvec = lambda sy: np.concatenate(
+                    [
+                        s_derivative @ sy[:self.m],
+                        y_derivative @ sy[self.m:]
+                    ]
+                ),
+                rmatvec = lambda sy: np.concatenate(
+                    [
+                        s_derivative.T @ sy[:self.m],
+                        y_derivative.T @ sy[self.m:]
+                    ]
+                )
+            )
+            # return sp.sparse.linalg.aslinearoperator(sp.sparse.bmat([
+            #     [s_derivative, None],
+            #     [None, y_derivative]
+            # ]))
 
     def newjacobian_linop_nocones(self):
         """Linear component of the Jacobian of the residual function."""
@@ -600,9 +667,6 @@ class Solver:
         # TODO: consider also other case
         assert self.m > self.n
 
-        # for now dense only
-        assert self.qr == 'NUMPY'
-
         var = self.var0 + self.gap_NS @ var_reduced
         x_transf = var[:self.n]
         s = self.b_qr_transf - self.matrix_qr_transf @ x_transf
@@ -611,11 +675,44 @@ class Solver:
         z = y-s
         z_derivative_nozero = self.dual_cone_project_derivative_nozero(z)
 
-        matrix1 = np.hstack([self.matrix_qr_transf, self.nullspace_projector])
-        matrix1[self.zero:] = z_derivative_nozero @ matrix1[self.zero:]
-        matrix2 = np.hstack(
-            [np.zeros((self.m, self.n)), self.nullspace_projector])
-        return (matrix1 - matrix2) @ self.gap_NS
+        def matvec(dvar_reduced):
+            dvar = self.gap_NS @ dvar_reduced
+            dx = dvar[:self.n]
+            dy_reduced = dvar[self.n:]
+            dy = self.nullspace_projector @ dy_reduced
+            dz = self.matrix_qr_transf @ dx + dy
+            dz[self.zero:] = z_derivative_nozero @ dz[self.zero:]
+            return dz - dy
+
+        def rmatvec(dres):
+            dz = np.copy(dres)
+            dz[self.zero:] = z_derivative_nozero.T @ dz[self.zero:]
+            dx = self.matrix_qr_transf.T @ dz
+            dy_reduced = self.nullspace_projector.T @ (dz - dres)
+            return self.gap_NS.T @ np.concatenate([dx, dy_reduced])
+
+        return sp.sparse.linalg.LinearOperator(
+            shape=(self.m, self.m-1),
+            matvec=matvec,
+            rmatvec=rmatvec,
+        )
+
+        # matrix1 = np.hstack([self.matrix_qr_transf, self.nullspace_projector])
+        # matrix1[self.zero:] = z_derivative_nozero @ matrix1[self.zero:]
+
+        # matrix2 = np.hstack(
+        #     [np.zeros((self.m, self.n)), self.nullspace_projector])
+
+        # old = (matrix1 - matrix2) @ self.gap_NS
+
+        # for i in range(10):
+        #     test = np.random.randn(old.shape[0])
+        #     assert np.allclose( old.T @ test, rmatvec(test))
+
+        # for i in range(10):
+        #     test = np.random.randn(old.shape[1])
+        #     assert np.allclose( old @ test, matvec(test))
+        # return old
 
     def _refine(self):
         """Refine with new formulation."""
@@ -639,21 +736,22 @@ class Solver:
     def new_toy_solve(self):
         """Solve by LM."""
 
-        # breakpoint()
-        # _ = self.inexact_levemberg_marquardt(self.refinement_residual, self.refinement_jacobian, self.var_reduced, eps=1e-15, max_iter=10)
-        # self.var_reduced = self.inexact_levemberg_marquardt(self.newres, self.newjacobian_linop, self.var_reduced, max_iter=10)
-        # breakpoint()
-
         self.var_reduced = self.inexact_levemberg_marquardt(
             self.newres, self.newjacobian_linop, self.var_reduced)
 
-        # breakpoint()
         # for i in range(10):
-        #     print( sp.optimize.check_grad(self.refinement_residual, self.refinement_jacobian, np.random.randn(self.m-1)))
-        # breakpoint()
-
-        # J = self.refinement_jacobian(self.var_reduced); r = self.refinement_residual(self.var_reduced); step = sp.sparse.linalg.lsqr(J, -r)[0]
-        # breakpoint()
+        #     self.var_reduced = self.inexact_levemberg_marquardt(
+        #       self.newres, self.newjacobian_linop, self.var_reduced, eps=eps)
+        #     old_loss = self.newton_loss(self.var_reduced)
+        #     _ = self.inexact_levemberg_marquardt(
+        #       self.refinement_residual, self.refinement_jacobian,
+        #       self.var_reduced, eps=1e-15, max_iter=3)
+        #     if self.newton_loss(_) < old_loss:
+        #         self.var_reduced = _
+        #         break
+        #     else:
+        #         print('Refinement refused')
+        #         eps /=10
 
     def old_toy_solve(self):
         result = sp.optimize.least_squares(
@@ -745,5 +843,5 @@ class Solver:
             # assert self.b.T @ self.infeasibility_certificate < 0.
 
         else:  # for now we only refine solutions
-            if self.qr == 'NUMPY' and self.m > self.n:
+            if self.m > self.n:
                 self.refine()

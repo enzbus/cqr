@@ -15,6 +15,8 @@
 # CQR. If not, see <https://www.gnu.org/licenses/>.
 """This module contains a Python implementation of Ruiz equilibration."""
 
+# TODO: if we keep this, import test files from outer package
+
 import logging
 
 import numpy as np
