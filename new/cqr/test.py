@@ -27,18 +27,51 @@ from .solver import Solver, Infeasible, Unbounded
 from .cvxpy_interface import CQR
 
 
+class Dims:
+    """Program dimensions."""
+    def __init__(
+        self, m, n, zero=0, soc=()):
+        self.m = m
+        self.n = n
+        self.zero = zero
+        self.soc = soc
+        self.nonneg = self.m - self.zero - sum(soc)
+        assert self.nonneg >= 0
+
+
 # Simple implementation of cone projection for tests
 
-def _cone_project(s, zero):
+def _second_order_project(z):
+
+    assert len(z) >= 2
+
+    y, t = z[1:], z[0]
+
+    norm_y = np.linalg.norm(y)
+
+    if norm_y <= t:
+        return np.copy(z)
+
+    if norm_y <= -t:
+        return np.zeros_like(z)
+
+    result = np.zeros_like(z)
+    result[0] = 1.
+    result[1:] = y / norm_y
+    result *= (norm_y + t) / 2.
+    return result
+
+
+def _cone_project(s, dims):
     """Project on program cone."""
     return np.concatenate([
-        np.zeros(zero), np.maximum(s[zero:], 0.)])
+        np.zeros(dims.zero), np.maximum(s[dims.zero:], 0.)])
 
 
-def _dual_cone_project(y, zero):
+def _dual_cone_project(y, dims):
     """Project on dual of program cone."""
     return np.concatenate([
-        y[:zero], np.maximum(y[zero:], 0.)])
+        y[:dims.zero], np.maximum(y[dims.zero:], 0.)])
 
 
 class TestSolverClass(TestCase):
@@ -48,29 +81,29 @@ class TestSolverClass(TestCase):
     # Logic to check solution or certificate validity
     ###
 
-    def _y_in_cone(self, y, zero):
+    def _y_in_cone(self, y, dims):
         self.assertTrue(
             # , atol=5e-5, rtol=1e-5)
-            np.allclose(_dual_cone_project(y, zero), y)
+            np.allclose(_dual_cone_project(y, dims), y)
         )
 
-    def _s_in_cone(self, s, zero):
+    def _s_in_cone(self, s, dims):
         self.assertTrue(
-            np.allclose(_cone_project(s, zero), s)  # , atol=5e-5, rtol=1e-5)
+            np.allclose(_cone_project(s, dims), s)  # , atol=5e-5, rtol=1e-5)
         )
 
-    def check_solution_valid(self, matrix, b, c, x, y, zero):
+    def check_solution_valid(self, matrix, b, c, x, y, dims):
         """Check a cone program solution is valid."""
         # dual cone error
         print('DUAL CONE RESIDUAL NORM %.2e' % np.linalg.norm(
-            _dual_cone_project(y, zero) - y))
-        self._y_in_cone(y, zero)
+            _dual_cone_project(y, dims) - y))
+        self._y_in_cone(y, dims)
 
         # primal cone error
         s = b - matrix @ x
         print('PRIMAL CONE RESIDUAL NORM %.2e' % np.linalg.norm(
-            _cone_project(s, zero) - s))
-        self._s_in_cone(s, zero)
+            _cone_project(s, dims) - s))
+        self._s_in_cone(s, dims)
 
         # gap error
         print('GAP RESIDUAL %.2e' % (c.T @ x + b.T @ y))
@@ -83,7 +116,7 @@ class TestSolverClass(TestCase):
             np.allclose(c, - matrix.T @ y)  # , atol=1e-6, rtol=1e-6)
         )
 
-    def check_infeasibility_certificate_valid(self, matrix, b, y, zero):
+    def check_infeasibility_certificate_valid(self, matrix, b, y, dims):
         """Check primal infeasibility certificate is valid."""
         y = np.copy(y)
         # TODO: this is here to pass tests, *remove* once refinement is there
@@ -92,36 +125,36 @@ class TestSolverClass(TestCase):
         y /= np.abs(b.T @ y)  # normalize
         self.assertTrue(np.isclose(b.T @ y, -1))
         # dual cone error
-        self._y_in_cone(y, zero)
+        self._y_in_cone(y, dims)
         # print(matrix.T @ y)
         self.assertTrue(
             np.allclose(matrix.T @ y, 0., atol=1e-6, rtol=1e-6)
         )
 
-    def check_unboundedness_certificate_valid(self, matrix, c, x, zero):
+    def check_unboundedness_certificate_valid(self, matrix, c, x, dims):
         """Check primal unboundedness certificate is valid."""
         x = np.copy(x)
         self.assertLess(c.T @ x, 0)
         x /= np.abs(c.T @ x)  # normalize
         conic = -matrix @ x
-        self._s_in_cone(conic, zero)
+        self._s_in_cone(conic, dims)
 
     @staticmethod
-    def solve_program_cvxpy(matrix, b, c, zero):
+    def solve_program_cvxpy(matrix, b, c, dims):
         """Solve simple LP with CVXPY."""
         m, n = matrix.shape
         x = cp.Variable(n)
         constr = []
-        if zero > 0:
-            constr.append(b[:zero] - matrix[:zero] @ x == 0)
-        if zero < len(b):
-            constr.append(b[zero:] - matrix[zero:] @ x >= 0)
+        if dims.zero > 0:
+            constr.append(b[:dims.zero] - matrix[:dims.zero] @ x == 0)
+        if dims.nonneg > 0:
+            constr.append(b[dims.zero:] - matrix[dims.zero:] @ x >= 0)
         program = cp.Problem(cp.Minimize(x.T @ c), constr)
         program.solve()
         # solver='SCS', verbose=True, acceleration_lookback=0)
         return program.status, x.value, constr[0].dual_value
 
-    def check_solve(self, matrix, b, c, zero, nonneg, x0=None, y0=None):
+    def check_solve(self, matrix, b, c, dims, x0=None, y0=None):
         """Check solution or certificate is correct.
 
         We both check that CVXPY with default solver returns same status
@@ -129,30 +162,30 @@ class TestSolverClass(TestCase):
         certificate is valid. We don't look at the CVXPY solution or
         certificate (only the CVXPY status).
         """
-        assert zero + nonneg == len(b)
+        assert dims.zero + dims.nonneg == len(b)
         for qr in ['NUMPY', 'PYSPQR']:
             with self.subTest(qr=qr):
                 solver = Solver(
                     sp.sparse.csc_matrix(matrix, copy=True),
                     np.array(b, copy=True), np.array(c, copy=True),
-                    zero=zero, nonneg=nonneg, qr=qr, x0=x0, y0=y0)
+                    zero=dims.zero, nonneg=dims.nonneg, qr=qr, x0=x0, y0=y0)
                 status, _, _ = self.solve_program_cvxpy(
                     sp.sparse.csc_matrix(matrix, copy=True),
-                    np.array(b, copy=True), np.array(c, copy=True), zero=zero)
+                    np.array(b, copy=True), np.array(c, copy=True), dims=dims)
                 if solver.status == 'Optimal':
                     self.assertIn(status, ['optimal', 'optimal_inaccurate'])
                     self.check_solution_valid(
-                        matrix, b, c, solver.x, solver.y, zero=zero)
+                        matrix, b, c, solver.x, solver.y, dims=dims)
                 elif solver.status == 'Infeasible':
                     self.assertIn(
                         status, ['infeasible', 'infeasible_inaccurate'])
                     self.check_infeasibility_certificate_valid(
-                        matrix, b, solver.y, zero=zero)
+                        matrix, b, solver.y, dims=dims)
                 elif solver.status == 'Unbounded':
                     self.assertIn(
                         status, ['unbounded', 'unbounded_inaccurate'])
                     self.check_unboundedness_certificate_valid(
-                        matrix, c, solver.x, zero=zero)
+                        matrix, c, solver.x, dims=dims)
                 else:
                     raise ValueError('Unknown solver status!')
 
@@ -163,22 +196,22 @@ class TestSolverClass(TestCase):
     ###
 
     @staticmethod
-    def make_program_from_matrix(matrix, zero, seed=0):
+    def make_program_from_matrix(matrix, dims, seed=0):
         """Make simple LP program."""
         m, n = matrix.shape
         np.random.seed(seed)
         z = np.random.randn(m)
-        y = _dual_cone_project(z, zero)
+        y = _dual_cone_project(z, dims)
         s = y - z
         x = np.random.randn(n)
         b = matrix @ x + s
         c = -matrix.T @ y
         return b, c
 
-    def _base_test_from_matrix(self, matrix, zero):
-        assert zero <= matrix.shape[0]
-        b, c = self.make_program_from_matrix(matrix, zero=zero)
-        self.check_solve(matrix, b, c, zero=zero, nonneg=len(b)-zero)
+    def _base_test_from_matrix(self, matrix, dims):
+        assert dims.zero <= matrix.shape[0]
+        b, c = self.make_program_from_matrix(matrix, dims=dims)
+        self.check_solve(matrix, b, c, dims=dims)
 
     ###
     # Simple corner case tests
@@ -190,7 +223,8 @@ class TestSolverClass(TestCase):
         print('\nm<n, matrix full rank\n')
         matrix = np.random.randn(2, 5)
         for zero in range(matrix.shape[0]+1):
-            self._base_test_from_matrix(matrix, zero=zero)
+            dims = Dims(*matrix.shape, zero=zero)
+            self._base_test_from_matrix(matrix, dims=dims)
 
     def test_m_equal_n_full_rank_(self):
         """M=n, matrix full rank."""
@@ -198,7 +232,8 @@ class TestSolverClass(TestCase):
         np.random.seed(0)
         matrix = np.random.randn(3, 3)
         for zero in range(matrix.shape[0]+1):
-            self._base_test_from_matrix(matrix, zero=zero)
+            dims = Dims(*matrix.shape, zero=zero)
+            self._base_test_from_matrix(matrix, dims=dims)
 
     def test_m_greater_n_full_rank_(self):
         """M>n, matrix full rank."""
@@ -206,7 +241,8 @@ class TestSolverClass(TestCase):
         print('\nm>n, matrix full rank\n')
         matrix = np.random.randn(5, 2)
         for zero in range(matrix.shape[0]+1):
-            self._base_test_from_matrix(matrix, zero=zero)
+            dims = Dims(*matrix.shape, zero=zero)
+            self._base_test_from_matrix(matrix, dims=dims)
 
     def test_m_less_n_rank_deficient(self):
         """M<n, matrix rank deficient."""
@@ -216,7 +252,8 @@ class TestSolverClass(TestCase):
         matrix = np.concatenate([matrix, [matrix.sum(0)]], axis=0)
         matrix = matrix[[0, 2, 1]]
         for zero in range(matrix.shape[0]+1):
-            self._base_test_from_matrix(matrix, zero=zero)
+            dims = Dims(*matrix.shape, zero=zero)
+            self._base_test_from_matrix(matrix, dims=dims)
 
     def test_m_equal_n_rank_deficient(self):
         """M=n, matrix rank deficient."""
@@ -226,7 +263,8 @@ class TestSolverClass(TestCase):
         matrix = np.concatenate([matrix, [matrix.sum(0)]], axis=0)
         matrix = matrix[[0, 2, 1]]
         for zero in range(matrix.shape[0]+1):
-            self._base_test_from_matrix(matrix, zero=zero)
+            dims = Dims(*matrix.shape, zero=zero)
+            self._base_test_from_matrix(matrix, dims=dims)
 
     def test_m_greater_n_rank_deficient(self):
         """M>n, matrix rank deficient."""
@@ -236,7 +274,8 @@ class TestSolverClass(TestCase):
         matrix = np.concatenate([matrix.T, [matrix.sum(1)]], axis=0).T
         # matrix = matrix[[0,2,1]]
         for zero in range(matrix.shape[0]+1):
-            self._base_test_from_matrix(matrix, zero=zero)
+            dims = Dims(*matrix.shape, zero=zero)
+            self._base_test_from_matrix(matrix, dims=dims)
 
     ###
     # Specify program as CVXPY object, reduce to code above
@@ -263,7 +302,8 @@ class TestSolverClass(TestCase):
         """Same as check solve, but takes CVXPY program object."""
         matrix, b, c, zero, nonneg = self.make_program_from_cvxpy(
             cvxpy_problem_obj)
-        self.check_solve(matrix, b, c, zero, nonneg)
+        dims = Dims(*matrix.shape, zero=zero)
+        self.check_solve(matrix, b, c, dims=dims)
 
     ###
     # Check correct by specifying CVXPY programs
@@ -438,16 +478,17 @@ class TestSolverClass(TestCase):
         _, prog = self._generate_problem_one(seed=123, m=81, n=70)
 
         matrix, b, c, zero, nonneg = self.make_program_from_cvxpy(prog)
+        dims = Dims(*matrix.shape, zero=zero)
 
         s = time.time()
-        status, x, y = self.check_solve(matrix, b, c, zero, nonneg)
+        status, x, y = self.check_solve(matrix, b, c, dims=dims)
         time_coldstart = time.time() - s
 
         x += np.random.randn(len(x)) * 1e-7
         y += np.random.randn(len(y)) * 1e-7
 
         s = time.time()
-        self.check_solve(matrix, b, c, zero, nonneg, x0=x, y0=y)
+        self.check_solve(matrix, b, c, dims=dims, x0=x, y0=y)
         time_hotstart = time.time() - s
 
         self.assertLess(time_hotstart, time_coldstart)

@@ -371,13 +371,75 @@ class Solver:
         return np.concatenate(
             [self.pri_err(x), self.dua_err(y_reduced)])
 
+    def derivative_second_order_project_linop(self, soc):
+        """Linear operator of second order cone projection derivative."""
+
+        x, t = soc[1:], soc[0]
+
+        norm_x = np.linalg.norm(x)
+
+        if norm_x <= t:
+            # identity
+            return sp.sparse.linalg.LinearOperator(
+                shape=(len(soc), len(soc)),
+                matvec=lambda x: x,
+                rmatvec=lambda x: x
+                )
+
+        if norm_x <= -t:
+            # zero
+            return sp.sparse.linalg.LinearOperator(
+                shape=(len(soc), len(soc)),
+                matvec=np.zeros_like,
+                rmatvec=np.zeros_like
+                )
+
+        # interesting case
+        def matvec(dsoc):
+            result = np.zeros_like(dsoc)
+            dx, dt = dsoc[1:], dsoc[0]
+            xtdx = x.T @ dx
+            result[0] = dt / 2.
+            result[0] += xtdx / (2. * norm_x)
+            result[1:] = x * ((dt - (xtdx/norm_x) * (t / norm_x))/(2 * norm_x))
+            result[1:] += dx * ((t + norm_x) / (2 * norm_x))
+            return result
+
+        return sp.sparse.linalg.LinearOperator(
+            shape=(len(soc), len(soc)),
+            matvec=matvec,
+            rmatvec=matvec
+            )
+
+        # if not invert_sign:
+        #     result[0] += dt / 2.
+        #     xtdx = x.T @ dx
+        #     result[0] += xtdx / (2. * norm_x)
+        #     result[1:] += x * ((dt - (xtdx/norm_x) * (t / norm_x))/(2 * norm_x))
+        #     result[1:] += dx * ((t + norm_x) / (2 * norm_x))
+        # else:
+        #     result[0] -= dt / 2.
+        #     xtdx = x.T @ dx
+        #     result[0] -= xtdx / (2. * norm_x)
+        #     result[1:] -= x * ((dt - (xtdx/norm_x) * (t / norm_x))/(2 * norm_x))
+        #     result[1:] -= dx * ((t + norm_x) / (2 * norm_x))
+
     def self_dual_cone_project_derivative(self, conic_var):
         """Derivative of projection on self-dual cones."""
         # TODO: add SOC here
-        active = 1. * (conic_var >= 0.)
+        nonneg_interior = 1. * (conic_var[:self.nonneg] >= 0.)
+        cur = self.nonneg
+        soc_dpis = []
+        for soc_dim in self.soc:
+            soc_dpis.append(
+                self.derivative_second_order_project_linop(
+                    conic_var[cur:cur+soc_dim]))
+            cur += soc_dim
 
         def internal_matvec(d_conic_var):
-            return d_conic_var * active
+            result = np.zeros_like(d_conic_var)
+            result[:self.nonneg] = d_conic_var[:self.nonneg] * nonneg_interior
+            return result
 
         return sp.sparse.linalg.LinearOperator(
             shape=(len(conic_var), len(conic_var)),
