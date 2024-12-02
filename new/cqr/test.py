@@ -61,17 +61,27 @@ def _second_order_project(z):
     result *= (norm_y + t) / 2.
     return result
 
+def _base_cone_project(var, dims, isdual):
+    """Project on self-dual cone."""
+    result = np.zeros_like(var)
+    if isdual:
+        result[:dims.zero] = var[:dims.zero]
+    result[dims.zero:dims.zero+dims.nonneg] =  np.maximum(
+        var[dims.zero:dims.zero+dims.nonneg], 0.)
+    cur = dims.zero+dims.nonneg
+    for soc_dim in dims.soc:
+        result[cur:cur+soc_dim] = _second_order_project(var[cur:cur+soc_dim])
+        cur += soc_dim
+    assert cur == dims.m
+    return result
 
 def _cone_project(s, dims):
     """Project on program cone."""
-    return np.concatenate([
-        np.zeros(dims.zero), np.maximum(s[dims.zero:], 0.)])
-
+    return _base_cone_project(s, dims, False)
 
 def _dual_cone_project(y, dims):
     """Project on dual of program cone."""
-    return np.concatenate([
-        y[:dims.zero], np.maximum(y[dims.zero:], 0.)])
+    return _base_cone_project(y, dims, True)
 
 
 class TestSolverClass(TestCase):
@@ -144,11 +154,27 @@ class TestSolverClass(TestCase):
         """Solve simple LP with CVXPY."""
         m, n = matrix.shape
         x = cp.Variable(n)
+        # assert len(dims.soc) == 0
         constr = []
         if dims.zero > 0:
             constr.append(b[:dims.zero] - matrix[:dims.zero] @ x == 0)
+        cur = dims.zero
         if dims.nonneg > 0:
-            constr.append(b[dims.zero:] - matrix[dims.zero:] @ x >= 0)
+            constr.append(b[cur:cur+dims.nonneg] - matrix[cur:cur+dims.nonneg] @ x >= 0)
+        cur += dims.nonneg
+        # breakpoint()
+        for soc_dim in dims.soc:
+            constr.append(
+                cp.norm2(
+                    b[cur+1:cur+soc_dim] - matrix[cur+1:cur+soc_dim] @ x
+                        ) <= b[cur] - matrix[cur] @ x
+                # cp.SOC(
+                #     b[cur] - matrix[cur] @ x,
+                #     b[cur+1:cur+soc_dim] - matrix[cur+1:cur+soc_dim] @ x,
+                # )
+            )
+            cur += soc_dim
+
         program = cp.Problem(cp.Minimize(x.T @ c), constr)
         program.solve()
         # solver='SCS', verbose=True, acceleration_lookback=0)
@@ -162,13 +188,14 @@ class TestSolverClass(TestCase):
         certificate is valid. We don't look at the CVXPY solution or
         certificate (only the CVXPY status).
         """
-        assert dims.zero + dims.nonneg == len(b)
+        assert dims.zero + dims.nonneg + sum(dims.soc) == len(b)
         for qr in ['NUMPY', 'PYSPQR']:
             with self.subTest(qr=qr):
                 solver = Solver(
                     sp.sparse.csc_matrix(matrix, copy=True),
                     np.array(b, copy=True), np.array(c, copy=True),
-                    zero=dims.zero, nonneg=dims.nonneg, qr=qr, x0=x0, y0=y0)
+                    zero=dims.zero, nonneg=dims.nonneg, soc=dims.soc,
+                    qr=qr, x0=x0, y0=y0)
                 status, _, _ = self.solve_program_cvxpy(
                     sp.sparse.csc_matrix(matrix, copy=True),
                     np.array(b, copy=True), np.array(c, copy=True), dims=dims)
@@ -296,13 +323,15 @@ class TestSolverClass(TestCase):
         if (data['A'] is not None) and (data['G'] is not None):
             matrix = sp.sparse.vstack([data['A'], data['G']], format='csc')
             b = np.concatenate([data['b'], data['h']], dtype=float)
-        return matrix, b, data['c'], data['dims'].zero, data['dims'].nonneg
+        return (
+            matrix, b, data['c'], data['dims'].zero, data['dims'].nonneg,
+            data['dims'].soc)
 
     def check_solve_from_cvxpy(self, cvxpy_problem_obj):
         """Same as check solve, but takes CVXPY program object."""
-        matrix, b, c, zero, nonneg = self.make_program_from_cvxpy(
+        matrix, b, c, zero, nonneg, soc = self.make_program_from_cvxpy(
             cvxpy_problem_obj)
-        dims = Dims(*matrix.shape, zero=zero)
+        dims = Dims(*matrix.shape, zero=zero, soc=soc)
         self.check_solve(matrix, b, c, dims=dims)
 
     ###
@@ -477,8 +506,8 @@ class TestSolverClass(TestCase):
         """Simple test warmstart."""
         _, prog = self._generate_problem_one(seed=123, m=81, n=70)
 
-        matrix, b, c, zero, nonneg = self.make_program_from_cvxpy(prog)
-        dims = Dims(*matrix.shape, zero=zero)
+        matrix, b, c, zero, nonneg, soc = self.make_program_from_cvxpy(prog)
+        dims = Dims(*matrix.shape, zero=zero, soc=soc)
 
         s = time.time()
         status, x, y = self.check_solve(matrix, b, c, dims=dims)
@@ -492,6 +521,23 @@ class TestSolverClass(TestCase):
         time_hotstart = time.time() - s
 
         self.assertLess(time_hotstart, time_coldstart)
+
+    def test_simple_soc(self):
+        """Simple SOCs."""
+        np.random.seed(0)
+        m, n = 20, 10
+        x = cp.Variable(n)
+        A = np.random.randn(m, n)
+        b = np.random.randn(m)
+        objective = cp.norm2(A @ x - b) + 1. * cp.norm1(x)
+        constraints = []
+        program = cp.Problem(cp.Minimize(objective), constraints)
+        self.check_solve_from_cvxpy(program)
+
+        # infeasible
+        constraints = [cp.norm2(x - 1) <= 1, x[2] >= 10]
+        program = cp.Problem(cp.Minimize(0.), constraints)
+        self.check_solve_from_cvxpy(program)
 
     ###
     # Test CVXPY interface
@@ -507,6 +553,24 @@ class TestSolverClass(TestCase):
 
         self.assertTrue(np.isneginf(cp.Problem(
             cp.Minimize(cp.sum(x)), [x <= 0]).solve(solver=CQR())))
+
+    def test_soc_cvxpy(self):
+        """Test correct translation to and from CVXPY for SOCs."""
+
+        np.random.seed(0)
+        m, n = 20, 10
+        x = cp.Variable(n)
+        A = np.random.randn(m, n)
+        b = np.random.randn(m)
+        objective = cp.norm2(A @ x - b) + 1. * cp.norm1(x)
+        constraints = []
+        prog = cp.Problem(cp.Minimize(objective), constraints)
+        prog.solve(solver=CQR())
+        cqr_obj = objective.value
+        prog.solve(solver='CVXOPT')
+        co_obj = objective.value
+        self.assertLess(cqr_obj, co_obj)
+
 
 if __name__ == '__main__':  # pragma: no cover
     main()

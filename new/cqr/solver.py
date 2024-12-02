@@ -87,7 +87,7 @@ class Solver:
         if self.verbose:
             print(
                 f'Program: m={self.m}, n={self.n}, nnz={self.matrix.nnz},'
-                f' zero={self.zero}, nonneg={self.nonneg}')
+                f' zero={self.zero}, nonneg={self.nonneg}, soc={self.soc}')
 
         self.x = np.zeros(self.n) if x0 is None else np.array(x0)
         assert len(self.x) == self.n
@@ -177,7 +177,7 @@ class Solver:
             self.matrix_ruiz_equil, self.b_ruiz_equil, self.c_ruiz_equil = \
             hsde_ruiz_equilibration(
                 self.matrix, self.b, self.c, dimensions={
-                    'zero': self.zero, 'nonneg': self.nonneg, 'second_order': []},
+                    'zero': self.zero, 'nonneg': self.nonneg, 'second_order': self.soc},
                 max_iters=25)
 
         self.x_equil = self.equil_sigma * (self.x / self.equil_e)
@@ -439,6 +439,11 @@ class Solver:
         def internal_matvec(d_conic_var):
             result = np.zeros_like(d_conic_var)
             result[:self.nonneg] = d_conic_var[:self.nonneg] * nonneg_interior
+            cur = self.nonneg
+            for i, soc_dim in enumerate(self.soc):
+                result[cur:cur+soc_dim] = soc_dpis[i] @ d_conic_var[cur:cur+soc_dim]
+                cur += soc_dim
+            assert cur == self.m - self.zero
             return result
 
         return sp.sparse.linalg.LinearOperator(

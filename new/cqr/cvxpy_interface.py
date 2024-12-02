@@ -35,7 +35,7 @@ class CQR(ConicSolver):
     """
 
     MIP_CAPABLE = False
-    SUPPORTED_CONSTRAINTS = [Zero, NonNeg]  # , SOC]
+    SUPPORTED_CONSTRAINTS = [Zero, NonNeg, SOC]
     REQUIRES_CONSTR = False
 
     def import_solver(self):
@@ -51,7 +51,7 @@ class CQR(ConicSolver):
 
         solver = Solver(
             matrix=data['A'], b=data['b'], c=data['c'], zero=data['dims'].zero,
-            nonneg=data['dims'].nonneg)  # , soc=data['dims'].soc)
+            nonneg=data['dims'].nonneg, soc=data['dims'].soc)
 
         return {
             'status': solver.status, 'value': np.dot(solver.x, data['c']),
