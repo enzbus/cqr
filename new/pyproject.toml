@@ -16,8 +16,7 @@ dev = [
     "build", "twine", "pylint", "isort", "autopep8", "docformatter",
     "diff_cover"]
 test = [
-    "cvxpy",
-    'coverage[toml]', 'ecos', 'scs']
+    "cvxpy-base", "cvxopt", 'coverage[toml]', 'ecos', 'scs']
 
 [build-system]
 requires = ["setuptools"]

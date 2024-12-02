@@ -1,7 +1,0 @@
-numpy
-scipy >= 1.12
-cvxpy
-ecos
-docformatter
-scs
-pyspqr
