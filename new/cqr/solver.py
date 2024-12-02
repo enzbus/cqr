@@ -27,7 +27,6 @@ import numpy as np
 import scipy as sp
 
 from .equilibrate import hsde_ruiz_equilibration
-from .cones import second_order_project
 
 from pyspqr import qr
 
@@ -318,13 +317,42 @@ class Solver:
         self.x_transf = var[:self.n]
         self.y_reduced = var[self.n:]
 
+    @staticmethod
+    def second_order_project(z, result):
+        """Project on second-order cone.
+
+        :param z: Input array.
+        :type z: np.array
+        :param result: Resulting array.
+        :type result: np.array
+        """
+
+        assert len(z) >= 2
+
+        y, t = z[1:], z[0]
+
+        # cache this?
+        norm_y = np.linalg.norm(y)
+
+        if norm_y <= t:
+            result[:] = z
+            return
+
+        if norm_y <= -t:
+            result[:] = 0.
+            return
+
+        result[0] = 1.
+        result[1:] = y / norm_y
+        result *= (norm_y + t) / 2.
+
     def self_dual_cone_project(self, conic_var):
         """Project on self-dual cones."""
         result = np.empty_like(conic_var)
         result[:self.nonneg] = np.maximum(conic_var[:self.nonneg], 0.)
         cur = self.nonneg
         for soc_dim in self.soc:
-            second_order_project(
+            self.second_order_project(
                 conic_var[cur:cur+soc_dim], result[cur:cur+soc_dim])
             cur += soc_dim
         return result
@@ -371,7 +399,8 @@ class Solver:
         return np.concatenate(
             [self.pri_err(x), self.dua_err(y_reduced)])
 
-    def derivative_second_order_project_linop(self, soc):
+    @staticmethod
+    def derivative_second_order_project_linop(soc):
         """Linear operator of second order cone projection derivative."""
 
         x, t = soc[1:], soc[0]
@@ -426,7 +455,6 @@ class Solver:
 
     def self_dual_cone_project_derivative(self, conic_var):
         """Derivative of projection on self-dual cones."""
-        # TODO: add SOC here
         nonneg_interior = 1. * (conic_var[:self.nonneg] >= 0.)
         cur = self.nonneg
         soc_dpis = []
@@ -466,13 +494,13 @@ class Solver:
 
         return sp.sparse.linalg.LinearOperator(
             shape=(self.m, self.m),
-            matvec = lambda s: np.concatenate([
+            matvec = lambda ds: np.concatenate([
                 np.zeros(self.zero),
-                internal_derivative @ s[self.zero:]
+                internal_derivative @ ds[self.zero:]
             ]),
-            rmatvec = lambda s: np.concatenate([
+            rmatvec = lambda ds: np.concatenate([
                 np.zeros(self.zero),
-                internal_derivative.T @ s[self.zero:]
+                internal_derivative.T @ ds[self.zero:]
             ])
         )
 
@@ -633,8 +661,9 @@ class Solver:
 
     # @staticmethod
     def inexact_levemberg_marquardt(self,
-                                    residual, jacobian, x0, max_iter=100000, max_ls=200, eps=1e-12,
-                                    damp=0.):
+                                    residual, jacobian, x0, max_iter=100000,
+                                    max_ls=200, eps=1e-12, damp=0.,
+                                    solver='CG'):
         """Inexact Levemberg-Marquardt solver."""
         cur_x = np.copy(x0)
         cur_residual = residual(cur_x)
@@ -667,13 +696,23 @@ class Solver:
             # sp_version = [int(el) for el in sp.__version__.split('.')]
             # if sp_version >= [1,12]:
             olditers = int(TOTAL_CG_ITER)
-            _ = sp.sparse.linalg.cg(
-                A=cur_hessian,
-                b=-cur_gradient,
-                rtol=min(0.5, np.linalg.norm(cur_gradient)**0.5),
-                callback=_counter,
-                # maxiter=30,
-            )
+            if solver == 'CG':
+                _ = sp.sparse.linalg.cg(
+                    A=cur_hessian,
+                    b=-cur_gradient,
+                    rtol=min(0.5, np.linalg.norm(cur_gradient)**0.5),
+                    callback=_counter,
+                    # maxiter=30,
+                )
+            elif solver == 'LSQR':
+                _ = sp.sparse.linalg.lsqr(
+                    cur_jacobian,
+                    -cur_residual,
+                    atol=0.,
+                    btol=0.,
+                    damp=damp,
+                )
+                TOTAL_CG_ITER += _[2]
             if self.verbose:
                 print('cg_iters=%d' % (TOTAL_CG_ITER - olditers), end='\t')
             # else:

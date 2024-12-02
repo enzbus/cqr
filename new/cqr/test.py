@@ -216,7 +216,7 @@ class TestSolverClass(TestCase):
                 else:
                     raise ValueError('Unknown solver status!')
 
-        return solver.status, solver.x, solver.y,
+        return solver
 
     ###
     # Logic to create program and check it
@@ -332,7 +332,7 @@ class TestSolverClass(TestCase):
         matrix, b, c, zero, nonneg, soc = self.make_program_from_cvxpy(
             cvxpy_problem_obj)
         dims = Dims(*matrix.shape, zero=zero, soc=soc)
-        self.check_solve(matrix, b, c, dims=dims)
+        return self.check_solve(matrix, b, c, dims=dims)
 
     ###
     # Check correct by specifying CVXPY programs
@@ -510,7 +510,8 @@ class TestSolverClass(TestCase):
         dims = Dims(*matrix.shape, zero=zero, soc=soc)
 
         s = time.time()
-        status, x, y = self.check_solve(matrix, b, c, dims=dims)
+        solver = self.check_solve(matrix, b, c, dims=dims)
+        status, x, y = solver.status, solver.x, solver.y
         time_coldstart = time.time() - s
 
         x += np.random.randn(len(x)) * 1e-7
@@ -522,22 +523,74 @@ class TestSolverClass(TestCase):
 
         self.assertLess(time_hotstart, time_coldstart)
 
+    @staticmethod
+    def _densify(linear_operator):
+        """Create Numpy 2-d array from a sparse LinearOperator."""
+        result = np.zeros(linear_operator.shape, dtype=float)
+        for j in range(result.shape[1]):
+            ej = np.zeros(result.shape[1])
+            ej[j] = 1.
+            result[:, j] = linear_operator @ ej
+        return result
+
     def test_simple_soc(self):
-        """Simple SOCs."""
+        """Simple SOCs and related tests."""
+
         np.random.seed(0)
         m, n = 20, 10
         x = cp.Variable(n)
         A = np.random.randn(m, n)
         b = np.random.randn(m)
         objective = cp.norm2(A @ x - b) + 1. * cp.norm1(x)
-        constraints = []
+        constraints = [x[2:5] == 2.]
         program = cp.Problem(cp.Minimize(objective), constraints)
-        self.check_solve_from_cvxpy(program)
+        solver = self.check_solve_from_cvxpy(program)
+
+        # check that residual and jacobian are correct
+        for i in range(100):
+            np.random.seed(i)
+            self.assertLess(
+                sp.optimize.check_grad(
+                    solver.newres,
+                    lambda vr: self._densify(solver.newjacobian_linop(vr)),
+                    np.random.randn(solver.m-1)),
+                1e-6)
 
         # infeasible
         constraints = [cp.norm2(x - 1) <= 1, x[2] >= 10]
         program = cp.Problem(cp.Minimize(0.), constraints)
         self.check_solve_from_cvxpy(program)
+
+    ###
+    # Test conic projection and derivatives
+    ###
+
+    @staticmethod
+    def _densify_square(linear_operator):
+        """Create Numpy 2-d array from a sparse LinearOperator."""
+        assert linear_operator.shape[0] == linear_operator.shape[1]
+        result = np.eye(linear_operator.shape[0], dtype=float)
+        for i in range(len(result)):
+            result[:, i] = linear_operator.matvec(result[:, i])
+        return result
+
+    def test_soc_proj_der(self):
+        """Second order projection and derivative."""
+
+        def _f(var):
+            result = np.empty_like(var)
+            Solver.second_order_project(var, result)
+            return result
+
+        def _J(var):
+            return self._densify_square(
+                Solver.derivative_second_order_project_linop(var)
+            )
+
+        for i in range(100):
+            np.random.seed(i)
+            self.assertLess(
+                sp.optimize.check_grad(_f, _J, np.random.randn(10)), 1e-6)
 
     ###
     # Test CVXPY interface
