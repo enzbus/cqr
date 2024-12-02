@@ -1,6 +1,6 @@
 [project]
 name = 'cqr'
-version = '0.0.1'
+version = '0.1.0'
 readme = 'README.rst'
 requires-python = '>=3.8'
 license = {text = "GPLv3"}
@@ -16,7 +16,7 @@ dev = [
     "build", "twine", "pylint", "isort", "autopep8", "docformatter",
     "diff_cover"]
 test = [
-    "cvxpy-base", "cvxopt", 'coverage[toml]', 'ecos', 'scs']
+    "cvxpy-base", 'coverage[toml]', 'ecos', 'scs']
 
 [build-system]
 requires = ["setuptools"]

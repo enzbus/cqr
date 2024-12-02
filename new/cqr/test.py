@@ -620,7 +620,7 @@ class TestSolverClass(TestCase):
         prog = cp.Problem(cp.Minimize(objective), constraints)
         prog.solve(solver=CQR())
         cqr_obj = objective.value
-        prog.solve(solver='CVXOPT')
+        prog.solve(solver='ECOS')
         co_obj = objective.value
         self.assertLess(cqr_obj, co_obj)
 

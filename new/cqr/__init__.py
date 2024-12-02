@@ -14,6 +14,9 @@
 # You should have received a copy of the GNU General Public License along with
 # CQR. If not, see <https://www.gnu.org/licenses/>.
 from .solver import Solver
+
+__version__ = '0.1.0'
+
 try:
     import cvxpy as _cp
     from .cvxpy_interface import CQR
