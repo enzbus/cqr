@@ -533,7 +533,7 @@ class TestSolverClass(TestCase):
             result[:, j] = linear_operator @ ej
         return result
 
-    def test_simple_soc(self):
+    def test_simple_soc_and_residuals(self):
         """Simple SOCs and related tests."""
 
         np.random.seed(0)
@@ -546,15 +546,24 @@ class TestSolverClass(TestCase):
         program = cp.Problem(cp.Minimize(objective), constraints)
         solver = self.check_solve_from_cvxpy(program)
 
-        # check that residual and jacobian are correct
-        for i in range(100):
-            np.random.seed(i)
-            self.assertLess(
-                sp.optimize.check_grad(
-                    solver.newres,
-                    lambda vr: self._densify(solver.newjacobian_linop(vr)),
-                    np.random.randn(solver.m-1)),
-                1e-6)
+        for res, jac in [
+                (solver.newres, solver.newjacobian_linop),
+                (solver.refinement_residual, solver.refinement_jacobian),
+                (solver.blended_residual, solver.blended_jacobian)]:
+            # check jacobian transpose is right
+            linop = jac(np.random.randn(solver.m-1))
+            self.assertTrue(np.allclose(
+                self._densify(linop).T, self._densify(linop.T)
+            ))
+            # check that jacobian is derivative of residual
+            for i in range(100):
+                np.random.seed(i)
+                self.assertLess(
+                    sp.optimize.check_grad(
+                        res,
+                        lambda vr: self._densify(jac(vr)),
+                        np.random.randn(solver.m-1)),
+                    1e-6)
 
         # infeasible
         constraints = [cp.norm2(x - 1) <= 1, x[2] >= 10]

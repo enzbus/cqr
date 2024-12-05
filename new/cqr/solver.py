@@ -793,6 +793,152 @@ class Solver:
         print('total backtracks', TOTAL_BACK_TRACKS)
         return np.array(cur_x, dtype=float)
 
+    def compute_conic_separation(self, y, s):
+        """Compute whether primal-dual cones should be treated separately."""
+
+        # compute separated cones
+        # for zero cones it doesn't matter
+        y_nonneg = y[self.zero:self.zero+self.nonneg]
+        s_nonneg = s[self.zero:self.zero+self.nonneg]
+        separated_nonneg = (y_nonneg > 0) & (s_nonneg > 0)
+        separated_nonneg |= (y_nonneg < 0) & (s_nonneg < 0)
+
+        # print('separated nonneg cones', np.sum(separated_nonneg))
+
+        # SOC
+        separated_soc_cones = []
+        cur = self.zero + self.nonneg
+        for soc_dim in self.soc:
+            this_soc_s = s[cur:cur + soc_dim]
+            this_soc_s_pi = np.zeros_like(this_soc_s)
+            self.second_order_project(this_soc_s, result=this_soc_s_pi)
+            this_soc_y = y[cur:cur + soc_dim]
+            this_soc_y_pi = np.zeros_like(this_soc_y)
+            self.second_order_project(this_soc_y, result=this_soc_y_pi)
+            s_inside = np.all(this_soc_s == this_soc_s_pi)
+            s_inside_negative = np.all(this_soc_s == 0.)
+            y_inside = np.all(this_soc_y == this_soc_y_pi)
+            y_inside_negative = np.all(this_soc_y == 0.)
+            this_soc_separated = (s_inside and y_inside) or (s_inside_negative and y_inside_negative)
+            separated_soc_cones.append(this_soc_separated)
+            cur += soc_dim
+
+        # transform into mask for cones entries
+        if len(separated_soc_cones) > 0:
+            separated_soc = np.concatenate([
+                np.ones(cone_dim, dtype=bool) if separated else np.zeros(cone_dim, dtype=bool)
+                for separated, cone_dim in zip(separated_soc_cones, self.soc)
+            ])
+        else:
+            separated_soc = np.zeros(0, dtype=bool)
+
+        return separated_nonneg, separated_soc
+
+    def blended_residual(self, var_reduced):
+        """Residual that combines refinement and normal residuals.
+        
+        Depending on primal-dual activity of the cones, either the refinement
+        residual or the normal residual are chosen, for each primal-dual cone.
+        """
+        var = self.var0 + self.gap_NS @ var_reduced
+        x_transf = var[:self.n]
+        s = self.b_qr_transf - self.matrix_qr_transf @ x_transf
+        y_reduced = var[self.n:]
+        y = self.y0 + self.nullspace_projector @ y_reduced
+
+        separated_nonneg, separated_soc = self.compute_conic_separation(y, s)
+
+        # compute both refinement and separated residuals
+        pure_joint_residual = self.dual_cone_project_basic(y - s) - y
+        pure_sep_residual_s = self.identity_minus_cone_project(s)
+        pure_sep_residual_y_nozero = self.identity_minus_dual_cone_project_nozero(y)
+
+        _sum_soc = np.sum(self.soc)
+
+        result = np.concatenate([
+            pure_joint_residual[:self.zero],
+            pure_joint_residual[self.zero:self.zero+self.nonneg][~separated_nonneg],
+            pure_sep_residual_s[self.zero:self.zero+self.nonneg][separated_nonneg],
+            pure_sep_residual_y_nozero[:self.nonneg][separated_nonneg],
+            pure_joint_residual[self.zero+self.nonneg:self.zero+self.nonneg+_sum_soc][~separated_soc] if len(separated_soc) else [],
+            pure_sep_residual_s[self.zero+self.nonneg:self.zero+self.nonneg+_sum_soc][separated_soc] if len(separated_soc) else [],
+            pure_sep_residual_y_nozero[self.nonneg:self.nonneg+_sum_soc][separated_soc] if len(separated_soc) else [],
+        ])
+
+        return result
+
+    def blended_jacobian(self, var_reduced):
+        """Jacobian of residual that combines refinement and normal residuals.
+        
+        Depending on primal-dual activity of the cones, either the refinement
+        residual or the normal residual are chosen, for each primal-dual cone.
+        """
+        var = self.var0 + self.gap_NS @ var_reduced
+        x_transf = var[:self.n]
+        s = self.b_qr_transf - self.matrix_qr_transf @ x_transf
+        y_reduced = var[self.n:]
+        y = self.y0 + self.nullspace_projector @ y_reduced
+
+        separated_nonneg, separated_soc = self.compute_conic_separation(y, s)
+        _sum_soc = np.sum(self.soc)
+
+        pure_joint_jacobian = self.refinement_jacobian(var_reduced)
+        pure_sep_jacobian = self.newjacobian_linop(var_reduced)
+
+        def matvec(d_var_reduced):
+            dres_sep = pure_sep_jacobian @ d_var_reduced
+            dres_joint = pure_joint_jacobian @ d_var_reduced
+            # same fragments as in blended_residual
+            dres_sep_s = dres_sep[:self.m]
+            dres_sep_y_nozero = dres_sep[self.m:]
+
+            result = np.concatenate([
+                dres_joint[:self.zero],
+                dres_joint[self.zero:self.zero+self.nonneg][~separated_nonneg],
+                dres_sep_s[self.zero:self.zero+self.nonneg][separated_nonneg],
+                dres_sep_y_nozero[:self.nonneg][separated_nonneg],
+                dres_joint[self.zero+self.nonneg:self.zero+self.nonneg+_sum_soc][~separated_soc] if len(separated_soc) else [],
+                dres_sep_s[self.zero+self.nonneg:self.zero+self.nonneg+_sum_soc][separated_soc] if len(separated_soc) else [],
+                dres_sep_y_nozero[self.nonneg:self.nonneg+_sum_soc][separated_soc] if len(separated_soc) else [],
+            ])
+
+            return result
+
+        def rmatvec(d_res):
+            dres_joint = np.zeros(self.m)
+            dres_sep_s = np.zeros(self.m)
+            dres_sep_y_nozero = np.zeros(self.m - self.zero)
+
+            dres_joint[:self.zero] = d_res[:self.zero]
+            cur = self.zero
+            dres_joint[self.zero:self.zero+self.nonneg][~separated_nonneg] = d_res[cur:cur+np.sum(~separated_nonneg)]
+            cur += np.sum(~separated_nonneg)
+            dres_sep_s[self.zero:self.zero+self.nonneg][separated_nonneg] = d_res[cur:cur+np.sum(separated_nonneg)]
+            cur += np.sum(separated_nonneg)
+            dres_sep_y_nozero[:self.nonneg][separated_nonneg] = d_res[cur:cur+np.sum(separated_nonneg)]
+            cur += np.sum(separated_nonneg)
+
+            if len(separated_soc):
+                dres_joint[self.zero+self.nonneg:self.zero+self.nonneg+_sum_soc][~separated_soc] = d_res[cur:cur+np.sum(~separated_soc)]
+                cur += np.sum(~separated_soc)
+                dres_sep_s[self.zero+self.nonneg:self.zero+self.nonneg+_sum_soc][separated_soc] = d_res[cur:cur+np.sum(separated_soc)]
+                cur += np.sum(separated_soc)
+                dres_sep_y_nozero[self.nonneg:self.nonneg+_sum_soc][separated_soc] = d_res[cur:cur+np.sum(separated_soc)]
+
+            return pure_joint_jacobian.T @ dres_joint + pure_sep_jacobian.T @ np.concatenate(
+                [dres_sep_s, dres_sep_y_nozero])
+
+        return sp.sparse.linalg.LinearOperator(
+            shape=(
+                self.zero
+                + np.sum(~separated_nonneg)
+                + 2 * np.sum(separated_nonneg)
+                + np.sum(~separated_soc)
+                + 2 * np.sum(separated_soc), self.m-1),
+            matvec = matvec,
+            rmatvec = rmatvec,
+        )
+
     def refinement_residual(self, var_reduced):
         """Residual for refinement."""
 
@@ -878,10 +1024,15 @@ class Solver:
     def new_toy_solve(self):
         """Solve by LM."""
 
-        # breakpoint()
+        # res = self.blended_residual(self.var_reduced)
+        # jac = self.blended_jacobian(self.var_reduced)
 
-        self.var_reduced = self.inexact_levemberg_marquardt(
-            self.newres, self.newjacobian_linop, self.var_reduced)#, max_iter=100)
+        if self.m > self.n:
+            self.var_reduced = self.inexact_levemberg_marquardt(
+                self.blended_residual, self.blended_jacobian, self.var_reduced)#, max_iter=100)
+        else:
+            self.var_reduced = self.inexact_levemberg_marquardt(
+                self.newres, self.newjacobian_linop, self.var_reduced)#, max_iter=100)
 
         # for i in range(10):
         #     self.var_reduced = self.inexact_levemberg_marquardt(
