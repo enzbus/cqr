@@ -27,6 +27,7 @@ import numpy as np
 import scipy as sp
 
 from .equilibrate import hsde_ruiz_equilibration
+from .line_search import LineSearcher, LineSearchFailed
 
 from pyspqr import qr
 
@@ -723,25 +724,60 @@ class Solver:
             #         callback=_counter,
             #     )
             step = _[0]
-            for j in range(max_ls):
-                step_len = 0.9**j
-                new_x = cur_x + step * step_len
-                new_residual = residual(new_x)
-                new_loss = np.linalg.norm(new_residual)
-                if new_loss < cur_loss:
-                    cur_x = new_x
-                    cur_residual = new_residual
-                    cur_loss = new_loss
-                    if self.verbose:
-                        print(f'btrcks={j}', end='\n')
-                    TOTAL_BACK_TRACKS += j
-                    break
-            else:
-                if self.verbose:
-                    print(
-                        'Line search failed, exiting.'
+            ls = LineSearcher(
+                    function=lambda step_len: np.linalg.norm(residual(cur_x + step * step_len))**2,
+                    max_initial_scalings=100,
+                    max_bisections=20,
+                    # verbose=True
                     )
-                break
+            try:
+                ls.initial_scaling()
+                ls.bisection_search()
+                opt_step_len = ls.mid
+            except LineSearchFailed:
+                if not np.isnan(ls.mid) and (ls.f_mid < ls.f_low):
+                    opt_step_len = ls.mid
+                elif not np.isnan(ls.high) and (ls.f_high < ls.f_low):
+                    opt_step_len = ls.high
+                else:
+                    print('Line search failed!')
+                    break
+                # opt_step_len = ls.high
+            # ls.bisection_search()
+            # except LineSearchFailed:
+            #     # print('Line search failed, exiting.')
+            #     # break
+            #     print('Line search failure; using best step available.')
+            #     if not np.isnan(ls.mid):
+            #         opt_step_len = ls.mid
+            #     elif not np.isnan(ls.high):
+            #         opt_step_len = ls.high
+            # opt_step_len = ls.mid
+            ls_iters = ls.call_counter
+            cur_x = cur_x + step * opt_step_len
+            cur_residual = residual(cur_x)
+            cur_loss = np.linalg.norm(cur_residual)
+            print(f'ls_iters={ls_iters}', end='\n')
+
+            # for j in range(max_ls):
+            #     step_len = 0.9**j
+            #     new_x = cur_x + step * step_len
+            #     new_residual = residual(new_x)
+            #     new_loss = np.linalg.norm(new_residual)
+            #     if new_loss < cur_loss:
+            #         cur_x = new_x
+            #         cur_residual = new_residual
+            #         cur_loss = new_loss
+            #         if self.verbose:
+            #             print(f'btrcks={j}', end='\n')
+            #         TOTAL_BACK_TRACKS += j
+            #         break
+            # else:
+            #     if self.verbose:
+            #         print(
+            #             'Line search failed, exiting.'
+            #         )
+            #     break
             # convergence check
             cur_jacobian = jacobian(cur_x)
             cur_gradient = cur_jacobian.T @ cur_residual
@@ -842,8 +878,10 @@ class Solver:
     def new_toy_solve(self):
         """Solve by LM."""
 
+        # breakpoint()
+
         self.var_reduced = self.inexact_levemberg_marquardt(
-            self.newres, self.newjacobian_linop, self.var_reduced)
+            self.newres, self.newjacobian_linop, self.var_reduced)#, max_iter=100)
 
         # for i in range(10):
         #     self.var_reduced = self.inexact_levemberg_marquardt(
