@@ -368,6 +368,22 @@ class Solver:
         return np.concatenate([
             y[:self.zero], self.self_dual_cone_project(y[self.zero:])])
 
+    ##
+    # ADMM Idea
+    ##
+
+    def admm_cone_project(self, sy):
+        """Project ADMM variable on the cone."""
+        s = sy[:self.m]
+        y = sy[self.m:]
+        pi_s = self.cone_project(s)
+        pi_y = self.dual_cone_project_basic(y)
+        return np.concatenate([pi_s, pi_y])
+
+    def admm_linspace_project(self, sy):
+        """Project ADMM variable on the subspace."""
+        
+
     def identity_minus_cone_project(self, s):
         """Identity minus projection on program cone."""
         return s - self.cone_project(s)
@@ -413,7 +429,8 @@ class Solver:
             return sp.sparse.linalg.LinearOperator(
                 shape=(len(soc), len(soc)),
                 matvec=lambda x: x,
-                rmatvec=lambda x: x
+                rmatvec=lambda x: x,
+                dtype=float,
                 )
 
         if norm_x <= -t:
@@ -421,11 +438,13 @@ class Solver:
             return sp.sparse.linalg.LinearOperator(
                 shape=(len(soc), len(soc)),
                 matvec=np.zeros_like,
-                rmatvec=np.zeros_like
+                rmatvec=np.zeros_like,
+                dtype=float,
                 )
 
         # interesting case
         def matvec(dsoc):
+            dsoc = dsoc.astype(float) # likely bug in scipy LinearOperator
             result = np.zeros_like(dsoc)
             dx, dt = dsoc[1:], dsoc[0]
             xtdx = x.T @ dx
@@ -438,7 +457,8 @@ class Solver:
         return sp.sparse.linalg.LinearOperator(
             shape=(len(soc), len(soc)),
             matvec=matvec,
-            rmatvec=matvec
+            rmatvec=matvec,
+            dtype=float,
             )
 
         # if not invert_sign:
