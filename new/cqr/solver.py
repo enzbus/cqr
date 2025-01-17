@@ -724,60 +724,64 @@ class Solver:
             #         callback=_counter,
             #     )
             step = _[0]
-            ls = LineSearcher(
-                    function=lambda step_len: np.linalg.norm(residual(cur_x + step * step_len))**2,
-                    max_initial_scalings=100,
-                    max_bisections=20,
-                    # verbose=True
-                    )
-            try:
-                ls.initial_scaling()
-                ls.bisection_search()
-                opt_step_len = ls.mid
-            except LineSearchFailed:
-                if not np.isnan(ls.mid) and (ls.f_mid < ls.f_low):
-                    opt_step_len = ls.mid
-                elif not np.isnan(ls.high) and (ls.f_high < ls.f_low):
-                    opt_step_len = ls.high
-                else:
-                    print('Line search failed!')
-                    break
-                # opt_step_len = ls.high
-            # ls.bisection_search()
-            # except LineSearchFailed:
-            #     # print('Line search failed, exiting.')
-            #     # break
-            #     print('Line search failure; using best step available.')
-            #     if not np.isnan(ls.mid):
-            #         opt_step_len = ls.mid
-            #     elif not np.isnan(ls.high):
-            #         opt_step_len = ls.high
-            # opt_step_len = ls.mid
-            ls_iters = ls.call_counter
-            cur_x = cur_x + step * opt_step_len
-            cur_residual = residual(cur_x)
-            cur_loss = np.linalg.norm(cur_residual)
-            print(f'ls_iters={ls_iters}', end='\n')
 
-            # for j in range(max_ls):
-            #     step_len = 0.9**j
-            #     new_x = cur_x + step * step_len
-            #     new_residual = residual(new_x)
-            #     new_loss = np.linalg.norm(new_residual)
-            #     if new_loss < cur_loss:
-            #         cur_x = new_x
-            #         cur_residual = new_residual
-            #         cur_loss = new_loss
-            #         if self.verbose:
-            #             print(f'btrcks={j}', end='\n')
-            #         TOTAL_BACK_TRACKS += j
-            #         break
-            # else:
-            #     if self.verbose:
-            #         print(
-            #             'Line search failed, exiting.'
-            #         )
-            #     break
+            NEWLINESEARCH = True
+
+            if NEWLINESEARCH:
+                ls = LineSearcher(
+                        function=lambda step_len: np.linalg.norm(residual(cur_x + step * step_len))**2,
+                        max_initial_scalings=100,
+                        max_bisections=20,
+                        # verbose=True
+                        )
+                try:
+                    ls.initial_scaling()
+                    ls.bisection_search()
+                    opt_step_len = ls.mid
+                except LineSearchFailed:
+                    if not np.isnan(ls.mid) and (ls.f_mid < ls.f_low):
+                        opt_step_len = ls.mid
+                    elif not np.isnan(ls.high) and (ls.f_high < ls.f_low):
+                        opt_step_len = ls.high
+                    else:
+                        print('Line search failed!')
+                        break
+                    # opt_step_len = ls.high
+                # ls.bisection_search()
+                # except LineSearchFailed:
+                #     # print('Line search failed, exiting.')
+                #     # break
+                #     print('Line search failure; using best step available.')
+                #     if not np.isnan(ls.mid):
+                #         opt_step_len = ls.mid
+                #     elif not np.isnan(ls.high):
+                #         opt_step_len = ls.high
+                # opt_step_len = ls.mid
+                ls_iters = ls.call_counter
+                cur_x = cur_x + step * opt_step_len
+                cur_residual = residual(cur_x)
+                cur_loss = np.linalg.norm(cur_residual)
+                print(f'ls_iters={ls_iters}', end='\n')
+            else:
+                for j in range(max_ls):
+                    step_len = 0.9**j
+                    new_x = cur_x + step * step_len
+                    new_residual = residual(new_x)
+                    new_loss = np.linalg.norm(new_residual)
+                    if new_loss < cur_loss:
+                        cur_x = new_x
+                        cur_residual = new_residual
+                        cur_loss = new_loss
+                        if self.verbose:
+                            print(f'btrcks={j}', end='\n')
+                        TOTAL_BACK_TRACKS += j
+                        break
+                else:
+                    if self.verbose:
+                        print(
+                            'Line search failed, exiting.'
+                        )
+                    break
             # convergence check
             cur_jacobian = jacobian(cur_x)
             cur_gradient = cur_jacobian.T @ cur_residual
@@ -819,7 +823,7 @@ class Solver:
             s_inside_negative = np.all(this_soc_s == 0.)
             y_inside = np.all(this_soc_y == this_soc_y_pi)
             y_inside_negative = np.all(this_soc_y == 0.)
-            this_soc_separated = (s_inside and y_inside) or (s_inside_negative and y_inside_negative)
+            this_soc_separated = s_inside or y_inside or s_inside_negative or y_inside_negative
             separated_soc_cones.append(this_soc_separated)
             cur += soc_dim
 
@@ -1026,13 +1030,13 @@ class Solver:
 
         # res = self.blended_residual(self.var_reduced)
         # jac = self.blended_jacobian(self.var_reduced)
+        breakpoint()
 
         if self.m > self.n:
             self.var_reduced = self.inexact_levemberg_marquardt(
                 self.blended_residual, self.blended_jacobian, self.var_reduced)#, max_iter=100)
         else:
-            self.var_reduced = self.inexact_levemberg_marquardt(
-                self.newres, self.newjacobian_linop, self.var_reduced)#, max_iter=100)
+            self.var_reduced = self.inexact_levemberg_marquardt(self.newres, self.newjacobian_linop, self.var_reduced, max_iter=100)
 
         # for i in range(10):
         #     self.var_reduced = self.inexact_levemberg_marquardt(
