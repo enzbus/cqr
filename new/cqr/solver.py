@@ -380,9 +380,58 @@ class Solver:
         pi_y = self.dual_cone_project_basic(y)
         return np.concatenate([pi_s, pi_y])
 
+    def _sy_from_var_reduced(self, var_reduced):
+        """Get sy from var reduced."""
+        var = self.var0 + self.gap_NS @ var_reduced
+        s = self.b_qr_transf - self.matrix_qr_transf @ var[:self.n]
+        y = self.y0 + self.nullspace_projector @ var[self.n:]
+        return np.concatenate([s, y])
+    
+    def _var_reduced_from_sy(self, sy):
+        """Get var reduced from sy in least squares sense."""
+        s = sy[:self.m]
+        y = sy[self.m:]
+        var1 = self.matrix_qr_transf.T  @ (self.b_qr_transf - s)
+        var2 = self.nullspace_projector.T @ (y - self.y0)
+        var = np.concatenate([var1, var2])
+        return self.gap_NS.T @ (var - self.var0)
+
+
     def admm_linspace_project(self, sy):
         """Project ADMM variable on the subspace."""
-        
+        vr = self._var_reduced_from_sy(sy)
+        return self._sy_from_var_reduced(vr)
+
+    def toy_admm_solve(self, var_reduced):
+        # sy_init = self._sy_from_var_reduced(var_reduced)
+        xk = np.zeros(2 * self.m)
+        zk = np.zeros(2 * self.m)
+        uk = np.zeros(2 * self.m)
+
+        losses = []
+
+        for i in range(2000000):
+            xk = self.admm_cone_project(zk - uk)
+            zk = self.admm_linspace_project(xk + uk)
+            uk = uk + xk - zk
+            print(np.linalg.norm(xk - zk))
+            losses.append(np.linalg.norm(xk - zk))
+            if np.linalg.norm(xk -zk) < 1e-12:
+                print(f'converged in {i} iterations')
+                break
+        else:
+            raise Exception
+
+        # breakpoint()        
+        var_reduced = self._var_reduced_from_sy(xk)
+        print('SQNORM RESIDUAL OF SOLUTION',
+            np.linalg.norm(self.newres(var_reduced))**2)
+
+
+        import matplotlib.pyplot as plt
+        plt.semilogy(losses)
+        plt.show()
+        return xk
 
     def identity_minus_cone_project(self, s):
         """Identity minus projection on program cone."""
@@ -1043,6 +1092,11 @@ class Solver:
 
     def new_toy_solve(self):
         """Solve by LM."""
+
+        breakpoint()
+        #self.var_reduced = 
+        self.toy_admm_solve(self.var_reduced)
+        breakpoint()
 
         # res = self.blended_residual(self.var_reduced)
         # jac = self.blended_jacobian(self.var_reduced)
