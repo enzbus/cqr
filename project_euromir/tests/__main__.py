@@ -31,5 +31,5 @@ from .test_loss import TestLoss
 from .test_solver import TestSolver
 
 if __name__ == '__main__':
-    # logging.basicConfig(level='INFO')
+    logging.basicConfig(level='INFO')
     main()

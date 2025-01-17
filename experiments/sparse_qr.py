@@ -5,23 +5,23 @@ import scipy as sp
 import matplotlib.pyplot as plt
 import cvxpy as cp
 
-# m = 200
-# n = 100
+m = 200
+n = 100
 
 def count_below(sparsity):
     return np.sum(sparsity) - np.sum(np.triu(sparsity))
 
-def row_permute(sparsity, weighter, weighter_mult = 1.):
+def row_permute(sparsity, weighter, weighter_mult = 1., invert=False):
     row_weight = sparsity @ np.arange(n)[::-1]
     row_weight += (sparsity * weighter).sum(1) * weighter_mult
     row_perm = np.argsort(row_weight)[::-1]
-    return sparsity[row_perm]
+    return sparsity[row_perm[::-1] if invert else row_perm]
 
-def col_permute(sparsity, weighter, weighter_mult = 0.):
+def col_permute(sparsity, weighter, weighter_mult = 0., invert=False):
     col_weight = sparsity.T @ np.arange(m)
     col_weight += (sparsity * weighter).sum(0) * weighter_mult
     col_perm = np.argsort(col_weight)
-    return sparsity[:, col_perm]
+    return sparsity[:, col_perm[::-1] if invert else col_perm]
 
 
 def sample_problem_matrix(n):
@@ -46,7 +46,7 @@ def make_weighter(sparsity):
     return big_weighter
 
 mat = sample_problem_matrix(100)
-# mat = sp.sparse.random(m, n, density=.5, format='csr')
+# mat = sp.sparse.random(m, n, density=.01, format='csr')
 sparsity = (mat.todense().A != 0.) * 1.
 print('NONZERO IN matrix', np.sum(sparsity))
 

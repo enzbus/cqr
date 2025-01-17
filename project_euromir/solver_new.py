@@ -113,7 +113,9 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
 
     ns_model = NullSpaceModel(
         m=m, n=n, zero=zero, nonneg=nonneg, matrix_transfqr=matrix_transf,
-        b=b_transf, c=c_transf, nullspace_projector=nullspace_projector)
+        b=b_transf, c=c_transf, nullspace_projector=nullspace_projector,
+        # regularizer=0.
+        )
 
     workspace = create_workspace(m, n, zero)
 
@@ -237,13 +239,15 @@ def solve(matrix, b, c, zero, nonneg, soc=(),
     #     )
 
     # direction_calculator = DenseNewton( #WarmStartedCGNewton(
-    #     hessian_function=_local_hessian,
+    #     hessian_function=hess_func,
     #     #rtol_termination=nocedal_wright_termination,
     #     #max_cg_iters=None,
     #     )
     # direction_calculator = MinamideTest(
     #     b=b_transf, c=c_transf, h_x_nogap=_local_hessian_x_nogap,
     #     h_y_nogap=_local_hessian_y_nogap)
+
+    # direction_calculator = ns_model
 
     _start = time.time()
     # extra_iters=5
