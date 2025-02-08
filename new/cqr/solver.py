@@ -109,7 +109,8 @@ class Solver:
 
             # self.new_toy_solve()
             # self.decide_solution_or_certificate()
-
+            self.toy_douglas_rachford_solve()
+            self.decide_solution_or_certificate()
 
             self._invert_qr_transform_gap()
             self._invert_qr_transform_dual_space()
@@ -526,7 +527,7 @@ class Solver:
             rmatvec=rmatvec)
 
 
-    def toy_douglas_rachford_solve(self, max_iter=int(1e9), eps=1e-14):
+    def toy_douglas_rachford_solve(self, max_iter=int(1e6), eps=1e-12):
         """Simple Douglas-Rachford iteration."""
         dr_y = self._sy_from_var_reduced(self.var_reduced)
 
@@ -541,17 +542,19 @@ class Solver:
                 print(f'converged in {i} iterations')
                 break
             dr_y += step
-        else:
-            raise NotImplementedError
+        else: # TODO: needs early stopping for infeas/unbound
+            pass
+            # breakpoint()
+            # raise NotImplementedError
 
         self.var_reduced = self._var_reduced_from_sy(
             self.admm_cone_project(dr_y))
         print('SQNORM RESIDUAL OF SOLUTION',
             np.linalg.norm(self.newres(self.var_reduced))**2)
-
-        import matplotlib.pyplot as plt
-        plt.semilogy(losses)
-        plt.show()
+        if False:
+            import matplotlib.pyplot as plt
+            plt.semilogy(losses)
+            plt.show()
 
     def old_toy_douglas_rachford_solve(self, var_reduced):
         """DR iteration, equivalent to ADMM below."""
