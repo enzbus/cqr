@@ -27,6 +27,8 @@ from cvxpy.error import SolverError
 
 from .solver import Solver
 
+solvers = []
+
 
 class CQR(ConicSolver):
     """CVXPY interface for CQR.
@@ -52,7 +54,7 @@ class CQR(ConicSolver):
         solver = Solver(
             matrix=data['A'], b=data['b'], c=data['c'], zero=data['dims'].zero,
             nonneg=data['dims'].nonneg, soc=data['dims'].soc)
-
+        solvers.append(solver)
         return {
             'status': solver.status, 'value': np.dot(solver.x, data['c']),
             'x': solver.x, 'y': solver.y}

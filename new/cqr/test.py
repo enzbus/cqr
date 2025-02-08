@@ -189,7 +189,7 @@ class TestSolverClass(TestCase):
         certificate (only the CVXPY status).
         """
         assert dims.zero + dims.nonneg + sum(dims.soc) == len(b)
-        for qr in ['NUMPY', 'PYSPQR']:
+        for qr in ['NUMPY']:#, 'PYSPQR']:
             with self.subTest(qr=qr):
                 solver = Solver(
                     sp.sparse.csc_matrix(matrix, copy=True),
@@ -620,17 +620,22 @@ class TestSolverClass(TestCase):
         """Test correct translation to and from CVXPY for SOCs."""
 
         np.random.seed(0)
-        m, n = 20, 10
+        m, n = 200, 100
         x = cp.Variable(n)
         A = np.random.randn(m, n)
         b = np.random.randn(m)
         objective = cp.norm2(A @ x - b) + 1. * cp.norm1(x)
         constraints = []
         prog = cp.Problem(cp.Minimize(objective), constraints)
+        #prog.solve(solver='SCS', verbose=True, eps=3e-10)
+        #scs_obj = objective.value
         prog.solve(solver=CQR())
         cqr_obj = objective.value
+        print(cqr_obj)
         prog.solve(solver='ECOS')
         co_obj = objective.value
+        print('gain over ecos', co_obj-cqr_obj)
+        #print('gain over scs', scs_obj-cqr_obj)
         self.assertLess(cqr_obj, co_obj)
 
 

@@ -63,7 +63,7 @@ class Solver:
 
     def __init__(
             self, matrix, b, c, zero, nonneg, soc=(), x0=None, y0=None,
-            qr='NUMPY', verbose=True):
+            qr='PYSPQR', verbose=True):
 
         # process program data
         self.matrix = sp.sparse.csc_matrix(matrix)
@@ -103,11 +103,14 @@ class Solver:
             self._qr_transform_dual_space()
             self._qr_transform_gap()
 
-            # self.toy_solve()
-            self.new_toy_solve()
-            # self.x_transf, self.y = self.solve_program_cvxpy(
-            #     self.matrix_qr_transf, b, self.c_qr_transf)
-            self.decide_solution_or_certificate()
+            #### self.toy_solve()
+            ##### self.x_transf, self.y = self.solve_program_cvxpy(
+            #####     self.matrix_qr_transf, b, self.c_qr_transf)
+
+            # self.new_toy_solve()
+            # self.decide_solution_or_certificate()
+
+
             self._invert_qr_transform_gap()
             self._invert_qr_transform_dual_space()
             self._invert_qr_transform()
@@ -178,7 +181,7 @@ class Solver:
             hsde_ruiz_equilibration(
                 self.matrix, self.b, self.c, dimensions={
                     'zero': self.zero, 'nonneg': self.nonneg, 'second_order': self.soc},
-                max_iters=25)
+                max_iters=0, eps_cols=1e-12, eps_rows=1e-12)
 
         self.x_equil = self.equil_sigma * (self.x / self.equil_e)
         self.y_equil = self.equil_rho * (self.y / self.equil_d)
@@ -197,7 +200,7 @@ class Solver:
     def _qr_transform_program_data_pyspqr(self):
         """Apply QR decomposition to equilibrated program data."""
 
-        q, r, e = qr(self.matrix_ruiz_equil)
+        q, r, e = qr(self.matrix_ruiz_equil, ordering='BEST')
         shape1 = min(self.n, self.m)
         self.matrix_qr_transf = sp.sparse.linalg.LinearOperator(
             shape=(self.m, shape1),
@@ -235,7 +238,7 @@ class Solver:
 
         # TODO: unclear if this helps
         # self.sigma_qr = np.linalg.norm(self.b_ruiz_equil)
-        # self.b_qr_transf = self.b_ruiz_equilb/self.sigma_qr
+        # self.b_qr_transf = self.b_ruiz_equil/self.sigma_qr
         self.sigma_qr = 1.
         self.b_qr_transf = self.b_ruiz_equil
 
@@ -396,11 +399,295 @@ class Solver:
         var = np.concatenate([var1, var2])
         return self.gap_NS.T @ (var - self.var0)
 
-
     def admm_linspace_project(self, sy):
         """Project ADMM variable on the subspace."""
         vr = self._var_reduced_from_sy(sy)
         return self._sy_from_var_reduced(vr)
+        
+    def admm_linspace_project_derivative(self):
+        
+        def matvec(dsy):
+            
+            # got by unpacking 2 functions above
+            ds = dsy[:self.m]
+            dy = dsy[self.m:]
+            dvar1 = -self.matrix_qr_transf.T @ ds
+            dvar2 = self.nullspace_projector.T @ dy
+            dvar = np.concatenate([dvar1, dvar2])
+            dvar_reduced = self.gap_NS.T @ dvar
+            
+            # second function
+            dvar = self.gap_NS @ dvar_reduced
+            ds = -self.matrix_qr_transf @ dvar[:self.n]
+            dy = self.nullspace_projector @ dvar[self.n:]
+            return np.concatenate([ds, dy])
+            
+        return sp.sparse.linalg.LinearOperator(
+            shape=(2*self.m, 2*self.m),
+            dtype=float,
+            matvec=matvec)
+
+    def admm_cone_project_derivative(self, sy):
+
+        s = sy[:self.m]
+        y = sy[self.m:]
+
+        d1 = self.self_dual_cone_project_derivative(s[self.zero:])
+        d2 = self.self_dual_cone_project_derivative(y[self.zero:])
+
+        def matvec(dsy):
+            ds = dsy[:self.m]
+            dy = dsy[self.m:]
+            return np.concatenate([
+                np.zeros(self.zero),
+                d1 @ ds[self.zero:],
+                dy[:self.zero],
+                d2 @ dy[self.zero:],
+            ])
+
+        return sp.sparse.linalg.LinearOperator(
+            shape=(2*self.m, 2*self.m),
+            dtype=float,
+            matvec=matvec)
+
+
+    def test_admm_derivatives(self):
+        
+        sy = np.random.randn(2 * self.m)
+        
+        for i in range(10):
+            print('test linspace derivative', i)
+            dsy = np.random.randn(2 * self.m)
+            
+            pi0 = self.admm_linspace_project(sy)
+            pi1 = self.admm_linspace_project(sy + dsy)
+            dpi = self.admm_linspace_project_derivative() @ dsy
+            # breakpoint()
+            assert np.allclose(pi1, pi0 + dpi)
+            
+        for i in range(10):
+            print('test coneproj derivative', i)
+            dsy = np.random.randn(2 * self.m) * 1e-6
+            
+            pi0 = self.admm_cone_project(sy)
+            pi1 = self.admm_cone_project(sy + dsy)
+            dpi = self.admm_cone_project_derivative(sy) @ dsy
+            # breakpoint()
+            assert np.allclose(pi1-pi0, dpi)
+
+        for i in range(10):
+            print('test dr derivative', i)
+            dsy = np.random.randn(2 * self.m) * 1e-6
+            
+            s0 = self.douglas_rachford_step(sy)
+            s1 = self.douglas_rachford_step(sy + dsy)
+            ds = self.douglas_rachford_step_derivative(sy) @ dsy
+            # breakpoint()
+            assert np.allclose(s1-s0, ds)
+        
+    def douglas_rachford_step(self, dr_y):
+        """Douglas-Rachford step.
+        
+        https://www.seas.ucla.edu/~vandenbe/236C/lectures/dr.pdf,
+        slides 11.2-3.
+        """
+        # self.admm_linspace_project(2 * self.admm_cone_project(dr_y) - dr_y) - self.admm_cone_project(dr_y)
+        tmp = self.admm_cone_project(dr_y)
+        return self.admm_linspace_project(2 * tmp - dr_y) - tmp
+                
+        # tmp = self.admm_linspace_project(dr_y)
+        # return self.admm_cone_project(2 * tmp - dr_y) - tmp
+
+        # return self.admm_linspace_project(self.admm_cone_project(dr_y)) - dr_y
+    
+    def douglas_rachford_step_derivative(self, dr_y):
+        """Douglas-Rachford step derivative
+        
+        Note that it is not symmetric! Transpose is the same as
+        switching the 2 projections; that's why it performs the same
+        if you switch them.
+        """
+        
+        dpicone = self.admm_cone_project_derivative(dr_y)
+        dpilin = self.admm_linspace_project_derivative()
+        
+        def matvec(dr_dy):
+            tmp = dpicone @ dr_dy
+            return dpilin @ (2 * tmp - dr_dy) - tmp
+            
+        def rmatvec(dr_df):
+            tmp = dpilin @ dr_df
+            return dpicone @ (2 * tmp - dr_df) - tmp
+            
+        return sp.sparse.linalg.LinearOperator(
+            shape=(2 * self.m, 2 * self.m),
+            dtype=float,
+            matvec=matvec,
+            rmatvec=rmatvec)
+
+
+    def toy_douglas_rachford_solve(self, max_iter=int(1e9), eps=1e-14):
+        """Simple Douglas-Rachford iteration."""
+        dr_y = self._sy_from_var_reduced(self.var_reduced)
+
+        losses = []
+        steps = []
+        for i in range(max_iter):
+            step = self.douglas_rachford_step(dr_y)
+            losses.append(np.linalg.norm(step))
+            steps.append(step)
+            print(f'iter {i} loss {losses[-1]:.2e}')
+            if losses[-1] < eps:
+                print(f'converged in {i} iterations')
+                break
+            dr_y += step
+        else:
+            raise NotImplementedError
+
+        self.var_reduced = self._var_reduced_from_sy(
+            self.admm_cone_project(dr_y))
+        print('SQNORM RESIDUAL OF SOLUTION',
+            np.linalg.norm(self.newres(self.var_reduced))**2)
+
+        import matplotlib.pyplot as plt
+        plt.semilogy(losses)
+        plt.show()
+
+    def old_toy_douglas_rachford_solve(self, var_reduced):
+        """DR iteration, equivalent to ADMM below."""
+
+
+        if False:
+            dr_y = self._sy_from_var_reduced(var_reduced)
+            
+            ##
+            # Netwon test
+            self.test_admm_derivatives()
+            for i in range(100000):
+                # breakpoint()
+                print('ITER', i)
+                base_step = self.douglas_rachford_step(dr_y)
+                print(f'current loss {np.linalg.norm(base_step):.2e}')
+                if np.linalg.norm(base_step) < 1e-12:
+                    print('CONVERGED!')
+                    break
+                base_next = self.douglas_rachford_step(dr_y+base_step)
+                print(f'next loss with basic step {np.linalg.norm(base_next):.2e}')
+                result = sp.sparse.linalg.lsqr(
+                    self.douglas_rachford_step_derivative(dr_y + base_step),
+                    self.douglas_rachford_step(dr_y+base_step),
+                    atol=0.,
+                    btol=0.,
+                    # iter_lim=30,
+                    # damp=.1 #e-4
+                    )
+                print(result[1:-1])
+                improved_step = base_step - result[0]/10
+                # breakpoint()
+                # step_len = np.logspace(-4,0.5,100)
+                # opt_step_len = step_len[np.argmin([np.linalg.norm(
+                #     self.douglas_rachford_step(dr_y + x * improved_step)) for x in step_len])]
+                # print('opt step len', opt_step_len)
+                dr_y += 1. * improved_step
+            
+            breakpoint()
+            ##
+        
+        dr_y = self._sy_from_var_reduced(var_reduced)
+        
+        losses = []
+        steps = []
+        for i in range(30000000000000):
+            step = self.douglas_rachford_step(dr_y)
+            losses.append(np.linalg.norm(step))
+            steps.append(step)
+            print(f'iter {i} loss {losses[-1]:.2e}')
+            if losses[-1] < 1e-12:
+                print(f'converged in {i} iterations')
+                break
+            dr_y += step
+        else:
+            # if it is infeasible/unbounded, we can actually return here
+            # breakpoint()
+            # self.var_reduced = self._var_reduced_from_sy(self.admm_cone_project(dr_y))
+            # self.var_reduced = self.inexact_levemberg_marquardt(self.newres, self.newjacobian_linop, self.var_reduced, max_iter=1)
+            # dr_y = self._sy_from_var_reduced(self.var_reduced)
+            # for i in range(1000):
+            #     step = self.douglas_rachford_step(dr_y)
+            #     losses.append(np.linalg.norm(step))
+            #     steps.append(step)
+            #     print(f'iter {i} loss {losses[-1]:.2e}')
+            #     if losses[-1] < 1e-12:
+            #         print(f'converged in {i} iterations')
+            #         break
+            #     dr_y += step
+
+            # import matplotlib.pyplot as plt
+            # plt.semilogy(losses)
+            # plt.show()
+
+            # breakpoint()
+            raise NotImplementedError
+        breakpoint()
+        var_reduced = self._var_reduced_from_sy(dr_y)
+        print('SQNORM RESIDUAL OF SOLUTION',
+            np.linalg.norm(self.newres(var_reduced))**2)
+
+
+        import matplotlib.pyplot as plt
+        plt.semilogy(losses)
+        plt.show()
+        return var_reduced
+
+    
+    def test_toy_douglas_rachford_solve(self, var_reduced):
+        """DR iteration with BFGS."""
+
+        dr_y = self._sy_from_var_reduced(var_reduced)
+
+        import scipy.optimize as opt
+        
+        
+        def func(dr_y):
+            step = self.douglas_rachford_step(dr_y)
+            loss = np.linalg.norm(step)**2 / 2.
+            return loss
+        
+        result = opt.fmin_l_bfgs_b(func, dr_y, approx_grad=True, maxfun=1000000000000000000000)#, pgtol=0.)#, factr=1e-16, epsilon=1e-14)
+        print('FINAL DR LOSS', np.linalg.norm(self.douglas_rachford_step(result[0])))
+        var_reduced = self._var_reduced_from_sy(result[0])
+        print('SQNORM RESIDUAL OF SOLUTION',
+            np.linalg.norm(self.newres(var_reduced))**2)
+        r = result[2]
+        r.pop('grad')
+        print(r)
+        breakpoint()
+        return var_reduced
+        
+        
+        
+        losses = []
+        for i in range(2000000):
+            step = self.douglas_rachford_step(dr_y)
+            losses.append(np.linalg.norm(step))
+            print(losses[-1])
+            if losses[-1] < 1e-12:
+                print(f'converged in {i} iterations')
+                break
+            dr_y += step
+        else:
+            raise Exception
+
+        var_reduced = self._var_reduced_from_sy(dr_y)
+        print('SQNORM RESIDUAL OF SOLUTION',
+            np.linalg.norm(self.newres(var_reduced))**2)
+
+
+        import matplotlib.pyplot as plt
+        plt.semilogy(losses)
+        plt.show()
+        return var_reduced
+
 
     def toy_admm_solve(self, var_reduced):
         # sy_init = self._sy_from_var_reduced(var_reduced)
@@ -408,14 +695,14 @@ class Solver:
         zk = np.zeros(2 * self.m)
         uk = np.zeros(2 * self.m)
 
-        losses = []
+        # losses = []
 
         for i in range(2000000):
             xk = self.admm_cone_project(zk - uk)
             zk = self.admm_linspace_project(xk + uk)
             uk = uk + xk - zk
-            print(np.linalg.norm(xk - zk))
-            losses.append(np.linalg.norm(xk - zk))
+            # print(np.linalg.norm(xk - zk))
+            # losses.append(np.linalg.norm(xk - zk))
             if np.linalg.norm(xk -zk) < 1e-12:
                 print(f'converged in {i} iterations')
                 break
@@ -428,10 +715,10 @@ class Solver:
             np.linalg.norm(self.newres(var_reduced))**2)
 
 
-        import matplotlib.pyplot as plt
-        plt.semilogy(losses)
-        plt.show()
-        return xk
+        # import matplotlib.pyplot as plt
+        # plt.semilogy(losses)
+        # plt.show()
+        return var_reduced
 
     def identity_minus_cone_project(self, s):
         """Identity minus projection on program cone."""
@@ -1092,21 +1379,28 @@ class Solver:
 
     def new_toy_solve(self):
         """Solve by LM."""
+        
 
-        breakpoint()
-        #self.var_reduced = 
-        self.toy_admm_solve(self.var_reduced)
-        breakpoint()
+        # breakpoint()
+        
+        # # self.var_reduced = self.old_toy_douglas_rachford_solve(self.var_reduced)
+        # self.toy_douglas_rachford_solve()
+        # breakpoint()
+        # return
+        
+        #self.var_reduced = self.toy_admm_solve(self.var_reduced)
+        # breakpoint()
+        #return
 
         # res = self.blended_residual(self.var_reduced)
         # jac = self.blended_jacobian(self.var_reduced)
 
-        if self.m > self.n:
-            self.var_reduced = self.inexact_levemberg_marquardt(
-                self.blended_residual, self.blended_jacobian, self.var_reduced)#, max_iter=100)
-        else:
-            self.var_reduced = self.inexact_levemberg_marquardt(
-                self.newres, self.newjacobian_linop, self.var_reduced)#, max_iter=100)
+        # if self.m > self.n:
+        #     self.var_reduced = self.inexact_levemberg_marquardt(
+        #         self.blended_residual, self.blended_jacobian, self.var_reduced)#, max_iter=100)
+        # else:
+        self.var_reduced = self.inexact_levemberg_marquardt(
+            self.newres, self.newjacobian_linop, self.var_reduced)#, max_iter=10)
 
         # for i in range(10):
         #     self.var_reduced = self.inexact_levemberg_marquardt(
