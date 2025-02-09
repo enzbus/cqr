@@ -189,7 +189,7 @@ class TestSolverClass(TestCase):
         certificate (only the CVXPY status).
         """
         assert dims.zero + dims.nonneg + sum(dims.soc) == len(b)
-        for qr in ['NUMPY']:#, 'PYSPQR']:
+        for qr in ['NUMPY']: #, 'PYSPQR']:
             with self.subTest(qr=qr):
                 solver = Solver(
                     sp.sparse.csc_matrix(matrix, copy=True),

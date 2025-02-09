@@ -390,7 +390,7 @@ class Solver:
         s = self.b_qr_transf - self.matrix_qr_transf @ var[:self.n]
         y = self.y0 + self.nullspace_projector @ var[self.n:]
         return np.concatenate([s, y])
-    
+
     def _var_reduced_from_sy(self, sy):
         """Get var reduced from sy in least squares sense."""
         s = sy[:self.m]
@@ -404,11 +404,11 @@ class Solver:
         """Project ADMM variable on the subspace."""
         vr = self._var_reduced_from_sy(sy)
         return self._sy_from_var_reduced(vr)
-        
+
     def admm_linspace_project_derivative(self):
-        
+
         def matvec(dsy):
-            
+
             # got by unpacking 2 functions above
             ds = dsy[:self.m]
             dy = dsy[self.m:]
@@ -416,13 +416,13 @@ class Solver:
             dvar2 = self.nullspace_projector.T @ dy
             dvar = np.concatenate([dvar1, dvar2])
             dvar_reduced = self.gap_NS.T @ dvar
-            
+
             # second function
             dvar = self.gap_NS @ dvar_reduced
             ds = -self.matrix_qr_transf @ dvar[:self.n]
             dy = self.nullspace_projector @ dvar[self.n:]
             return np.concatenate([ds, dy])
-            
+
         return sp.sparse.linalg.LinearOperator(
             shape=(2*self.m, 2*self.m),
             dtype=float,
@@ -451,25 +451,24 @@ class Solver:
             dtype=float,
             matvec=matvec)
 
-
     def test_admm_derivatives(self):
-        
+
         sy = np.random.randn(2 * self.m)
-        
+
         for i in range(10):
             print('test linspace derivative', i)
             dsy = np.random.randn(2 * self.m)
-            
+
             pi0 = self.admm_linspace_project(sy)
             pi1 = self.admm_linspace_project(sy + dsy)
             dpi = self.admm_linspace_project_derivative() @ dsy
             # breakpoint()
             assert np.allclose(pi1, pi0 + dpi)
-            
+
         for i in range(10):
             print('test coneproj derivative', i)
             dsy = np.random.randn(2 * self.m) * 1e-6
-            
+
             pi0 = self.admm_cone_project(sy)
             pi1 = self.admm_cone_project(sy + dsy)
             dpi = self.admm_cone_project_derivative(sy) @ dsy
@@ -479,13 +478,13 @@ class Solver:
         for i in range(10):
             print('test dr derivative', i)
             dsy = np.random.randn(2 * self.m) * 1e-6
-            
+
             s0 = self.douglas_rachford_step(sy)
             s1 = self.douglas_rachford_step(sy + dsy)
             ds = self.douglas_rachford_step_derivative(sy) @ dsy
             # breakpoint()
             assert np.allclose(s1-s0, ds)
-        
+
     def douglas_rachford_step(self, dr_y):
         """Douglas-Rachford step.
         
@@ -495,12 +494,12 @@ class Solver:
         # self.admm_linspace_project(2 * self.admm_cone_project(dr_y) - dr_y) - self.admm_cone_project(dr_y)
         tmp = self.admm_cone_project(dr_y)
         return self.admm_linspace_project(2 * tmp - dr_y) - tmp
-                
+
         # tmp = self.admm_linspace_project(dr_y)
         # return self.admm_cone_project(2 * tmp - dr_y) - tmp
 
         # return self.admm_linspace_project(self.admm_cone_project(dr_y)) - dr_y
-    
+
     def douglas_rachford_step_derivative(self, dr_y):
         """Douglas-Rachford step derivative
         
@@ -508,24 +507,23 @@ class Solver:
         switching the 2 projections; that's why it performs the same
         if you switch them.
         """
-        
+
         dpicone = self.admm_cone_project_derivative(dr_y)
         dpilin = self.admm_linspace_project_derivative()
-        
+
         def matvec(dr_dy):
             tmp = dpicone @ dr_dy
             return dpilin @ (2 * tmp - dr_dy) - tmp
-            
+
         def rmatvec(dr_df):
             tmp = dpilin @ dr_df
             return dpicone @ (2 * tmp - dr_df) - tmp
-            
+
         return sp.sparse.linalg.LinearOperator(
             shape=(2 * self.m, 2 * self.m),
             dtype=float,
             matvec=matvec,
             rmatvec=rmatvec)
-
 
     def toy_douglas_rachford_solve(self, max_iter=int(1e6), eps=1e-12):
         """Simple Douglas-Rachford iteration."""
@@ -533,19 +531,70 @@ class Solver:
 
         losses = []
         steps = []
+        xs = []
         for i in range(max_iter):
             step = self.douglas_rachford_step(dr_y)
             losses.append(np.linalg.norm(step))
+            xs.append(dr_y)
             steps.append(step)
             print(f'iter {i} loss {losses[-1]:.2e}')
             if losses[-1] < eps:
                 print(f'converged in {i} iterations')
                 break
-            dr_y += step
+
+            # Acceleration
+            MEMORY = 10
+            if (MEMORY > 0) and (i > 5):
+                mystep = np.array(steps[-MEMORY-1:])
+                Y = np.diff(mystep, axis=0).T
+                myxs = np.array(xs[-MEMORY-1:])
+                S = np.diff(myxs, axis=0).T
+
+                # breakpoint()
+                MULTIPLIER = 10
+                # normalize columns
+                S_scaled = S / np.linalg.norm(S, axis=0)
+                Y_scaled = Y / np.linalg.norm(S, axis=0)
+                # multiply by norm of identity
+                S_scaled *= np.sqrt(self.m * 2) * MULTIPLIER
+                Y_scaled *= np.sqrt(self.m * 2) * MULTIPLIER
+
+                # old normalization
+                # S_scaled = S * (np.sqrt(self.m * 2) / np.linalg.norm(S))
+                # Y_scaled = Y * (np.sqrt(self.m * 2) / np.linalg.norm(S))
+                # breakpoint()
+
+                u, s, v = np.linalg.svd(Y_scaled, full_matrices=False)
+
+                # multiply by this matrix:
+                # newJ = D @ v.T @ np.diag(s / (1 + s**2)) @ u.T - np.eye(self.m*2) + u @ np.diag(s**2 / (1 + s**2)) @ u.T
+                # dr_y = np.copy(dr_y - newJ @ step)
+                result = -np.copy(step)
+                tmp = u.T @ step
+                mult1 = (s**2 / (1 + s**2)) * tmp
+                result += u @ mult1
+                mult2 = (s / (1 + s**2)) * tmp
+                result += S_scaled @ (v.T @ mult2)
+                dr_y = np.copy(dr_y - result)
+            else:
+                dr_y = np.copy(dr_y + step)
+
+            # infeas / unbound
+            if i % 100 == 99:
+                tmp = self.admm_linspace_project(dr_y)
+                cert = tmp - self.admm_cone_project(tmp)
+                # y_cert = cert[:self.m]
+                # s_cert = cert[self.m:]
+                # x_cert = self.matrix_qr_transf.T @ cert[self.m:]
+                cert /= np.linalg.norm(cert) # no, shoud normalize y by b and x,s by c
+                # TODO double check this logic
+                if (np.linalg.norm(self.matrix_qr_transf.T @ cert[:self.m]) < eps) and (np.linalg.norm(self.matrix_qr_transf @ self.matrix_qr_transf.T @ cert[self.m:] - cert[self.m:]) < eps):
+                    # print('INFEASIBLE')
+                    break
+
         else: # TODO: needs early stopping for infeas/unbound
-            pass
-            # breakpoint()
-            # raise NotImplementedError
+
+            raise NotImplementedError
 
         self.var_reduced = self._var_reduced_from_sy(
             self.admm_cone_project(dr_y))
@@ -559,10 +608,9 @@ class Solver:
     def old_toy_douglas_rachford_solve(self, var_reduced):
         """DR iteration, equivalent to ADMM below."""
 
-
         if False:
             dr_y = self._sy_from_var_reduced(var_reduced)
-            
+
             ##
             # Netwon test
             self.test_admm_derivatives()
@@ -592,12 +640,12 @@ class Solver:
                 #     self.douglas_rachford_step(dr_y + x * improved_step)) for x in step_len])]
                 # print('opt step len', opt_step_len)
                 dr_y += 1. * improved_step
-            
+
             breakpoint()
             ##
-        
+
         dr_y = self._sy_from_var_reduced(var_reduced)
-        
+
         losses = []
         steps = []
         for i in range(30000000000000):
@@ -636,26 +684,23 @@ class Solver:
         print('SQNORM RESIDUAL OF SOLUTION',
             np.linalg.norm(self.newres(var_reduced))**2)
 
-
         import matplotlib.pyplot as plt
         plt.semilogy(losses)
         plt.show()
         return var_reduced
 
-    
     def test_toy_douglas_rachford_solve(self, var_reduced):
         """DR iteration with BFGS."""
 
         dr_y = self._sy_from_var_reduced(var_reduced)
 
         import scipy.optimize as opt
-        
-        
+
         def func(dr_y):
             step = self.douglas_rachford_step(dr_y)
             loss = np.linalg.norm(step)**2 / 2.
             return loss
-        
+
         result = opt.fmin_l_bfgs_b(func, dr_y, approx_grad=True, maxfun=1000000000000000000000)#, pgtol=0.)#, factr=1e-16, epsilon=1e-14)
         print('FINAL DR LOSS', np.linalg.norm(self.douglas_rachford_step(result[0])))
         var_reduced = self._var_reduced_from_sy(result[0])
@@ -666,9 +711,7 @@ class Solver:
         print(r)
         breakpoint()
         return var_reduced
-        
-        
-        
+
         losses = []
         for i in range(2000000):
             step = self.douglas_rachford_step(dr_y)
@@ -685,12 +728,10 @@ class Solver:
         print('SQNORM RESIDUAL OF SOLUTION',
             np.linalg.norm(self.newres(var_reduced))**2)
 
-
         import matplotlib.pyplot as plt
         plt.semilogy(losses)
         plt.show()
         return var_reduced
-
 
     def toy_admm_solve(self, var_reduced):
         # sy_init = self._sy_from_var_reduced(var_reduced)
@@ -706,17 +747,16 @@ class Solver:
             uk = uk + xk - zk
             # print(np.linalg.norm(xk - zk))
             # losses.append(np.linalg.norm(xk - zk))
-            if np.linalg.norm(xk -zk) < 1e-12:
+            if np.linalg.norm(xk - zk) < 1e-12:
                 print(f'converged in {i} iterations')
                 break
         else:
             raise Exception
 
-        # breakpoint()        
+        # breakpoint()
         var_reduced = self._var_reduced_from_sy(xk)
         print('SQNORM RESIDUAL OF SOLUTION',
             np.linalg.norm(self.newres(var_reduced))**2)
-
 
         # import matplotlib.pyplot as plt
         # plt.semilogy(losses)
@@ -1382,15 +1422,14 @@ class Solver:
 
     def new_toy_solve(self):
         """Solve by LM."""
-        
 
         # breakpoint()
-        
+
         # # self.var_reduced = self.old_toy_douglas_rachford_solve(self.var_reduced)
         # self.toy_douglas_rachford_solve()
         # breakpoint()
         # return
-        
+
         #self.var_reduced = self.toy_admm_solve(self.var_reduced)
         # breakpoint()
         #return

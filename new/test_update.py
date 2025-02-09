@@ -65,9 +65,16 @@ u,s,v = np.linalg.svd(C, full_matrices=False)
 zietta = -np.eye(N) + D @ C.T - (-np.eye(N) + D @ C.T) @ (u @ np.diag(s**2 / (1 + s**2)) @ u.T)
 
 zietto = (-np.eye(N) + D @ v.T @ np.diag(s) @ u.T) @ (np.eye(N) - u @ np.diag(s**2 / (1 + s**2)) @ u.T)
+zione = D @ v.T @ np.diag(s / (1 + s**2)) @ u.T - (np.eye(N) - u @ np.diag(s**2 / (1 + s**2)) @ u.T)
+
+
+assert np.allclose(zietto, sol0)
+assert np.allclose(zione, sol0)
+
 
 plt.plot(np.linalg.svd(zietta)[1])
 plt.plot(np.linalg.svd(zietto)[1])
+plt.plot(np.linalg.svd(zione)[1])
 
 
 plt.show()
