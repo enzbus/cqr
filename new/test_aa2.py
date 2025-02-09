@@ -8,7 +8,7 @@ import cvxpy as cp
 from cqr.cvxpy_interface import CQR
 
 SOC = False # True #False #True #True #False
-PO = True # False #True
+PO = False # False #True
 PROGRAM_ONE = False#False#True # True #False
 PROGRAM_TWO = True # True # False # True #True #True
 

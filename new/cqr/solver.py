@@ -182,7 +182,7 @@ class Solver:
             hsde_ruiz_equilibration(
                 self.matrix, self.b, self.c, dimensions={
                     'zero': self.zero, 'nonneg': self.nonneg, 'second_order': self.soc},
-                max_iters=0, eps_cols=1e-12, eps_rows=1e-12)
+                max_iters=25, eps_cols=1e-12, eps_rows=1e-12)
 
         self.x_equil = self.equil_sigma * (self.x / self.equil_e)
         self.y_equil = self.equil_rho * (self.y / self.equil_d)
@@ -201,7 +201,7 @@ class Solver:
     def _qr_transform_program_data_pyspqr(self):
         """Apply QR decomposition to equilibrated program data."""
 
-        q, r, e = qr(self.matrix_ruiz_equil, ordering='BEST')
+        q, r, e = qr(self.matrix_ruiz_equil, ordering='AMD')
         shape1 = min(self.n, self.m)
         self.matrix_qr_transf = sp.sparse.linalg.LinearOperator(
             shape=(self.m, shape1),
@@ -1063,7 +1063,7 @@ class Solver:
     def inexact_levemberg_marquardt(self,
                                     residual, jacobian, x0, max_iter=100000,
                                     max_ls=200, eps=1e-12, damp=0.,
-                                    solver='CG'):
+                                    solver='CG', max_cg_iters=None):
         """Inexact Levemberg-Marquardt solver."""
         cur_x = np.copy(x0)
         cur_residual = residual(cur_x)
@@ -1102,7 +1102,7 @@ class Solver:
                     b=-cur_gradient,
                     rtol=min(0.5, np.linalg.norm(cur_gradient)**0.5),
                     callback=_counter,
-                    # maxiter=30,
+                    maxiter=max_cg_iters,
                 )
             elif solver == 'LSQR':
                 _ = sp.sparse.linalg.lsqr(
@@ -1405,7 +1405,7 @@ class Solver:
         """Refine with new formulation."""
         self.var_reduced = self.inexact_levemberg_marquardt(
             self.refinement_residual, self.refinement_jacobian,
-            self.var_reduced, eps=1e-15)
+            self.var_reduced, eps=1e-15)#, max_cg_iters=10)
 
     def refine(self):
         """Basic refinement."""

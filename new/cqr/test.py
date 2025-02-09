@@ -189,7 +189,7 @@ class TestSolverClass(TestCase):
         certificate (only the CVXPY status).
         """
         assert dims.zero + dims.nonneg + sum(dims.soc) == len(b)
-        for qr in ['NUMPY']: #, 'PYSPQR']:
+        for qr in ['NUMPY', 'PYSPQR']:
             with self.subTest(qr=qr):
                 solver = Solver(
                     sp.sparse.csc_matrix(matrix, copy=True),
@@ -492,6 +492,28 @@ class TestSolverClass(TestCase):
         program = cp.Problem(cp.Minimize(objective), constraints)
         return x, program
 
+    @staticmethod
+    def _generate_portfolio_problem(seed, n=10):
+        np.random.seed(seed)
+        w = cp.Variable(n)
+        w0 = np.random.randn(n)
+        w0 -= np.sum(w0)/len(w0)
+        w0 /= np.sum(np.abs(w0))
+        mu = np.random.randn(n) * 1e-3
+        Sigma = np.random.randn(n, n)
+        Sigma = Sigma.T @ Sigma
+        eival, eivec = np.linalg.eigh(Sigma)
+        eival *= 1e-4
+        eival[:-len(eival)//10] = 0.
+        Sigma = eivec @ np.diag(eival) @ eivec.T
+        objective = w.T @ mu + 1e-5 * cp.norm1(w-w0)
+        constraints = [#w >=0, #w<=w_max,
+            cp.sum(w) == 0, cp.norm1(w-w0) <= 0.05,
+            cp.norm1(w) <= 1,
+            cp.sum_squares((np.diag(np.sqrt(eival)) @ eivec.T) @ w) <= 0.00005]
+        program = cp.Problem(cp.Minimize(objective), constraints)
+        return w, program
+
     def test_program_one(self):
         for seed in range(1):
             _, prog = self._generate_problem_one(seed)
@@ -500,6 +522,11 @@ class TestSolverClass(TestCase):
     def test_program_two(self):
         for seed in range(1):
             _, prog = self._generate_problem_two(seed)
+            self.check_solve_from_cvxpy(prog)
+
+    def test_po_program(self):
+        for seed in range(1):
+            _, prog = self._generate_portfolio_problem(seed)
             self.check_solve_from_cvxpy(prog)
 
     def test_warmstart(self):
