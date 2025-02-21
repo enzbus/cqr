@@ -174,6 +174,20 @@ for MEMORY in [1,2,5,10,20,50]:
         print('fwd', np.linalg.norm(self.douglas_rachford_step(xs[-1] + np.linalg.solve(J.value, steps[-1]))))
         print('bwd', np.linalg.norm(self.douglas_rachford_step(xs[-1] - np.linalg.solve(J.value, steps[-1]))))
 
+
+
+def _densify(linear_operator):
+    """Create Numpy 2-d array from a sparse LinearOperator."""
+    result = np.zeros(linear_operator.shape, dtype=float)
+    for j in range(result.shape[1]):
+        ej = np.zeros(result.shape[1])
+        ej[j] = 1.
+        result[:, j] = linear_operator @ ej
+    return result
+
+zio = _densify(self.newjacobian_linop(self.var_reduced))
+
+
 raise Exception
 
 
