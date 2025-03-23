@@ -42,7 +42,6 @@ jobs:
 
       - name: Test with Makefile
         run: |
-              cd new
               make
 
 
