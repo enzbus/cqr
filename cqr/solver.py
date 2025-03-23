@@ -525,10 +525,10 @@ class Solver:
         """
         # self.admm_linspace_project(2 * self.admm_cone_project(dr_y) - dr_y) - self.admm_cone_project(dr_y)
         tmp = self.admm_cone_project(dr_y)
-        if not hasattr(self, "admm_intercept"):
-            return self.admm_linspace_project(2 * tmp - dr_y) - tmp
-        else:
-            return self.admm_linspace_project_ex_intercept(2 * tmp - dr_y) - tmp
+        # if not hasattr(self, "admm_intercept"):
+        return self.admm_linspace_project(2 * tmp - dr_y) - tmp
+        # else:
+        #     return self.admm_linspace_project_ex_intercept(2 * tmp - dr_y) - tmp
 
         # tmp = self.admm_linspace_project(dr_y)
         # return self.admm_cone_project(2 * tmp - dr_y) - tmp
@@ -563,7 +563,7 @@ class Solver:
     def new_toy_douglas_rachford_solve(self, max_iter=int(1e6), eps=1e-12):
         """Simple Douglas-Rachford iteration."""
         dr_y = self._sy_from_var_reduced(self.var_reduced)
-        self.admm_compute_intercept()
+        # self.admm_compute_intercept()
 
         # losses = []
         # steps = []
