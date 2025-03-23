@@ -1637,4 +1637,5 @@ class Solver:
 
         else:  # for now we only refine solutions
             if self.m > self.n:
-                self.refine()
+                pass
+                # self.refine()
