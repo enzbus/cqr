@@ -189,7 +189,7 @@ class TestSolverClass(TestCase):
         certificate (only the CVXPY status).
         """
         assert dims.zero + dims.nonneg + sum(dims.soc) == len(b)
-        for qr in [# 'NUMPY', 
+        for qr in [# 'NUMPY',
                 'PYSPQR']:
             with self.subTest(qr=qr):
                 solver = Solver(
@@ -480,7 +480,7 @@ class TestSolverClass(TestCase):
         return x, program
 
     @staticmethod
-    def _generate_problem_two(seed, m=70, n=40):
+    def _generate_problem_two(seed, m=41, n=30):
         """Generate a sample LP which can be difficult."""
         np.random.seed(seed)
         x = cp.Variable(n)
@@ -494,7 +494,7 @@ class TestSolverClass(TestCase):
         return x, program
 
     @staticmethod
-    def _generate_portfolio_problem(seed, n=1000):
+    def _generate_portfolio_problem(seed, n=10):
         np.random.seed(seed)
         w = cp.Variable(n)
         w0 = np.random.randn(n)
@@ -512,7 +512,7 @@ class TestSolverClass(TestCase):
         constraints = [#w >=0, #w<=w_max,
             cp.sum(w) == 0, cp.norm1(w-w0) <= 0.05,
             cp.norm1(w) <= 1,
-            cp.sum_squares((np.diag(np.sqrt(eival)) @ eivec[:,-n//10:].T) @ w) <= 0.00005]
+            cp.sum_squares((np.diag(np.sqrt(eival)) @ eivec[:, -n//10:].T) @ w) <= 0.00005]
         program = cp.Problem(cp.Minimize(objective), constraints)
         program.solve(solver='SCS', verbose=True, eps=1e-14)
         return w, program

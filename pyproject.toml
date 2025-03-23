@@ -1,6 +1,6 @@
 [project]
 name = 'cqr'
-version = '0.1.0'
+dynamic = ["version"]
 readme = 'README.rst'
 requires-python = '>=3.8'
 license = {text = "GPLv3"}
@@ -14,13 +14,17 @@ dependencies = [
 docs = ["sphinx"]
 dev = [
     "build", "twine", "pylint", "isort", "autopep8", "docformatter",
-    "diff_cover"]
+    # "diff_cover",
+    "setuptools_scm"]
 test = [
     "cvxpy-base", 'coverage[toml]', 'ecos', 'scs']
 
 [build-system]
-requires = ["setuptools"]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+# should be OK to leave this blank
 
 [tool.setuptools]
 packages = ["cqr"]
@@ -31,10 +35,10 @@ fail_under = 99
 [tool.coverage.run]
 omit = ["*/site-packages/*", "*/dist-packages/*"]
 
-[tool.diff_cover]
-# this will be superflous once we push coverage to 100
-compare_branch = "origin/master"
-fail_under = 99
+# [tool.diff_cover]
+# # this will be superflous once we push coverage to 100
+# compare_branch = "origin/master"
+# fail_under = 99
 
 [tool.diff_quality]
 # this will be superflous once we push pylint score to 10

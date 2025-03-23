@@ -110,9 +110,10 @@ class Solver:
             # self.new_toy_solve()
             # self.var_reduced = self.toy_admm_solve(self.var_reduced)
             # self.var_reduced = self.old_toy_douglas_rachford_solve(self.var_reduced)
-            
+
             # self.decide_solution_or_certificate()
-            #self.toy_douglas_rachford_solve()
+            # self.toy_douglas_rachford_solve()
+            self.new_toy_douglas_rachford_solve()
             self.decide_solution_or_certificate()
 
             self._invert_qr_transform_gap()
@@ -558,6 +559,49 @@ class Solver:
             dtype=float,
             matvec=matvec,
             rmatvec=rmatvec)
+
+    def new_toy_douglas_rachford_solve(self, max_iter=int(1e6), eps=1e-12):
+        """Simple Douglas-Rachford iteration."""
+        dr_y = self._sy_from_var_reduced(self.var_reduced)
+        self.admm_compute_intercept()
+
+        # losses = []
+        # steps = []
+        # xs = []
+        for i in range(max_iter):
+            step = self.douglas_rachford_step(dr_y)
+            # losses.append(np.linalg.norm(step))
+            # xs.append(dr_y)
+            # steps.append(step)
+            # print(f'iter {i} loss {losses[-1]:.2e}')
+            if np.linalg.norm(step) < eps:
+                print(f'converged in {i} iterations')
+                break
+
+            dr_y = np.copy(dr_y + step)
+
+            # infeas / unbound
+            if i % 100 == 99:
+                tmp = self.admm_linspace_project(dr_y)
+                cert = tmp - self.admm_cone_project(tmp)
+                # y_cert = cert[:self.m]
+                # s_cert = cert[self.m:]
+                # x_cert = self.matrix_qr_transf.T @ cert[self.m:]
+                cert /= np.linalg.norm(cert) # no, shoud normalize y by b and x,s by c
+                # TODO double check this logic
+                if (np.linalg.norm(self.matrix_qr_transf.T @ cert[:self.m]) < eps) and (np.linalg.norm(self.matrix_qr_transf @ self.matrix_qr_transf.T @ cert[self.m:] - cert[self.m:]) < eps):
+                    # print('INFEASIBLE')
+                    break
+
+        else: # TODO: needs early stopping for infeas/unbound
+
+            raise NotImplementedError
+
+        self.var_reduced = self._var_reduced_from_sy(
+            self.admm_cone_project(dr_y))
+        print('SQNORM RESIDUAL OF SOLUTION',
+            np.linalg.norm(self.newres(self.var_reduced))**2)
+
 
     def toy_douglas_rachford_solve(self, max_iter=int(1e6), eps=1e-12):
         """Simple Douglas-Rachford iteration."""

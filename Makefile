@@ -21,7 +21,9 @@ test: env
 
 env:
 	python -m venv $(VENV_OPTS) $(ENVDIR)
-	$(BINDIR)/pip install $(PIP_OPTS) .[test]
+	$(BINDIR)/pip install $(PIP_OPTS) .[dev,docs,test]
+
+update: clean env
 
 fix:
 	$(BINDIR)/python -m autopep8 -i cqr/*.py
