@@ -103,6 +103,8 @@ class Solver:
             self._qr_transform_dual_space()
             self._qr_transform_gap()
 
+            self.admm_intercept = self.admm_linspace_project(np.zeros(self.m*2))
+
             #### self.toy_solve()
             ##### self.x_transf, self.y = self.solve_program_cvxpy(
             #####     self.matrix_qr_transf, b, self.c_qr_transf)
@@ -186,7 +188,7 @@ class Solver:
             hsde_ruiz_equilibration(
                 self.matrix, self.b, self.c, dimensions={
                     'zero': self.zero, 'nonneg': self.nonneg, 'second_order': self.soc},
-                max_iters=0, eps_cols=1e-12, eps_rows=1e-12)
+                max_iters=5, l_norm=2, eps_cols=1e-12, eps_rows=1e-12)
 
         self.x_equil = self.equil_sigma * (self.x / self.equil_e)
         self.y_equil = self.equil_rho * (self.y / self.equil_d)
@@ -355,6 +357,38 @@ class Solver:
         result[1:] = y / norm_y
         result *= (norm_y + t) / 2.
 
+    @staticmethod
+    def new_second_order_project(z, pi, two_pi_minus_z):
+        """Project on second-order cone.
+
+        :param z: Input array.
+        :type z: np.array
+        :param result: Resulting array.
+        :type result: np.array
+        """
+
+        assert len(z) >= 2
+
+        y, t = z[1:], z[0]
+
+        # cache this?
+        norm_y = np.linalg.norm(y)
+
+        if norm_y <= t:
+            pi[:] = z
+            two_pi_minus_z[:] = z
+            return
+
+        if norm_y <= -t:
+            pi[:] = 0.
+            two_pi_minus_z[:] = -z
+            return
+
+        pi[0] = (norm_y + t) / 2.
+        two_pi_minus_z[0] = norm_y
+        pi[1:] = ((1. + t/norm_y) / 2.) * y
+        two_pi_minus_z[1:] = (t/norm_y) * y
+
     def self_dual_cone_project(self, conic_var):
         """Project on self-dual cones."""
         result = np.empty_like(conic_var)
@@ -387,6 +421,54 @@ class Solver:
         pi_s = self.cone_project(s)
         pi_y = self.dual_cone_project_basic(y)
         return np.concatenate([pi_s, pi_y])
+
+    def new_admm_cone_project(self, sy):
+        """Project ADMM variable on the cone."""
+        s = sy[:self.m]
+        y = sy[self.m:]
+        pi = np.empty(self.m*2)
+        two_pi_minus_sy = np.empty(self.m*2)
+
+        cur = 0
+
+        # s, zero cone
+        pi[:self.zero] = np.zeros(self.zero)
+        two_pi_minus_sy[:self.zero] = -s[:self.zero]
+
+        cur += self.zero
+
+        # s, nonneg cone
+        pi[cur:cur+self.nonneg] = np.maximum(s[cur:cur+self.nonneg], 0.)
+        two_pi_minus_sy[cur:cur+self.nonneg] = 2 * pi[cur:cur+self.nonneg] - s[cur:cur+self.nonneg]
+
+        cur += self.nonneg
+
+        # s, soc cones
+        for q in self.soc:
+            self.new_second_order_project(s[cur:cur+q], pi[cur:cur+q], two_pi_minus_sy[cur:cur+q])
+            cur += q
+
+        # y, zero cone
+        pi[cur:cur+self.zero] = y[:self.zero]
+        two_pi_minus_sy[cur:cur+self.zero] = y[:self.zero]
+
+        cur += self.zero
+
+        # y, nonneg cone
+        pi[cur:cur+self.nonneg] = np.maximum(y[cur-self.m:cur-self.m+self.nonneg], 0.)
+        two_pi_minus_sy[cur:cur+self.nonneg] = 2 * pi[cur:cur+self.nonneg] - y[cur-self.m:cur-self.m+self.nonneg]
+
+        cur += self.nonneg
+
+        # y, soc cones
+        for q in self.soc:
+            self.new_second_order_project(y[cur-self.m:cur-self.m+q], pi[cur:cur+q], two_pi_minus_sy[cur:cur+q])
+            # two_pi_minus_sy[cur:cur+q] = 2 * pi[cur:cur+q] - y[cur-self.m:cur-self.m+q]
+            cur += q
+
+        assert cur == self.m * 2
+
+        return pi, two_pi_minus_sy
 
     def _sy_from_var_reduced(self, var_reduced):
         """Get sy from var reduced."""
@@ -425,6 +507,11 @@ class Solver:
         vr = self._var_reduced_from_sy(sy)
         return self._sy_from_var_reduced(vr)
 
+    def admm_linspace_project_noconst(self, sy):
+        """Project ADMM variable on the subspace."""
+        vr = self._var_reduced_from_sy_noconst(sy)
+        return self._sy_from_var_reduced_noconst(vr)
+
     def douglas_rachford_step(self, dr_y):
         """Douglas-Rachford step.
 
@@ -432,9 +519,13 @@ class Solver:
         slides 11.2-3.
         """
         # self.admm_linspace_project(2 * self.admm_cone_project(dr_y) - dr_y) - self.admm_cone_project(dr_y)
-        tmp = self.admm_cone_project(dr_y)
+        pi, two_pi_minus_sy = self.new_admm_cone_project(dr_y)
+        # tmp = self.admm_cone_project(dr_y)
+        # assert np.allclose(tmp, pi)
         # if not hasattr(self, "admm_intercept"):
-        return self.admm_linspace_project(2 * tmp - dr_y) - tmp
+        # return self.admm_intercept + self.admm_linspace_project_noconst(2 * tmp - dr_y) - tmp
+        # return self.admm_linspace_project(2 * tmp - dr_y) - tmp
+        return self.admm_linspace_project(two_pi_minus_sy) - pi
         # else:
         #     return self.admm_linspace_project_ex_intercept(2 * tmp - dr_y) - tmp
 
@@ -468,17 +559,30 @@ class Solver:
             matvec=matvec,
             rmatvec=rmatvec)
 
-    def new_toy_douglas_rachford_solve(self, max_iter=int(1e6), eps=1e-12):
+    def new_toy_douglas_rachford_solve(self, max_iter=int(1e5), eps=1e-12):
         """Simple Douglas-Rachford iteration."""
         dr_y = self._sy_from_var_reduced(self.var_reduced)
         # self.admm_compute_intercept()
 
-        # losses = []
+        losses = []
         # steps = []
         # xs = []
+        # breakpoint()
+
+        ##
+        # Analize vectors
+        ##
+
+        # for var in [self.var0, self.y0, self.b_qr_transf, self.admm_intercept]:
+        #     _ = np.abs(var)
+        #     _ = _[_ > 10 * np.finfo(float).eps]
+        #     print(f'min={np.min(_):.2e} max={np.max(_):.2e}')
+
+        # breakpoint()
+
         for i in range(max_iter):
             step = self.douglas_rachford_step(dr_y)
-            # losses.append(np.linalg.norm(step))
+            losses.append(np.linalg.norm(step))
             # xs.append(dr_y)
             # steps.append(step)
             # print(f'iter {i} loss {losses[-1]:.2e}')
@@ -503,12 +607,20 @@ class Solver:
 
         else: # TODO: needs early stopping for infeas/unbound
 
+            import matplotlib.pyplot as plt
+            plt.semilogy(losses)
+            plt.show()
+
             raise NotImplementedError
 
         self.var_reduced = self._var_reduced_from_sy(
             self.admm_cone_project(dr_y))
         print('SQNORM RESIDUAL OF SOLUTION',
             np.linalg.norm(self.newres(self.var_reduced))**2)
+
+        # import matplotlib.pyplot as plt
+        # plt.semilogy(losses)
+        # plt.show()
 
     def identity_minus_cone_project(self, s):
         """Identity minus projection on program cone."""

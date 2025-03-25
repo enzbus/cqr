@@ -16,6 +16,7 @@
 """Unit tests of the solver class."""
 
 import time
+import logging
 import warnings
 from unittest import TestCase, main, skip
 
@@ -26,6 +27,7 @@ import scipy as sp
 from .solver import Solver, Infeasible, Unbounded
 from .cvxpy_interface import CQR
 
+logging.basicConfig(level='INFO')
 
 class Dims:
     """Program dimensions."""
@@ -517,19 +519,19 @@ class TestSolverClass(TestCase):
         program.solve(solver='SCS', verbose=True, eps=1e-14)
         return w, program
 
-    @skip("slow test, skip for now")
+    # @skip("slow test, skip for now")
     def test_program_one(self):
         for seed in range(1):
             _, prog = self._generate_problem_one(seed)
             self.check_solve_from_cvxpy(prog)
 
-    @skip("slow test, skip for now")
+    # @skip("slow test, skip for now")
     def test_program_two(self):
         for seed in range(1):
             _, prog = self._generate_problem_two(seed)
             self.check_solve_from_cvxpy(prog)
 
-    @skip("slow test, skip for now")
+    # @skip("slow test, skip for now")
     def test_po_program(self):
         for seed in range(1):
             _, prog = self._generate_portfolio_problem(seed)

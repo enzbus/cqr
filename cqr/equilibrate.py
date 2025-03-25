@@ -35,7 +35,7 @@ def _cones_separation_matrix(zero, nonneg, second_order):
 
 def hsde_ruiz_equilibration(  # pylint: disable=too-many-arguments
         matrix, b, c, dimensions, d=None, e=None, rho=1., sigma=1.,
-        eps_rows=1E-1, eps_cols=1E-1, max_iters=25):
+        eps_rows=1E-1, eps_cols=1E-1, l_norm=np.inf, max_iters=25):
     """Ruiz equilibration of problem matrices for the HSDE system.
 
     :param matrix: Problem matrix.
@@ -63,7 +63,10 @@ def hsde_ruiz_equilibration(  # pylint: disable=too-many-arguments
     :param eps_cols: Column scaling converges if the largest norm of a column
         is smaller than ``(1 + eps_cols)`` times the smallest.
     :type eps_cols: float
-    :param max_iters: Maximum number of iterations.
+    :param l_norm: Norm type, supported either ``2.0`` or ``np.inf``. Default
+        ``np.inf``.
+    :type l_norm: float
+    :param max_iters: Maximum number of iterations. Default 25.
     :type max_iters: int
 
     :returns: Diagonal equilibration vectors of rows and columns, rho, sigma,
@@ -75,6 +78,9 @@ def hsde_ruiz_equilibration(  # pylint: disable=too-many-arguments
     """
 
     cones_mapper = _cones_separation_matrix(**dimensions)
+
+    # TODO: very inefficient, just to test
+    bool_mapper = cones_mapper.todense().astype(int).astype(bool).A
     cones_sizes = cones_mapper.sum(1).A1.ravel()
 
     m, n = matrix.shape
@@ -104,19 +110,40 @@ def hsde_ruiz_equilibration(  # pylint: disable=too-many-arguments
 
     for i in range(max_iters):
 
-        norm_rows_and_c[:-1] = spl.norm(work_matrix, axis=1)**2
-        norm_rows_and_c[:-1] += work_b**2
-        norm_rows_and_c[:-1] = np.sqrt(norm_rows_and_c[:-1])
-        norm_rows_and_c[-1] = np.linalg.norm(work_c)
+        if l_norm == 2.0:
 
-        # here we apply the cones separation, each block gets equal values
-        norm_rows_and_c = np.sqrt(
-            cones_mapper.T @ ((cones_mapper @ norm_rows_and_c**2)/cones_sizes))
+            norm_rows_and_c[:-1] = spl.norm(work_matrix, axis=1)**2
+            norm_rows_and_c[:-1] += work_b**2
+            norm_rows_and_c[:-1] = np.sqrt(norm_rows_and_c[:-1])
+            norm_rows_and_c[-1] = np.linalg.norm(work_c)
 
-        norm_cols_and_b[:-1] = spl.norm(work_matrix, axis=0)**2
-        norm_cols_and_b[:-1] += work_c**2
-        norm_cols_and_b[:-1] = np.sqrt(norm_cols_and_b[:-1])
-        norm_cols_and_b[-1] = np.linalg.norm(work_b)
+            # here we apply the cones separation, each block gets equal values
+            norm_rows_and_c = np.sqrt(
+                cones_mapper.T @ ((cones_mapper @ norm_rows_and_c**2)/cones_sizes))
+
+            norm_cols_and_b[:-1] = spl.norm(work_matrix, axis=0)**2
+            norm_cols_and_b[:-1] += work_c**2
+            norm_cols_and_b[:-1] = np.sqrt(norm_cols_and_b[:-1])
+            norm_cols_and_b[-1] = np.linalg.norm(work_b)
+
+        elif l_norm == np.inf:
+            # breakpoint()
+            norm_rows_and_c[:-1] = work_matrix.max(axis=1).todense().flatten()
+            norm_rows_and_c[:-1] = np.maximum(norm_rows_and_c[:-1], work_b)
+            norm_rows_and_c[-1] = np.max(work_c)
+
+            # here we apply the cones separation, each block gets equal values
+            maxes = np.array(
+                [np.max(norm_rows_and_c[bool_mapper[i]])
+                    for i in range(len(bool_mapper))])
+            norm_rows_and_c = cones_mapper.T @ maxes
+
+            norm_cols_and_b[:-1] = work_matrix.max(axis=0).todense().flatten()
+            norm_cols_and_b[:-1] += np.maximum(norm_cols_and_b[:-1], work_c)
+            norm_cols_and_b[-1] = np.max(work_b)
+
+        else:
+            raise SyntaxError("L-norm not supported!")
 
         r1 = max(norm_rows_and_c[norm_rows_and_c > 0]
                  ) / min(norm_rows_and_c[norm_rows_and_c > 0])
