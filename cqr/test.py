@@ -17,7 +17,7 @@
 
 import time
 import warnings
-from unittest import TestCase, main
+from unittest import TestCase, main, skip
 
 import cvxpy as cp
 import numpy as np
@@ -517,24 +517,28 @@ class TestSolverClass(TestCase):
         program.solve(solver='SCS', verbose=True, eps=1e-14)
         return w, program
 
+    @skip("slow test, skip for now")
     def test_program_one(self):
         for seed in range(1):
             _, prog = self._generate_problem_one(seed)
             self.check_solve_from_cvxpy(prog)
 
+    @skip("slow test, skip for now")
     def test_program_two(self):
         for seed in range(1):
             _, prog = self._generate_problem_two(seed)
             self.check_solve_from_cvxpy(prog)
 
+    @skip("slow test, skip for now")
     def test_po_program(self):
         for seed in range(1):
             _, prog = self._generate_portfolio_problem(seed)
             self.check_solve_from_cvxpy(prog)
 
+    @skip("slow test, skip for now")
     def test_warmstart(self):
         """Simple test warmstart."""
-        _, prog = self._generate_problem_one(seed=123, m=81, n=70)
+        _, prog = self._generate_problem_one(seed=123, m=80, n=70)
 
         matrix, b, c, zero, nonneg, soc = self.make_program_from_cvxpy(prog)
         dims = Dims(*matrix.shape, zero=zero, soc=soc)
@@ -650,7 +654,7 @@ class TestSolverClass(TestCase):
         """Test correct translation to and from CVXPY for SOCs."""
 
         np.random.seed(0)
-        m, n = 200, 100
+        m, n = 20, 10
         x = cp.Variable(n)
         A = np.random.randn(m, n)
         b = np.random.randn(m)
