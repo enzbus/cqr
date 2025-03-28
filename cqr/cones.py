@@ -56,7 +56,8 @@ def project_nonsymm_soc(x, a):
     #
     # We find it by Newton search looking for the solution of this
     # s**2 = sum((z*a)**2)
-    # knowing that mu is in the open interval (-0.5, 0).
+    # knowing that the open interval (-0.5, 0) are all feasible values we
+    # start from -0.25, but we may warm-start instead.
 
     print('3')
 
@@ -66,9 +67,20 @@ def project_nonsymm_soc(x, a):
 
     # placeholder
     import scipy as sp
-    result = sp.optimize.root_scalar(loss, x0=-.25)
+
+    if t > 0:
+        mu0 = -.25
+    else:
+        mu0 = -1.
+    result = sp.optimize.root_scalar(loss, x0=mu0)
     print(result)
     mu = result.root
+
+    assert s(mu) > 0
+    assert s(mu) > t
+
+    # fails on one sample, but I can find correct solution by hand; it jumps 
+    # over a pole; need to clarify valid interval and impose it in N search
 
     return np.concatenate([[s(mu)], z(mu)])
 
@@ -85,11 +97,11 @@ if __name__ == "__main__":
         pi = project_nonsymm_soc(x, a)
 
         # check pi in cone
-        assert pi[0] - np.linalg.norm(pi[1:] * a) >= -1e6
+        assert pi[0] - np.linalg.norm(pi[1:] * a) >= -1e-6
 
         # check pi - x in dual cone
         diff = pi - x
-        assert diff[0] - np.linalg.norm(diff[1:] / a) >= -1e6
+        assert diff[0] - np.linalg.norm(diff[1:] / a) >= -1e-6
 
         # check pi orthogonal to pi - x
-        assert np.dot(pi, diff) < 1e6
+        assert abs(np.dot(pi, diff)) < 1e-6
