@@ -70,17 +70,26 @@ def project_nonsymm_soc(x, a):
 
     if t > 0:
         mu0 = -.25
+        interval = (-.5, 0.)
+        print('interval', interval)
+        result = sp.optimize.root_scalar(loss, x0=mu0, bracket=interval)
     else:
-        mu0 = -1.
-    result = sp.optimize.root_scalar(loss, x0=mu0)
+        low = -1.
+        for _ in range(100):
+            if loss(low) < 0:
+                break
+            low *= 2.
+        else:
+            raise NotImplementedError
+        interval = (low, -.5)
+        print('interval', interval)
+        result = sp.optimize.root_scalar(loss, x0=(low - 0.5)/2., bracket=interval)
+    print('obtained mu', result.root)
     print(result)
     mu = result.root
 
     assert s(mu) > 0
     assert s(mu) > t
-
-    # fails on one sample, but I can find correct solution by hand; it jumps 
-    # over a pole; need to clarify valid interval and impose it in N search
 
     return np.concatenate([[s(mu)], z(mu)])
 
@@ -89,8 +98,8 @@ if __name__ == "__main__":
 
     np.random.seed(0)
     N = 100
-    NTRIES = 100
-    for _ in range(100):
+    NTRIES = 1000
+    for _ in range(NTRIES):
         x = np.random.randn(N)
         # chosen so that 3 clauses are more or less equally likely
         a = np.random.uniform(0, 1e-1 if _ % 2 == 0 else 1000., N-1)
