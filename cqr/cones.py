@@ -56,8 +56,10 @@ def project_nonsymm_soc(x, a):
     #
     # We find it by Newton search looking for the solution of this
     # s**2 = sum((z*a)**2)
-    # knowing that the open interval (-0.5, 0) are all feasible values we
-    # start from -0.25, but we may warm-start instead.
+    # mu is < 0; it has a pole at -.5; it is either in (-.5, 0.) or
+    # in (-inf, -.5), both open intervals, depending on sign of t; might make
+    # sense to re-formulate the problem since we lose accuracy if mu is very
+    # close to the pole.
 
     print('3')
 
@@ -72,7 +74,9 @@ def project_nonsymm_soc(x, a):
         mu0 = -.25
         interval = (-.5, 0.)
         print('interval', interval)
-        result = sp.optimize.root_scalar(loss, x0=mu0, bracket=interval)
+        result = sp.optimize.root_scalar(loss, x0=mu0, bracket=interval,
+            # rtol is the minimum allowed by impl
+            xtol=np.finfo(float).eps, rtol=4*np.finfo(float).eps)
     else:
         low = -1.
         for _ in range(100):
@@ -83,8 +87,11 @@ def project_nonsymm_soc(x, a):
             raise NotImplementedError
         interval = (low, -.5)
         print('interval', interval)
-        result = sp.optimize.root_scalar(loss, x0=(low - 0.5)/2., bracket=interval)
+        result = sp.optimize.root_scalar(loss, x0=(low - 0.5)/2., bracket=interval,
+            # rtol is the minimum allowed by impl
+            xtol=np.finfo(float).eps, rtol=4*np.finfo(float).eps)
     print('obtained mu', result.root)
+    print('accuracy condition', loss(result.root))
     print(result)
     mu = result.root
 
@@ -105,12 +112,14 @@ if __name__ == "__main__":
         a = np.random.uniform(0, 1e-1 if _ % 2 == 0 else 1000., N-1)
         pi = project_nonsymm_soc(x, a)
 
+        ACCURACY = 1e-12 # about the max we achieve with this prototype
+
         # check pi in cone
-        assert pi[0] - np.linalg.norm(pi[1:] * a) >= -1e-6
+        assert pi[0] - np.linalg.norm(pi[1:] * a) >= -ACCURACY
 
         # check pi - x in dual cone
         diff = pi - x
-        assert diff[0] - np.linalg.norm(diff[1:] / a) >= -1e-6
+        assert diff[0] - np.linalg.norm(diff[1:] / a) >= -ACCURACY
 
         # check pi orthogonal to pi - x
-        assert abs(np.dot(pi, diff)) < 1e-6
+        assert abs(np.dot(pi, diff)) < ACCURACY
