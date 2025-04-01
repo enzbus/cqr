@@ -27,6 +27,8 @@ import scipy as sp
 from .solver import Solver, Infeasible, Unbounded
 from .cvxpy_interface import CQR
 
+from .test_ql_transform import TestQLTransform
+
 logging.basicConfig(level='INFO')
 
 class Dims:
