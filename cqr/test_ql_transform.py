@@ -25,7 +25,7 @@ from .ql_transform import (
 
 class TestQLTransform(TestCase):
     """Unit tests for the QL transform.
-    
+
     Can subclass by overriding setUpClass for testing corner cases.
     """
 
@@ -77,17 +77,16 @@ class TestQLTransform(TestCase):
         ])
 
     def test_transform_consistent(self):
-        """Run the transform, check consistent."""
+        """Check consistent."""
         scaler = sp.linalg.block_diag(np.linalg.inv(self.l), np.eye(self.m))
         self.assertAllClose(scaler.T @ self.Q_original @ scaler, self.Q_transf)
 
     def test_var_transform_inverts(self):
-        """Test variables transform inverts and preserves subspace."""
+        """Test variables transform inverts."""
 
         tau_init, u1_init, u2_init = self.unpack_hsde_var(self.u)
         kappa_init, v1_init, v2_init = self.unpack_hsde_var(self.v)
 
-        # FORWARD AND BACKWARD TRANSFORMS
         u1_transf, tau_transf, v1_transf, kappa_transf = forward_transform_ql(
             u1_init, tau_init, v1_init, kappa_init, self.n, self.l)
         u1_orig, tau_orig, v1_orig, kappa_orig = backward_transform_ql(
@@ -102,10 +101,11 @@ class TestQLTransform(TestCase):
     def test_subspace_preserved(self):
         """Test subspace is preserved by transform."""
 
+        self.assertAllClose(self.Q_original @ self.u, self.v)
+
         tau_init, u1_init, u2_init = self.unpack_hsde_var(self.u)
         kappa_init, v1_init, v2_init = self.unpack_hsde_var(self.v)
 
-        # FORWARD AND BACKWARD TRANSFORMS
         u1_transf, tau_transf, v1_transf, kappa_transf = forward_transform_ql(
             u1_init, tau_init, v1_init, kappa_init, self.n, self.l)
 

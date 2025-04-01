@@ -28,6 +28,8 @@ from .solver import Solver, Infeasible, Unbounded
 from .cvxpy_interface import CQR
 
 from .test_ql_transform import TestQLTransform
+from .test_cones import TestCones
+
 
 logging.basicConfig(level='INFO')
 
