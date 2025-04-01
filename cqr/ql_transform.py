@@ -18,7 +18,8 @@
 In HSDE, with (u1, u2, tau) and (v1, v2, kappa) being the two variables, this
 transformation mixes (u1, tau) and (v1, kappa). Conic projection has to keep
 that into account, should be relatively easy since transformation is a
-triangular matrix. The u2, v2 variables are untouched.
+triangular matrix. Turns out the cone is unchanged. The u2, v2 variables are
+untouched.
 """
 import numpy as np
 import scipy as sp
