@@ -29,6 +29,7 @@ from .cvxpy_interface import CQR
 
 from .test_ql_transform import TestQLTransform
 from .test_cones import TestCones
+from .test_linspace_project import TestLinspaceProject
 
 
 logging.basicConfig(level='INFO')

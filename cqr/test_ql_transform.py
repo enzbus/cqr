@@ -52,7 +52,7 @@ class TestQLTransform(TestCase):
         cls.v = cls.Q_original @ cls.u
 
         # run transform
-        cls.A_transf, cls.c_transf, cls.b_transf, cls.l = data_ql_transform(
+        cls.A_transf, cls.c_transf, cls.b_transf, (cls.orth_q, cls.scale), cls.l = data_ql_transform(
             cls.A, cls.b, cls.c)
         cls.Q_transf = cls.build_Q(cls.A_transf, cls.b_transf, cls.c_transf)
 

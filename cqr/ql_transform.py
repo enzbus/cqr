@@ -39,14 +39,13 @@ def data_ql_transform(A: np.array, b: np.array, c: np.array):
     l = _r[::-1, ::-1]
     scale = l[0, 0] # need guard here if 0; when does that happen?
     l /= scale
-    q *= scale
     assert np.allclose(
-        sp.linalg.solve_triangular(l.T, matrix.T, lower=False), q.T)
+        sp.linalg.solve_triangular(l.T, matrix.T, lower=False), q.T * scale)
     assert np.isclose(l[0, 0], 1.)
-    A_transf = q[1:, 1:]
-    c_transf = q[0, 1:]
-    b_transf = -q[1:, 0]
-    return A_transf, c_transf, b_transf, l
+    A_transf = q[1:, 1:] * scale
+    c_transf = q[0, 1:] * scale
+    b_transf = -q[1:, 0] * scale
+    return A_transf, c_transf, b_transf, (q, scale), l
 
 def forward_transform_ql(
         u1_init, tau_init, v1_init, kappa_init, n, l):
@@ -105,7 +104,7 @@ if __name__ == '__main__':
         plt.colorbar()
         plt.title('HSDE_Q MATRIX BEFORE TRANSFORM')
 
-    A_transf, c_transf, b_transf, l = data_ql_transform(A, b, c)
+    A_transf, c_transf, b_transf, _, l = data_ql_transform(A, b, c)
 
     # BUILD TRANSFORMED HSDE_Q (my ordering)
     HSDE_Q = np.block([
