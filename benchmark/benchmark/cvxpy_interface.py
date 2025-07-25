@@ -61,12 +61,15 @@ class CvxpyWrapper(ConicSolver):
             nonneg=data['dims'].nonneg, soc=data['dims'].soc)
         return {
             'status': solver.status, 'value': np.dot(solver.x, data['c']),
-            'x': solver.x, 'y': solver.y}
+            'x': solver.x, 'y': solver.y,
+            'solution_qualities': solver.solution_qualities}
 
     def invert(self, solution, inverse_data):
         """CVXPY interface to propagate solution back."""
 
         attr = {}
+        attr[s.EXTRA_STATS] = {
+            'solution_qualities': solution['solution_qualities']}
 
         if solution['status'] == 'Optimal':
 
@@ -90,6 +93,7 @@ class CvxpyWrapper(ConicSolver):
             dual_vars = {}
             dual_vars.update(eq_dual_vars)
             dual_vars.update(ineq_dual_vars)
+
             return Solution(status, opt_val, primal_vars, dual_vars, attr)
 
         if solution['status'] == 'Infeasible':

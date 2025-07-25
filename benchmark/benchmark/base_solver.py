@@ -78,7 +78,7 @@ class BaseSolver:
         self.hsde_q = self.build_hsde_q()
 
         # in these benchmarks we only deal with feasible programs
-        self.status = "optimal"
+        self.status = "Optimal"
 
         self.prepare_loop()
 
@@ -161,10 +161,10 @@ class BaseSolver:
         :returns: Solution quality.
         :rtype: float
         """
-        u = np.concatenate([self.x, self.y, 1.])
+        u = np.concatenate([self.x, self.y, [1.]])
         v = self.hsde_q @ u
         u_cone_proj = self.project_u(u)
-        v_cone_proj = self.project_v(u)
+        v_cone_proj = self.project_v(v)
 
         # very basic metric of solution quality, relies on each test program
         # from same class being similarly scaled

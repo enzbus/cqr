@@ -36,25 +36,33 @@ class SimpleBFGS(BaseSolver):
         self.u[:] = current_u
         self.obtain_x_and_y()
         self.solution_qualities.append(self.check_solution_quality())
+        if self.solution_qualities[-1] < self.epsilon_convergence:
+            raise StopIteration
 
     def _func_gradient(self, u):
         """Simple objective and gradient."""
 
         v = self.hsde_q @ u
         u_cone_proj = self.project_u(u)
-        v_cone_proj = self.project_v(u)
+        v_cone_proj = self.project_v(v)
 
         obj = 0.5 * (
             np.linalg.norm(u-u_cone_proj)**2
             + np.linalg.norm(v-v_cone_proj)**2)
 
-        grad = ...
+        return obj
+
+        # grad = ...
 
     def loop(self):
         """Either use this default loop, or redefine based on your needs."""
         result = opt.fmin_l_bfgs_b(
-            func=self._func_gradient, x0=np.copy(self.u), approx_grad=False,
+            func=self._func_gradient, x0=np.copy(self.u), approx_grad=True,
             callback=self._callback, maxiter=self.max_iterations)
+        # breakpoint()
+        result[2].pop('grad')
+        print(
+            'hsde var', result[0][-1], 'obj.', result[1], 'stats', result[2])
         self.u[:] = result[0]
         self.obtain_x_and_y()
 

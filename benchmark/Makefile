@@ -5,7 +5,10 @@ env:
 	env/bin/pip install numpy scipy cvxpy pylint autopep8
 
 lint:
-	env/bin/pylint benchmark
+	env/bin/python -m pylint benchmark
 	
 fix:
-	env/bin/autopep8 --in-place benchmark/*.py 
+	env/bin/python -m autopep8 --in-place benchmark/*.py 
+
+test:
+	env/bin/python -m benchmark.test
