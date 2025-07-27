@@ -109,9 +109,12 @@ class BaseSolver:
     def loop(self):
         """Either use this default loop, or redefine based on your needs."""
         self.prepare_loop()
-        for _ in range(self.max_iterations):
-            self.callback_iterate()
-            self.iterate()
+        try:
+            for _ in range(self.max_iterations):
+                self.callback_iterate()
+                self.iterate()
+        except StopIteration:
+            pass
         self.obtain_x_and_y()
 
     def obtain_x_and_y(self):

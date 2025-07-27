@@ -26,10 +26,9 @@ from ..base_solver import BaseSolver
 class SimpleBFGS(BaseSolver):
     """L-BFGS applied directly to solution metric."""
 
-    # class constants possibly overwritten by subclasses
-    # this one unused
-    # epsilon_convergence = 1e-12
-    # max_iterations = 100000
+    # class constants
+    epsilon_convergence = 1e-6
+    max_iterations = 1e8
 
     def _callback(self, current_u):
         """Changed logic from base."""
@@ -37,6 +36,7 @@ class SimpleBFGS(BaseSolver):
         self.obtain_x_and_y()
         self.solution_qualities.append(self.check_solution_quality())
         if self.solution_qualities[-1] < self.epsilon_convergence:
+            # thankfully Scipy handles this
             raise StopIteration
 
     def _func_gradient(self, u):
@@ -50,16 +50,16 @@ class SimpleBFGS(BaseSolver):
             np.linalg.norm(u-u_cone_proj)**2
             + np.linalg.norm(v-v_cone_proj)**2)
 
-        return obj
+        grad = u - u_cone_proj + self.hsde_q.T @ (v - v_cone_proj)
 
-        # grad = ...
+        return obj, grad
 
     def loop(self):
         """Either use this default loop, or redefine based on your needs."""
         result = opt.fmin_l_bfgs_b(
-            func=self._func_gradient, x0=np.copy(self.u), approx_grad=True,
-            callback=self._callback, maxiter=self.max_iterations)
-        # breakpoint()
+            func=self._func_gradient, x0=np.copy(self.u), approx_grad=False,
+            callback=self._callback, maxiter=self.max_iterations, maxfun=1e10,
+            factr=0.0, pgtol=0.0)
         result[2].pop('grad')
         print(
             'hsde var', result[0][-1], 'obj.', result[1], 'stats', result[2])

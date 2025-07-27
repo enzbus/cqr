@@ -8,7 +8,7 @@ lint:
 	env/bin/python -m pylint benchmark
 	
 fix:
-	env/bin/python -m autopep8 --in-place benchmark/*.py 
+	env/bin/python -m autopep8 --in-place benchmark/*.py benchmark/*/*.py
 
 test:
 	env/bin/python -m benchmark.test

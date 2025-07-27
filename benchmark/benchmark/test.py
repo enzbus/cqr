@@ -19,10 +19,13 @@ import logging
 from unittest import TestCase, main
 
 import cvxpy as cp
+import matplotlib.pyplot as plt
 import numpy as np
 
 from .cvxpy_interface import CvxpyWrapper
 from .implementations.simple_bfgs import SimpleBFGS
+from .implementations.simple_scs import SimpleSCS
+
 
 logging.basicConfig(level='INFO')
 
@@ -91,16 +94,28 @@ class Benchmark(TestCase):
     # @skip("slow test, skip for now")
     def test_program_two(self):
         """Run second program class."""
-        for seed in range(1):
+        solution_quality_curves = []
+        for seed in range(10):
             _, prog = self._generate_problem_two(seed)
-            self.solve_program(prog)
+            solution_quality_curves.append(self.solve_program(prog))
+            plt.semilogy(solution_quality_curves[-1])
+        plt.show()
+        # import matplotlib.pyplot as plt
+        # plt.semilogy(sol_qual)
+        # plt.show()
 
     # @skip("slow test, skip for now")
     def test_po_program(self):
         """Run portf opt class."""
-        for seed in range(1):
+        solution_quality_curves = []
+        for seed in range(10):
             _, prog = self._generate_portfolio_problem(seed)
-            self.solve_program(prog)
+            solution_quality_curves.append(self.solve_program(prog))
+            plt.semilogy(solution_quality_curves[-1])
+        plt.show()
+        # import matplotlib.pyplot as plt
+        # plt.semilogy(sol_qual)
+        # plt.show()
 
     def solve_program(self, prog):
         """Solve given CVXPY program.
@@ -108,10 +123,17 @@ class Benchmark(TestCase):
         :param prog: CVXPY Problem object.
         :type prog: cp.Problem
         """
-        prog.solve(solver=CvxpyWrapper(solver_class=SimpleBFGS))
-        sol_qual = np.array(
-            prog.solver_stats.extra_stats['solution_qualities'])
-        print(sol_qual)
+        for solver_class in [
+                #SimpleBFGS
+                SimpleSCS]:
+            print('solver class', solver_class)
+            prog.solve(solver=CvxpyWrapper(solver_class=solver_class))
+            sol_qual = np.array(
+                prog.solver_stats.extra_stats['solution_qualities'])
+            return sol_qual
+            # import matplotlib.pyplot as plt
+            # plt.semilogy(sol_qual)
+            # plt.show()
 
 if __name__ == '__main__':  # pragma: no cover
     main()
