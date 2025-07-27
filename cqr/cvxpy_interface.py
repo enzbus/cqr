@@ -46,6 +46,13 @@ class CQR(ConicSolver):
     def name(self):
         return "CQR"
 
+    def cite(self):
+        """Violation of semver in CVXPY, introduced API break with this.
+
+        https://github.com/cvxpy/cvxpy/issues/2876
+        """
+        raise NotImplementedError
+
     def solve_via_data(
             self, data: dict, warm_start: bool, verbose: bool, solver_opts,
             solver_cache=None):

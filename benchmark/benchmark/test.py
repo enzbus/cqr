@@ -60,7 +60,7 @@ class Benchmark(TestCase):
         return x, program
 
     @staticmethod
-    def _generate_portfolio_problem(seed, n=10):
+    def _generate_portfolio_problem(seed, n=100):
         np.random.seed(seed)
         w = cp.Variable(n)
         w0 = np.random.randn(n)
@@ -73,13 +73,25 @@ class Benchmark(TestCase):
         eival *= 1e-4
         eival = eival[-n//10:]
 
+        # make it feasible; reduce w0 size so that it's in risk cone
+        risk = cp.sum_squares((np.diag(np.sqrt(eival))
+                @ eivec[:, -n//10:].T) @ w)
+        risk_limit = 0.00005
+
+        for _ in range(10):
+            w.value = w0
+            if risk.value < risk_limit:
+                break
+            w0 /= 2.
+        else:
+            raise ValueError("Increase counter, wasn't enough.")
+
         # Sigma = eivec @ np.diag(eival) @ eivec.T
         objective = w.T @ mu + 1e-5 * cp.norm1(w-w0)
         constraints = [#w >=0, #w<=w_max,
             cp.sum(w) == 0, cp.norm1(w-w0) <= 0.05,
             cp.norm1(w) <= 1,
-            cp.sum_squares((np.diag(np.sqrt(eival))
-                @ eivec[:, -n//10:].T) @ w) <= 0.00005]
+            risk <= risk_limit]
         program = cp.Problem(cp.Minimize(objective), constraints)
         # program.solve(solver='SCS', verbose=True, eps=1e-14)
         return w, program
@@ -95,7 +107,7 @@ class Benchmark(TestCase):
     def test_program_two(self):
         """Run second program class."""
         solution_quality_curves = []
-        for seed in range(10):
+        for seed in range(200):
             _, prog = self._generate_problem_two(seed)
             solution_quality_curves.append(self.solve_program(prog))
             plt.semilogy(solution_quality_curves[-1])
@@ -108,7 +120,7 @@ class Benchmark(TestCase):
     def test_po_program(self):
         """Run portf opt class."""
         solution_quality_curves = []
-        for seed in range(10):
+        for seed in range(200):
             _, prog = self._generate_portfolio_problem(seed)
             solution_quality_curves.append(self.solve_program(prog))
             plt.semilogy(solution_quality_curves[-1])

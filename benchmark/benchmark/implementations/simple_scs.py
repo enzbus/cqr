@@ -23,6 +23,10 @@ from ..base_solver import BaseSolver
 class SimpleSCS(BaseSolver):
     """Simple implementation of original SCS (HSDE based)."""
 
+    # class constants possibly overwritten by subclasses
+    epsilon_convergence = 1e-12
+    max_iterations = 1000000
+
     def prepare_loop(self):
         """Define anything we need to re-use."""
         self.matrix_solve = sp.sparse.linalg.splu(
