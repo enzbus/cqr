@@ -1,8 +1,8 @@
-.PHONY: env lint fix
+.PHONY: env lint fix scs bfgs
 
 env:
 	python -m venv --system-site-packages env
-	env/bin/pip install numpy scipy cvxpy pylint autopep8
+	env/bin/pip install numpy scipy cvxpy pylint autopep8 matplotlib
 
 lint:
 	env/bin/python -m pylint benchmark
@@ -10,5 +10,8 @@ lint:
 fix:
 	env/bin/python -m autopep8 --in-place benchmark/*.py benchmark/*/*.py
 
-test:
-	env/bin/python -m benchmark.test
+scs:
+	SOLVER_CLASS=SimpleSCS env/bin/python -m benchmark.test
+
+bfgs:
+	SOLVER_CLASS=SimpleBFGS env/bin/python -m benchmark.test

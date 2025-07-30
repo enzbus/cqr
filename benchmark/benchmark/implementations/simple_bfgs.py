@@ -27,8 +27,8 @@ class SimpleBFGS(BaseSolver):
     """L-BFGS applied directly to solution metric."""
 
     # class constants
-    epsilon_convergence = 1e-6
-    max_iterations = 1e8
+    epsilon_convergence = 1e-8
+    max_iterations = 1000000
 
     def _callback(self, current_u):
         """Changed logic from base."""
@@ -65,6 +65,7 @@ class SimpleBFGS(BaseSolver):
             'hsde var', result[0][-1], 'obj.', result[1], 'stats', result[2])
         self.u[:] = result[0]
         self.obtain_x_and_y()
+        self.solution_qualities.append(self.check_solution_quality())
 
     def obtain_x_and_y(self):
         """Redefine if/as needed."""

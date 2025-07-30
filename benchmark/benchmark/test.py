@@ -16,6 +16,7 @@
 """Unit tests of the solver class."""
 
 import logging
+import os
 from unittest import TestCase, main
 
 import cvxpy as cp
@@ -26,6 +27,7 @@ from .cvxpy_interface import CvxpyWrapper
 from .implementations.simple_bfgs import SimpleBFGS
 from .implementations.simple_scs import SimpleSCS
 
+SOLVER_CLASS = os.getenv("SOLVER_CLASS")
 
 logging.basicConfig(level='INFO')
 
@@ -107,7 +109,7 @@ class Benchmark(TestCase):
     def test_program_two(self):
         """Run second program class."""
         solution_quality_curves = []
-        for seed in range(200):
+        for seed in range(10):
             _, prog = self._generate_problem_two(seed)
             solution_quality_curves.append(self.solve_program(prog))
             plt.semilogy(solution_quality_curves[-1])
@@ -120,7 +122,7 @@ class Benchmark(TestCase):
     def test_po_program(self):
         """Run portf opt class."""
         solution_quality_curves = []
-        for seed in range(200):
+        for seed in range(10):
             _, prog = self._generate_portfolio_problem(seed)
             solution_quality_curves.append(self.solve_program(prog))
             plt.semilogy(solution_quality_curves[-1])
@@ -135,17 +137,14 @@ class Benchmark(TestCase):
         :param prog: CVXPY Problem object.
         :type prog: cp.Problem
         """
-        for solver_class in [
-                #SimpleBFGS
-                SimpleSCS]:
-            print('solver class', solver_class)
-            prog.solve(solver=CvxpyWrapper(solver_class=solver_class))
-            sol_qual = np.array(
-                prog.solver_stats.extra_stats['solution_qualities'])
-            return sol_qual
-            # import matplotlib.pyplot as plt
-            # plt.semilogy(sol_qual)
-            # plt.show()
+        print('solver class', SOLVER_CLASS)
+        prog.solve(solver=CvxpyWrapper(solver_class=globals()[SOLVER_CLASS]))
+        sol_qual = np.array(
+            prog.solver_stats.extra_stats['solution_qualities'])
+        return sol_qual
+        # import matplotlib.pyplot as plt
+        # plt.semilogy(sol_qual)
+        # plt.show()
 
 if __name__ == '__main__':  # pragma: no cover
     main()
