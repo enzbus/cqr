@@ -28,7 +28,7 @@ class SimpleBFGS(BaseSolver):
 
     # class constants
     epsilon_convergence = 1e-8
-    max_iterations = 1000000
+    max_iterations = 100000
 
     def _callback(self, current_u):
         """Changed logic from base."""

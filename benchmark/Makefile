@@ -1,8 +1,9 @@
-.PHONY: env lint fix scs bfgs
+.PHONY: env lint fix scs bfgs hsde
 
 env:
 	python -m venv --system-site-packages env
 	env/bin/pip install numpy scipy cvxpy pylint autopep8 matplotlib
+	mkdir results
 
 lint:
 	env/bin/python -m pylint benchmark
@@ -15,3 +16,6 @@ scs:
 
 bfgs:
 	SOLVER_CLASS=SimpleBFGS env/bin/python -m benchmark.test
+
+hsde:
+	SOLVER_CLASS=SimpleHSDE env/bin/python -m benchmark.test

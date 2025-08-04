@@ -20,6 +20,7 @@
 
 import numpy as np
 import scipy as sp
+import tqdm
 
 
 class BaseSolver:
@@ -110,7 +111,7 @@ class BaseSolver:
         """Either use this default loop, or redefine based on your needs."""
         self.prepare_loop()
         try:
-            for _ in range(self.max_iterations):
+            for _ in tqdm.tqdm(range(self.max_iterations)):
                 self.callback_iterate()
                 self.iterate()
         except StopIteration:

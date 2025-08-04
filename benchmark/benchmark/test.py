@@ -15,19 +15,25 @@
 # CQR. If not, see <https://www.gnu.org/licenses/>.
 """Unit tests of the solver class."""
 
+import gzip
 import logging
 import os
-from unittest import TestCase, main
+from unittest import TestCase, main #, skip
+
+# pylint: disable=unused-import
 
 import cvxpy as cp
-import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 from .cvxpy_interface import CvxpyWrapper
 from .implementations.simple_bfgs import SimpleBFGS
 from .implementations.simple_scs import SimpleSCS
+from .implementations.simple_hsde import SimpleHSDE
+
 
 SOLVER_CLASS = os.getenv("SOLVER_CLASS")
+NUM_INSTANCES = 1000
 
 logging.basicConfig(level='INFO')
 
@@ -101,50 +107,39 @@ class Benchmark(TestCase):
     # @skip("slow test, skip for now")
     def test_program_one(self):
         """Run first program class."""
-        for seed in range(1):
-            _, prog = self._generate_problem_one(seed)
-            self.solve_program(prog)
+        self._run_benchmark(self._generate_problem_one)
 
     # @skip("slow test, skip for now")
     def test_program_two(self):
         """Run second program class."""
-        solution_quality_curves = []
-        for seed in range(10):
-            _, prog = self._generate_problem_two(seed)
-            solution_quality_curves.append(self.solve_program(prog))
-            plt.semilogy(solution_quality_curves[-1])
-        plt.show()
-        # import matplotlib.pyplot as plt
-        # plt.semilogy(sol_qual)
-        # plt.show()
+        self._run_benchmark(self._generate_problem_two)
 
     # @skip("slow test, skip for now")
     def test_po_program(self):
         """Run portf opt class."""
-        solution_quality_curves = []
-        for seed in range(10):
-            _, prog = self._generate_portfolio_problem(seed)
-            solution_quality_curves.append(self.solve_program(prog))
-            plt.semilogy(solution_quality_curves[-1])
-        plt.show()
-        # import matplotlib.pyplot as plt
-        # plt.semilogy(sol_qual)
-        # plt.show()
+        self._run_benchmark(self._generate_portfolio_problem)
 
-    def solve_program(self, prog):
-        """Solve given CVXPY program.
-        
-        :param prog: CVXPY Problem object.
-        :type prog: cp.Problem
-        """
+    def _run_benchmark(self, program_generator):
+        """Run many instances, save history of solution qualities."""
         print('solver class', SOLVER_CLASS)
-        prog.solve(solver=CvxpyWrapper(solver_class=globals()[SOLVER_CLASS]))
-        sol_qual = np.array(
-            prog.solver_stats.extra_stats['solution_qualities'])
-        return sol_qual
-        # import matplotlib.pyplot as plt
-        # plt.semilogy(sol_qual)
-        # plt.show()
+        solution_quality_curves = []
+        for seed in range(NUM_INSTANCES):
+            _, prog = program_generator(seed)
+            prog.solve(solver=CvxpyWrapper(
+                solver_class=globals()[SOLVER_CLASS]))
+            sol_qual = np.array(
+                prog.solver_stats.extra_stats['solution_qualities'])
+            solution_quality_curves.append(sol_qual)
+
+        # very rough
+        sol_quals = pd.DataFrame(solution_quality_curves).T.ffill()
+
+        # shouldn't get too heavy on disk
+        with gzip.open(
+            f"results/{SOLVER_CLASS}_"
+            f"{program_generator.__name__.split('_generate_')[1]}.npy.gz",
+                "w") as f:
+            np.save(file=f, arr=sol_quals.values)
 
 if __name__ == '__main__':  # pragma: no cover
     main()
