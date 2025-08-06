@@ -36,6 +36,7 @@ for result_file in list(Path('results/').glob(f"{solver}*.npy.gz")):
     plt.figure()
     with gzip.open(result_file, "r") as f:
         sol_quals = pd.DataFrame(np.load(file=f))
+    sol_quals = sol_quals.fillna(np.inf)
     program_name = "_".join(result_file.stem.split('.')[0].split('_')[1:])
     plt.semilogy(sol_quals.quantile(.5, axis=1).values, label=solver + ", 50%")
     # plt.semilogy(sol_quals.quantile(.75, axis=1))

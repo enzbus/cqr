@@ -30,7 +30,7 @@ class SimpleHSDECvxpy(BaseSolver):
 
     # class constants possibly overwritten by subclasses
     epsilon_convergence = 1e-12
-    max_iterations = 200000
+    max_iterations = 100000
 
     def base_prepare(self):
         """Base prepare loop."""

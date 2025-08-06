@@ -18,10 +18,13 @@
 # pylint: disable=too-many-instance-attributes,too-many-positional-arguments,
 # pylint: disable=too-many-arguments
 
+import logging
+
 import numpy as np
 import scipy as sp
-import tqdm
+# import tqdm
 
+logger = logging.getLogger()
 
 class BaseSolver:
     """Solver class.
@@ -66,7 +69,7 @@ class BaseSolver:
         self.verbose = verbose
 
         if self.verbose:
-            print(
+            logger.info(
                 f'Program: m={self.m}, n={self.n}, nnz={self.matrix.nnz},'
                 f' zero={self.zero}, nonneg={self.nonneg}, soc={self.soc}')
 
@@ -92,6 +95,15 @@ class BaseSolver:
     # ELEMENTS TO POSSIBLY REDEFINE
     ###
 
+    # NOTE! What you need to do:
+    # Make sure self.obtain_x_and_y() returns the actual x and y you'd return
+    # to the user (scaling, ...). Ideally use the self.callback_iterate
+    # unchanged. If you can use the self.loop unchanged. Do whatever in the
+    # self.prepare_loop and self.iterate. So, only relevant variables for BM
+    # logic are self.x and self.y, we do not deal here with self.u, self.v,
+    # or self.z. ALSO do not modify self.hsde_q, which we use to compute
+    # solution quality.
+
     # class constants possibly overwritten by subclasses
     epsilon_convergence = 1e-12
     max_iterations = 100000
@@ -104,14 +116,16 @@ class BaseSolver:
         self.obtain_x_and_y()
         self.solution_qualities.append(self.check_solution_quality())
         if self.solution_qualities[-1] < self.epsilon_convergence:
-            print(f'Converged in {len(self.solution_qualities)} iterations!')
+            logger.info(
+                f'Converged in {len(self.solution_qualities)} iterations!')
             raise StopIteration
 
     def loop(self):
         """Either use this default loop, or redefine based on your needs."""
         self.prepare_loop()
         try:
-            for _ in tqdm.tqdm(range(self.max_iterations)):
+            # for _ in tqdm.tqdm(range(self.max_iterations)):
+            for _ in range(self.max_iterations):
                 self.callback_iterate()
                 self.iterate()
         except StopIteration:

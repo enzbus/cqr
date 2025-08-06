@@ -25,17 +25,19 @@ from unittest import TestCase, main #, skip
 import cvxpy as cp
 import numpy as np
 import pandas as pd
+import tqdm
 
 from .cvxpy_interface import CvxpyWrapper
 from .implementations.simple_bfgs import SimpleBFGS
-from .implementations.simple_scs import SimpleSCS
+from .implementations.simple_scs import SimpleSCS, EquilibratedSCS
 from .implementations.simple_hsde import SimpleHSDE
+from .implementations.simple_cqr import SimpleCQR
 
 
 SOLVER_CLASS = os.getenv("SOLVER_CLASS")
 NUM_INSTANCES = 1000
 
-logging.basicConfig(level='INFO')
+# logging.basicConfig(level='INFO')
 
 class Benchmark(TestCase):
     """Unit tests of the solver class."""
@@ -123,7 +125,8 @@ class Benchmark(TestCase):
         """Run many instances, save history of solution qualities."""
         print('solver class', SOLVER_CLASS)
         solution_quality_curves = []
-        for seed in range(NUM_INSTANCES):
+        print("PROGRAM", program_generator.__name__)
+        for seed in tqdm.tqdm(range(NUM_INSTANCES)):
             _, prog = program_generator(seed)
             prog.solve(solver=CvxpyWrapper(
                 solver_class=globals()[SOLVER_CLASS]))
