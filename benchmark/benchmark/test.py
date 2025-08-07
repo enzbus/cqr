@@ -29,9 +29,11 @@ import tqdm
 
 from .cvxpy_interface import CvxpyWrapper
 from .implementations.simple_bfgs import SimpleBFGS
-from .implementations.simple_scs import SimpleSCS, EquilibratedSCS
+from .implementations.simple_scs import (
+    SimpleSCS, EquilibratedSCS, DouglasRachfordSCS)
 from .implementations.simple_hsde import SimpleHSDE
 from .implementations.simple_cqr import SimpleCQR
+from .implementations.lm_scs import LevMarSCS
 
 
 SOLVER_CLASS = os.getenv("SOLVER_CLASS")

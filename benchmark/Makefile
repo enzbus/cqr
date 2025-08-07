@@ -2,7 +2,7 @@
 
 env:
 	python -m venv --system-site-packages env
-	env/bin/pip install numpy scipy cvxpy pylint autopep8 matplotlib
+	env/bin/pip install numpy scipy cvxpy pylint autopep8 matplotlib pandas tqdm
 	# we install CQR to avoid copy-pasting too much code
 	env/bin/python -m pip install -e ..
 	mkdir results
@@ -18,6 +18,12 @@ scs:
 
 eqscs:
 	SOLVER_CLASS=EquilibratedSCS env/bin/python -m benchmark.test
+
+drscs:
+	SOLVER_CLASS=DouglasRachfordSCS env/bin/python -m benchmark.test
+
+lmscs:
+	SOLVER_CLASS=LevMarSCS env/bin/python -m benchmark.test
 
 bfgs:
 	SOLVER_CLASS=SimpleBFGS env/bin/python -m benchmark.test

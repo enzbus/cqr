@@ -64,6 +64,24 @@ class SimpleSCS(BaseSolver):
         self.x = self.u[:self.n] / self.u[-1]
         self.y = self.u[self.n:-1] / self.u[-1]
 
+class DouglasRachfordSCS(SimpleSCS):
+    """Simple rewriting using explicit DR."""
+
+    def prepare_loop(self):
+        """Define anything we need to re-use."""
+        self.matrix_solve = sp.sparse.linalg.splu(
+            sp.sparse.eye(self.m + self.n + 1, format="csc")
+            + getattr(self, self.hsde_q_used))
+        self.z = np.zeros(self.n + self.m + 1)
+        self.z[-1] = 1.
+        self.u = np.copy(self.z)
+
+    def iterate(self):
+        """Do one iteration."""
+        self.u[:] = self.project_u(self.z)
+        self.z[:] = self.matrix_solve.solve(
+            2 * self.u - self.z) - self.u + self.z
+
 
 class EquilibratedSCS(SimpleSCS):
     """With Ruiz equilibration."""
