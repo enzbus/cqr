@@ -18,7 +18,7 @@
 import gzip
 import logging
 import os
-from unittest import TestCase, main #, skip
+from unittest import TestCase, main, skip, skipIf
 
 # pylint: disable=unused-import
 
@@ -29,11 +29,10 @@ import tqdm
 
 from .cvxpy_interface import CvxpyWrapper
 from .implementations.simple_bfgs import SimpleBFGS
-from .implementations.simple_scs import (
-    SimpleSCS, EquilibratedSCS, DouglasRachfordSCS)
+from .implementations.simple_scs import *
 from .implementations.simple_hsde import SimpleHSDE
-from .implementations.simple_cqr import SimpleCQR
-from .implementations.lm_scs import LevMarSCS
+from .implementations.simple_cqr import SimpleCQR #, UnscaledCQR
+from .implementations.lm_scs import *
 
 
 SOLVER_CLASS = os.getenv("SOLVER_CLASS")
@@ -119,6 +118,8 @@ class Benchmark(TestCase):
         self._run_benchmark(self._generate_problem_two)
 
     # @skip("slow test, skip for now")
+    @skipIf(issubclass(globals()[SOLVER_CLASS], SimpleSHR),
+        "SOCs not supported with those prototypes.")
     def test_po_program(self):
         """Run portf opt class."""
         self._run_benchmark(self._generate_portfolio_problem)

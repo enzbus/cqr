@@ -18,26 +18,14 @@
 import numpy as np
 import scipy as sp
 
-from .simple_scs import SimpleSCS
+from .simple_scs import DouglasRachfordSCS
 from cqr.ql_transform import data_ql_transform
 
 
-class SimpleCQR(SimpleSCS):
+class SimpleCQR(DouglasRachfordSCS):
     """With "Abc" QR factorization."""
 
     hsde_q_used = "abc_cqr_q"
-
-    # # to test model
-    # def _build_custom_q_test_ordering(self, mat, b ,c):
-    #     """Build HSDE Q matrix."""
-    #     if hasattr(mat, 'todense'):
-    #         mat = mat.todense()
-    #     dense = np.block([
-    #         [  np.zeros((self.m, self.m)), b.reshape(self.m, 1),-mat,],
-    #         [-b.reshape(1, self.m), np.zeros((1, 1)), -c.reshape(1, self.n)],
-    #         [ mat.T , c.reshape(self.n, 1), np.zeros((self.n, self.n)),],
-    #     ])
-    #     return sp.sparse.csc_array(dense)
 
     def prepare_loop(self):
         """Define anything we need to re-use."""
@@ -70,3 +58,42 @@ class SimpleCQR(SimpleSCS):
         ux_orig, tau_orig = self.backward_transform_ql(ux, tau)
         self.x = ux_orig / tau_orig
         self.y = self.u[self.n:-1] / tau_orig
+
+# can't get this to work
+# class UnscaledCQR(SimpleCQR):
+#     """Test with unscaled Q in the HSDE matrix."""
+
+#     hsde_q_used = "abc_cqr_q_unscal"
+
+#     def prepare_loop(self):
+#         """Define anything we need to re-use."""
+
+#         A_transf, c_transf, b_transf, (q, scale), self.l = data_ql_transform(
+#             self.matrix.todense(), b=self.b, c=self.c)
+
+#         self.scale = scale
+#         A_transf /= self.scale
+#         b_transf /= self.scale
+#         c_transf /= self.scale
+
+
+#         self.abc_cqr_q_unscal = self._build_custom_q(
+#             mat=A_transf, b=b_transf, c=c_transf)
+
+#         # breakpoint()
+
+#         import matplotlib.pyplot as plt
+#         plt.plot(np.linalg.svd(self.abc_cqr_q_unscal.todense())[1])
+#         plt.title("Singular values of HSDE Q matrix")
+#         plt.show()
+
+#         super().prepare_loop()
+
+#     def obtain_x_and_y(self):
+#         """Redefine if/as needed."""
+#         ux, tau = np.copy(self.u[:self.n]), self.u[-1]
+#         ux /= self.scale
+#         tau /= self.scale
+#         ux_orig, tau_orig = self.backward_transform_ql(ux, tau)
+#         self.x = ux_orig / tau_orig
+#         self.y = self.u[self.n:-1] / tau_orig

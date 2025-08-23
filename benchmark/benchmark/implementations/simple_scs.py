@@ -64,6 +64,12 @@ class SimpleSCS(BaseSolver):
         self.x = self.u[:self.n] / self.u[-1]
         self.y = self.u[self.n:-1] / self.u[-1]
 
+class LongSCS(SimpleSCS):
+    """Just to test with much longer max iterations."""
+
+    max_iterations = int(10e6)
+
+
 class DouglasRachfordSCS(SimpleSCS):
     """Simple rewriting using explicit DR."""
 
@@ -79,7 +85,46 @@ class DouglasRachfordSCS(SimpleSCS):
     def iterate(self):
         """Do one iteration."""
         self.u[:] = self.project_u(self.z)
-        self.z[:] = self.matrix_solve.solve(
+        step = self.matrix_solve.solve(2 * self.u - self.z) - self.u
+        # print(self.z[-1], np.linalg.norm(step))
+        self.z[:] = step + self.z
+
+class SimpleSHR(DouglasRachfordSCS):
+    """Old idea to replace identity with DPi in SCS linsys step.
+
+    (Was nicknamed SHR, "supporting hyperplane reflection", not good name
+    anyways.)
+
+    Just PoC, not practical as implemented here. Motivation is that convergence
+    condition dz = 0 is unchanged, but I'm not sure we still retain favorable
+    D-R properties.
+    """
+
+    max_iterations = 100
+
+    def prepare_loop(self):
+        """Define anything we need to re-use."""
+        self.z = np.zeros(self.n + self.m + 1)
+        self.z[-1] = 1.
+        self.u = np.copy(self.z)
+
+    def get_matrix_solve(self, z):
+        """Linsys matrix at current z."""
+        assert len(self.soc) == 0, "Not implemented for now."
+        diag = np.ones(self.m + self.n + 1)
+        diag[self.n + self.zero:] = (z[self.n + self.zero:] > 0.) * 1.
+        # diag = 1 - diag
+        # for simplicity
+        diag[diag == 0.] = .1
+        # breakpoint()
+        return sp.sparse.linalg.splu(
+            sp.sparse.diags(diag, format="csc")
+            + getattr(self, self.hsde_q_used))
+
+    def iterate(self):
+        """Do one iteration."""
+        self.u[:] = self.project_u(self.z)
+        self.z[:] = self.get_matrix_solve(self.z).solve(
             2 * self.u - self.z) - self.u + self.z
 
 

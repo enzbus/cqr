@@ -16,6 +16,12 @@ fix:
 scs:
 	SOLVER_CLASS=SimpleSCS env/bin/python -m benchmark.test
 
+shr:
+	SOLVER_CLASS=SimpleSHR env/bin/python -m benchmark.test
+
+longscs:
+	SOLVER_CLASS=LongSCS env/bin/python -m benchmark.test
+
 eqscs:
 	SOLVER_CLASS=EquilibratedSCS env/bin/python -m benchmark.test
 
@@ -25,6 +31,15 @@ drscs:
 lmscs:
 	SOLVER_CLASS=LevMarSCS env/bin/python -m benchmark.test
 
+lmscsref:
+	SOLVER_CLASS=LevMarRefSCS env/bin/python -m benchmark.test
+
+lmqrscs:
+	SOLVER_CLASS=LevMarQRSCS env/bin/python -m benchmark.test
+
+lmrefqrscs:
+	SOLVER_CLASS=LevMarRefQRSCS env/bin/python -m benchmark.test
+
 bfgs:
 	SOLVER_CLASS=SimpleBFGS env/bin/python -m benchmark.test
 
@@ -33,3 +48,6 @@ hsde:
 
 cqr:
 	SOLVER_CLASS=SimpleCQR env/bin/python -m benchmark.test
+
+uscqr:
+	SOLVER_CLASS=UnscaledCQR env/bin/python -m benchmark.test
