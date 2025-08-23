@@ -25,6 +25,147 @@ import scipy as sp
 from cqr.equilibrate import hsde_ruiz_equilibration
 from .simple_scs import DouglasRachfordSCS
 from .simple_cqr import SimpleCQR
+from ..base_solver import BaseSolver
+from .simple_scs import DouglasRachfordSCS
+
+class Broyden1SCS(DouglasRachfordSCS):
+    """Just to test basic idea."""
+
+    max_iterations = 100
+
+    def prepare_loop(self):
+        """Define anything we need to re-use."""
+        super().prepare_loop()
+        self.oldz = np.copy(self.z)
+        self.oldstep = np.zeros_like(self.z)
+        self.step = np.zeros_like(self.z)
+        self.jaco_inv = -np.eye(self.m+self.n+1)
+
+    def update_jaco_inv(self, dz, dstep):
+        """Broyden update."""
+        if len(self.solution_qualities) < 5:
+            return
+        if len(self.solution_qualities) % 5 == 0:
+            self.jaco_inv = -np.eye(self.m+self.n+1)
+        current = self.jaco_inv @ dstep
+        dsn = dstep / (np.linalg.norm(dstep)**2)
+        self.jaco_inv += np.outer(
+            dz-current, dsn)
+        # self.jaco_inv += np.outer(
+        #   dz - self.jaco_inv @ dstep, dstep
+        #   ) / (np.linalg.norm(dstep)**2)
+
+        assert np.allclose(self.jaco_inv @ dstep, dz)
+        # breakpoint()
+
+    def iterate(self):
+        """Do one iteration."""
+        self.oldz[:] = self.z
+        # self.z[:] = self.z - (-self.step)
+        self.z[:] = self.z - self.jaco_inv @ self.step
+
+        self.u[:] = self.project_u(self.z)
+        self.oldstep[:] = self.step
+        self.step[:] = self.matrix_solve.solve(
+            2 * self.u - self.z) - self.u
+
+        self.update_jaco_inv(
+            dz = self.z - self.oldz,
+            dstep = self.step - self.oldstep,
+        )
+
+class Broyden3SCS(DouglasRachfordSCS):
+    """Same as B1, but with right update scheme."""
+
+    max_iterations = 1000
+    memory = 5
+
+    def prepare_loop(self):
+        """Define anything we need to re-use."""
+        super().prepare_loop()
+        self.oldz = np.copy(self.z)
+        self.oldstep = np.zeros_like(self.z)
+        self.alldz = np.zeros((self.memory, len(self.z)))
+        self.alldstep = np.zeros((self.memory, len(self.z)))
+        self.step = np.zeros_like(self.z)
+        self.jaco_inv = -np.eye(self.m+self.n+1)
+        self.last_index = 0
+
+    def make_jaco_inv(self):
+        if len(self.solution_qualities) < self.memory * 1.1:
+            return
+        self.jaco_inv = -np.eye(self.m+self.n+1)
+
+        for i in range(1, self.memory + 1):
+            used_index = (i + self.last_index) % self.memory
+            # print("updating with used_index", used_index)
+            dz = self.alldz[used_index]
+            dstep = self.alldstep[used_index]
+            current = self.jaco_inv @ dstep
+            dsn = dstep / (np.linalg.norm(dstep)**2)
+            self.jaco_inv += np.outer(
+                dz-current, dsn)
+            assert np.allclose(self.jaco_inv @ dstep, dz)
+
+    def iterate(self):
+        """Do one iteration."""
+        self.oldz[:] = self.z
+        # self.z[:] = self.z - (-self.step)
+        self.z[:] = self.z - self.jaco_inv @ self.step
+
+        self.u[:] = self.project_u(self.z)
+        self.oldstep[:] = self.step
+        self.step[:] = self.matrix_solve.solve(
+            2 * self.u - self.z) - self.u
+
+        self.last_index = len(
+            self.solution_qualities) % self.memory
+        self.alldz[self.last_index, :] = self.z - self.oldz
+        self.alldstep[self.last_index, :] = self.step - self.oldstep
+        # print("last index", self.last_index)
+
+        self.make_jaco_inv()
+
+
+class Broyden2SCS(Broyden1SCS):
+
+    def prepare_loop(self):
+        """Define anything we need to re-use."""
+        super().prepare_loop()
+        self.oldz = np.copy(self.z)
+        self.oldstep = np.zeros_like(self.z)
+        self.step = np.zeros_like(self.z)
+        self.jaco = -np.eye(self.m+self.n+1)
+
+    def update_jaco(self, dz, dstep):
+        """Broyden update."""
+        if len(self.solution_qualities) < 5:
+            return
+        if len(self.solution_qualities) % 5 == 0:
+            self.jaco = -np.eye(self.m+self.n+1)
+        current = self.jaco @ dz
+        dzn = dz / (np.linalg.norm(dz)**2)
+        self.jaco += np.outer(
+            dstep-current, dzn)
+        assert np.allclose(self.jaco @ dz, dstep)
+        # breakpoint()
+
+    def iterate(self):
+        """Do one iteration."""
+        self.oldz[:] = self.z
+        # self.z[:] = self.z - (-self.step)
+        self.z[:] = self.z - np.linalg.solve(
+            self.jaco, self.step)
+
+        self.u[:] = self.project_u(self.z)
+        self.oldstep[:] = self.step
+        self.step[:] = self.matrix_solve.solve(
+            2 * self.u - self.z) - self.u
+
+        self.update_jaco(
+            dz = self.z - self.oldz,
+            dstep = self.step - self.oldstep,
+        )
 
 class LevMarSCS(DouglasRachfordSCS):
     """SCS-DR using Levemberg-Marquardt."""
@@ -55,8 +196,11 @@ class LevMarSCS(DouglasRachfordSCS):
                 shape=(self.m+self.n+1, self.m+self.n+1),
                 matvec=lambda dz: self.multiply_jacobian_dr(self.z, dz),
                 rmatvec=lambda dz: self.multiply_jacobian_dr_transpose(
-                    self.z, dz)), -step, x0=step, atol=0., btol=0.,
-                    iter_lim=5)
+                    self.z, dz)), -step,
+                    x0=step,
+                    damp=0.0, # doesn't seem to help
+                    atol=0., btol=0., # without this we have random termination
+                    iter_lim = 5)
 
         self.z[:] = self.z + result[0]
 

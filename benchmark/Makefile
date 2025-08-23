@@ -13,6 +13,9 @@ lint:
 fix:
 	env/bin/python -m autopep8 --in-place benchmark/*.py benchmark/*/*.py
 
+brscs:
+	SOLVER_CLASS=BroydenSCS env/bin/python -m benchmark.test
+
 scs:
 	SOLVER_CLASS=SimpleSCS env/bin/python -m benchmark.test
 

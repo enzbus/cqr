@@ -90,17 +90,16 @@ class DouglasRachfordSCS(SimpleSCS):
         self.z[:] = step + self.z
 
 class SimpleSHR(DouglasRachfordSCS):
-    """Old idea to replace identity with DPi in SCS linsys step.
+    """Use projection operators in linspace."""
 
-    (Was nicknamed SHR, "supporting hyperplane reflection", not good name
-    anyways.)
-
-    Just PoC, not practical as implemented here. Motivation is that convergence
-    condition dz = 0 is unchanged, but I'm not sure we still retain favorable
-    D-R properties.
-    """
-
-    max_iterations = 100
+    max_iterations = 10000
+    lsqr_warmstart = None
+    lsqriters = 20
+    reg = 1.
+    mult = 1.
+    atol = 0.
+    btol = 0.
+    ws = True
 
     def prepare_loop(self):
         """Define anything we need to re-use."""
@@ -108,24 +107,63 @@ class SimpleSHR(DouglasRachfordSCS):
         self.z[-1] = 1.
         self.u = np.copy(self.z)
 
-    def get_matrix_solve(self, z):
-        """Linsys matrix at current z."""
-        assert len(self.soc) == 0, "Not implemented for now."
-        diag = np.ones(self.m + self.n + 1)
-        diag[self.n + self.zero:] = (z[self.n + self.zero:] > 0.) * 1.
-        # diag = 1 - diag
-        # for simplicity
-        diag[diag == 0.] = .1
-        # breakpoint()
-        return sp.sparse.linalg.splu(
-            sp.sparse.diags(diag, format="csc")
-            + getattr(self, self.hsde_q_used))
+    def get_matrix(self, z):
+        """Very inefficient, just to try."""
+        assert len(self.soc) == 0
+        dpi_u = np.ones(self.m + self.n + 1)
+        dpi_u[self.n+self.zero:-1] = (
+            z[self.n+self.zero:-1] > 0)*1.
+        dpi_v = 1. - dpi_u
+
+        return (
+            sp.sparse.diags(self.reg + self.mult*dpi_v, format="csc")
+            + sp.sparse.diags(self.reg + self.mult*dpi_u, format="csc") @
+                getattr(self, self.hsde_q_used))
 
     def iterate(self):
         """Do one iteration."""
         self.u[:] = self.project_u(self.z)
-        self.z[:] = self.get_matrix_solve(self.z).solve(
-            2 * self.u - self.z) - self.u + self.z
+        rhs = 2 * self.u - self.z
+        mat = self.get_matrix(self.z)
+        result = sp.sparse.linalg.lsqr(mat, rhs,
+            x0=self.lsqr_warmstart if self.ws else None,
+            iter_lim=self.lsqriters,
+            atol=self.atol, btol=self.btol)
+        self.lsqr_warmstart = np.copy(result[0])
+        # breakpoint()
+        self.z[:] = result[0] - self.u + self.z
+        # self.z[:] = self.get_matrix_solve(self.z).solve(
+        #     2 * self.u - self.z) - self.u + self.z
+
+
+class SimpleSHRTest(SimpleSHR):
+
+    def get_matrix(self, z):
+        """Very inefficient, just to try."""
+        assert len(self.soc) == 0
+        dpi_u = np.ones(self.m + self.n + 1)
+        dpi_u[self.n+self.zero:-1] = (
+            z[self.n+self.zero:-1] > 0)*1.
+        dpi_v = 1. - dpi_u
+
+        return (
+            sp.sparse.diags(
+                1 + 10 * dpi_v,
+                format="csc")
+            + sp.sparse.diags(1 + 10 * dpi_u, format="csc") @
+                getattr(self, self.hsde_q_used))
+
+
+class SimpleSHR1000(SimpleSHR):
+    max_iterations = 100
+    btol = 1e-8
+    atol = 1e-8
+    lsqriters = None #None #20
+    ws = True #True #False
+
+    @property
+    def mult(self):
+        return 1. + len(self.solution_qualities)
 
 
 class EquilibratedSCS(SimpleSCS):

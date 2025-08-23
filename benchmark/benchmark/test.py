@@ -18,7 +18,8 @@
 import gzip
 import logging
 import os
-from unittest import TestCase, main, skip, skipIf
+
+from unittest import TestCase, main, skipIf
 
 # pylint: disable=unused-import
 
@@ -31,7 +32,7 @@ from .cvxpy_interface import CvxpyWrapper
 from .implementations.simple_bfgs import SimpleBFGS
 from .implementations.simple_scs import *
 from .implementations.simple_hsde import SimpleHSDE
-from .implementations.simple_cqr import SimpleCQR #, UnscaledCQR
+from .implementations.simple_cqr import SimpleCQR
 from .implementations.lm_scs import *
 
 
@@ -117,7 +118,6 @@ class Benchmark(TestCase):
         """Run second program class."""
         self._run_benchmark(self._generate_problem_two)
 
-    # @skip("slow test, skip for now")
     @skipIf(issubclass(globals()[SOLVER_CLASS], SimpleSHR),
         "SOCs not supported with those prototypes.")
     def test_po_program(self):
