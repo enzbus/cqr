@@ -16,6 +16,12 @@ fix:
 brscs:
 	SOLVER_CLASS=BroydenSCS env/bin/python -m benchmark.test
 
+br2scs:
+	SOLVER_CLASS=Broyden2SCS NUM_INSTANCES=10 env/bin/python -m benchmark.test
+
+br2cqr:
+	SOLVER_CLASS=Broyden2CQRSCS NUM_INSTANCES=10 env/bin/python -m benchmark.test
+
 scs:
 	SOLVER_CLASS=SimpleSCS env/bin/python -m benchmark.test
 
@@ -54,3 +60,6 @@ cqr:
 
 uscqr:
 	SOLVER_CLASS=UnscaledCQR env/bin/python -m benchmark.test
+
+test:
+	BENCHMARK_MODE=TEST env/bin/python -m benchmark.test

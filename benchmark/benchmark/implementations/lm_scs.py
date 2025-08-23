@@ -129,6 +129,8 @@ class Broyden3SCS(DouglasRachfordSCS):
 
 class Broyden2SCS(Broyden1SCS):
 
+    max_iterations = 1000
+
     def prepare_loop(self):
         """Define anything we need to re-use."""
         super().prepare_loop()
@@ -166,6 +168,49 @@ class Broyden2SCS(Broyden1SCS):
             dz = self.z - self.oldz,
             dstep = self.step - self.oldstep,
         )
+
+class Broyden2CQRSCS(Broyden1SCS, SimpleCQR):
+
+    max_iterations = 1000
+
+    def prepare_loop(self):
+        """Define anything we need to re-use."""
+        super().prepare_loop()
+        self.oldz = np.copy(self.z)
+        self.oldstep = np.zeros_like(self.z)
+        self.step = np.zeros_like(self.z)
+        self.jaco = -np.eye(self.m+self.n+1)
+
+    def update_jaco(self, dz, dstep):
+        """Broyden update."""
+        if len(self.solution_qualities) < 5:
+            return
+        if len(self.solution_qualities) % 5 == 0:
+            self.jaco = -np.eye(self.m+self.n+1)
+        current = self.jaco @ dz
+        dzn = dz / (np.linalg.norm(dz)**2)
+        self.jaco += np.outer(
+            dstep-current, dzn)
+        assert np.allclose(self.jaco @ dz, dstep)
+        # breakpoint()
+
+    def iterate(self):
+        """Do one iteration."""
+        self.oldz[:] = self.z
+        # self.z[:] = self.z - (-self.step)
+        self.z[:] = self.z - np.linalg.solve(
+            self.jaco, self.step)
+
+        self.u[:] = self.project_u(self.z)
+        self.oldstep[:] = self.step
+        self.step[:] = self.matrix_solve.solve(
+            2 * self.u - self.z) - self.u
+
+        self.update_jaco(
+            dz = self.z - self.oldz,
+            dstep = self.step - self.oldstep,
+        )
+
 
 class LevMarSCS(DouglasRachfordSCS):
     """SCS-DR using Levemberg-Marquardt."""
@@ -214,81 +259,6 @@ class LevMarSCS(DouglasRachfordSCS):
         tmp = self.tr_matrix_solve.solve(dz)
         return self.multiply_jacobian_hsde_project(z, 2 * tmp - dz) - tmp
 
-    def multiply_jacobian_hsde_project(self, z, dz):
-        """Multiply by Jacobian of projection on cone of HSDE variable z.
-
-        :param z: Point at which the Jacobian is computed.
-        :type z: np.array
-        :param dz: Input array.
-        :type dz: np.array
-
-        :return: Multiplication of du by the Jacobian
-        :rtype: np.array 
-        """
-        result = np.zeros_like(z)
-
-        # x part + zero cone
-        result[:self.n+self.zero] = dz[:self.n+self.zero]
-        cur = self.n+self.zero
-
-        # nonneg cone
-        result[cur:cur+self.nonneg] = (
-            z[cur:cur+self.nonneg] > 0.) * dz[cur:cur+self.nonneg]
-        cur += self.nonneg
-
-        # soc cones
-        for soc_dim in self.soc:
-            result[cur:cur+soc_dim] = \
-                self.multiply_jacobian_second_order_project(
-                    z[cur:cur+soc_dim], dz[cur:cur+soc_dim])
-            cur += soc_dim
-        assert cur == self.n + self.m
-
-        # hsde variable
-        result[-1] = (z[-1] > 0.) * dz[-1]
-
-        return result
-
-    @staticmethod
-    def multiply_jacobian_second_order_project(z, dz):
-        """Multiply by Jacobian of projection on second-order cone.
-
-        We follow the derivation in `Solution Refinement at Regular Points of
-        Conic Problems
-        <https://stanford.edu/~boyd/papers/pdf/cone_prog_refine.pdf>`_.
-
-        :param z: Point at which the Jacobian is computed.
-        :type z: np.array
-        :param dz: Input array.
-        :type dz: np.array
-
-        :return: Multiplication of dz by the Jacobian
-        :rtype: np.array 
-        """
-
-        assert len(z) >= 2
-        assert len(z) == len(dz)
-        result = np.zeros_like(z)
-
-        x, t = z[1:], z[0]
-
-        norm_x = np.linalg.norm(x)
-
-        if norm_x <= t:
-            result[:] = dz
-            return result
-
-        if norm_x <= -t:
-            return result
-
-        dx, dt = dz[1:], dz[0]
-
-        result[0] += dt / 2.
-        xtdx = x.T @ dx
-        result[0] += xtdx / (2. * norm_x)
-        result[1:] += x * ((dt - (xtdx/norm_x) * (t / norm_x))/(2 * norm_x))
-        result[1:] += dx * ((t + norm_x) / (2 * norm_x))
-        return result
 
 class LevMarQRSCS(SimpleCQR, LevMarSCS):
     """Using QR transform."""

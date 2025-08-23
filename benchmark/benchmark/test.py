@@ -37,7 +37,8 @@ from .implementations.lm_scs import *
 
 
 SOLVER_CLASS = os.getenv("SOLVER_CLASS")
-NUM_INSTANCES = 1000
+NUM_INSTANCES = int(os.getenv("NUM_INSTANCES", "1"))
+MODE = os.getenv("BENCHMARK_MODE", "BENCHMARK") # or "TEST"
 
 # logging.basicConfig(level='INFO')
 
@@ -118,34 +119,55 @@ class Benchmark(TestCase):
         """Run second program class."""
         self._run_benchmark(self._generate_problem_two)
 
-    @skipIf(issubclass(globals()[SOLVER_CLASS], SimpleSHR),
-        "SOCs not supported with those prototypes.")
+    # @skipIf(issubclass(globals()[SOLVER_CLASS], SimpleSHR),
+    #     "SOCs not supported with those prototypes.")
     def test_po_program(self):
         """Run portf opt class."""
         self._run_benchmark(self._generate_portfolio_problem)
 
     def _run_benchmark(self, program_generator):
         """Run many instances, save history of solution qualities."""
-        print('solver class', SOLVER_CLASS)
-        solution_quality_curves = []
-        print("PROGRAM", program_generator.__name__)
-        for seed in tqdm.tqdm(range(NUM_INSTANCES)):
-            _, prog = program_generator(seed)
-            prog.solve(solver=CvxpyWrapper(
-                solver_class=globals()[SOLVER_CLASS]))
-            sol_qual = np.array(
-                prog.solver_stats.extra_stats['solution_qualities'])
-            solution_quality_curves.append(sol_qual)
+        if MODE == "BENCHMARK":
+            print('solver class', SOLVER_CLASS)
+            solution_quality_curves = []
+            print("PROGRAM", program_generator.__name__)
+            for seed in tqdm.tqdm(range(NUM_INSTANCES)):
+                _, prog = program_generator(seed)
+                prog.solve(solver=CvxpyWrapper(
+                    solver_class=globals()[SOLVER_CLASS]))
+                sol_qual = np.array(
+                    prog.solver_stats.extra_stats['solution_qualities'])
+                solution_quality_curves.append(sol_qual)
 
-        # very rough
-        sol_quals = pd.DataFrame(solution_quality_curves).T.ffill()
+            # very rough
+            sol_quals = pd.DataFrame(solution_quality_curves).T.ffill()
 
-        # shouldn't get too heavy on disk
-        with gzip.open(
-            f"results/{SOLVER_CLASS}_"
-            f"{program_generator.__name__.split('_generate_')[1]}.npy.gz",
-                "w") as f:
-            np.save(file=f, arr=sol_quals.values)
+            # shouldn't get too heavy on disk
+            with gzip.open(
+                f"results/{SOLVER_CLASS}_"
+                f"{program_generator.__name__.split('_generate_')[1]}.npy.gz",
+                    "w") as f:
+                np.save(file=f, arr=sol_quals.values)
+        elif MODE == "TEST":
+            all_prototypes = [
+                el for el in globals().values()
+                if (type(el) is type)
+                and (not el is BaseSolver)
+                and issubclass(el, BaseSolver)]
+            for prototype in all_prototypes:
+                print(prototype)
+                prototype.max_iterations = 100
+                with self.subTest(prototype=prototype):
+                    _, prog = program_generator(0)
+                    prog.solve(solver=CvxpyWrapper(
+                        solver_class=prototype))
+                    sol_qual = np.array(
+                        prog.solver_stats.extra_stats['solution_qualities'])
+                    # breakpoint()
+                    self.assertLess(sol_qual[-1], sol_qual[0])
+
+        else:
+            raise ValueError("Wrong BENCHMARK_MODE env var value.")
 
 if __name__ == '__main__':  # pragma: no cover
     main()

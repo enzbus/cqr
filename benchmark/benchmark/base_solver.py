@@ -287,3 +287,160 @@ class BaseSolver:
         result[0] = 1.
         result[1:] = y / norm_y
         result *= (norm_y + t) / 2.
+
+    def multiply_jacobian_hsde_project(self, z, dz):
+        """Multiply by Jacobian of projection on cone of HSDE variable z.
+
+        :param z: Point at which the Jacobian is computed.
+        :type z: np.array
+        :param dz: Input array.
+        :type dz: np.array
+
+        :return: Multiplication of du by the Jacobian
+        :rtype: np.array 
+        """
+        result = np.zeros_like(z)
+
+        # x part + zero cone
+        result[:self.n+self.zero] = dz[:self.n+self.zero]
+        cur = self.n+self.zero
+
+        # nonneg cone
+        result[cur:cur+self.nonneg] = (
+            z[cur:cur+self.nonneg] > 0.) * dz[cur:cur+self.nonneg]
+        cur += self.nonneg
+
+        # soc cones
+        for soc_dim in self.soc:
+            result[cur:cur+soc_dim] = \
+                self.multiply_jacobian_second_order_project(
+                    z[cur:cur+soc_dim], dz[cur:cur+soc_dim])
+            cur += soc_dim
+        assert cur == self.n + self.m
+
+        # hsde variable
+        result[-1] = (z[-1] > 0.) * dz[-1]
+
+        return result
+
+    @staticmethod
+    def multiply_jacobian_second_order_project(z, dz):
+        """Multiply by Jacobian of projection on second-order cone.
+
+        We follow the derivation in `Solution Refinement at Regular Points of
+        Conic Problems
+        <https://stanford.edu/~boyd/papers/pdf/cone_prog_refine.pdf>`_.
+
+        :param z: Point at which the Jacobian is computed.
+        :type z: np.array
+        :param dz: Input array.
+        :type dz: np.array
+
+        :return: Multiplication of dz by the Jacobian
+        :rtype: np.array 
+        """
+
+        assert len(z) >= 2
+        assert len(z) == len(dz)
+        result = np.zeros_like(z)
+
+        x, t = z[1:], z[0]
+
+        norm_x = np.linalg.norm(x)
+
+        if norm_x <= t:
+            result[:] = dz
+            return result
+
+        if norm_x <= -t:
+            return result
+
+        dx, dt = dz[1:], dz[0]
+
+        result[0] = norm_x * dt + x.T @ dx
+        result[1:] = x * dt + (t + norm_x) * dx - t * x * (
+            x.T @ dx) / (norm_x**2)
+        return result / (2 * norm_x)
+
+        # result[0] += dt / 2.
+        # xtdx = x.T @ dx
+        # result[0] += xtdx / (2. * norm_x)
+        # result[1:] += x * ((dt - (xtdx/norm_x) * (t / norm_x))/(2 * norm_x))
+        # result[1:] += dx * ((t + norm_x) / (2 * norm_x))
+        # return result
+
+if __name__ == "__main__":
+    from tqdm import tqdm
+
+    n = 20
+
+    def _dense_grad(z):
+        grad_cols = []
+        for i in range(n): #tqdm(range(n)):
+            e = np.zeros(n)
+            e[i] = 1
+            grad_cols.append(BaseSolver.multiply_jacobian_second_order_project(
+                z, e))
+        return np.array(grad_cols)
+
+    def _func(z):
+        result = np.zeros_like(z)
+        BaseSolver.second_order_project(z, result)
+        return result
+
+    # plot eigenvals
+    import matplotlib.pyplot as plt
+    myz = np.random.randn(n)
+    j = _dense_grad(myz)
+    plt.plot(np.linalg.eigh(j)[0])
+    plt.title('eivals of jacobian matrix of SOC project')
+    plt.show()
+    plt.plot(np.linalg.eigh(j@j)[0])
+    plt.title('eivals of jacobian matrix squared of SOC project')
+    plt.show()
+
+    results = []
+    for _ in range(100):
+        np.random.seed(_)
+
+        myz = np.random.randn(n)
+        myu = _func(myz)
+        myv = myu - myz
+        j = _dense_grad(myz)
+        # check few identities that should hold
+        assert np.allclose(myu, j @ myu)
+        assert np.allclose(0., j @ myv)
+
+        result = sp.optimize.check_grad(
+            _func, _dense_grad, x0 = myz,
+            # epsilon=1e-12
+            )
+        results.append(result)
+        # print("RESULT", result)
+
+    print("MEAN", np.mean(results), "STD", np.std(results))
+
+    # # simple test of cone projection derivative
+    # m = 10
+    # n = 30
+    # zero = 0
+    # nonneg = 0
+    # soc = [10]#, 20, 30]
+    # matrix = np.random.randn(m,n)
+    # b = np.random.randn(m)
+    # c = np.random.randn(n)
+    # solver = BaseSolver(matrix, b, c, zero=zero, nonneg=nonneg, soc=soc)
+
+    # def _dense_grad(z):
+    #     grad_cols = []
+    #     for i in tqdm(range(n+m+1)):
+    #         e = np.zeros(n+m+1)
+    #         e[i] = 1
+    #         grad_cols.append(solver.multiply_jacobian_hsde_project(z, e))
+    #     return np.array(grad_cols)
+
+    # for _ in range(10):
+    #     np.random.seed(_)
+    #     print("RESULT", sp.optimize.check_grad(
+    #         solver.project_u, _dense_grad, x0 = np.random.randn(n+m+1),
+    #         epsilon=1e-12))
