@@ -369,6 +369,18 @@ class BaseSolver:
         # result[1:] += dx * ((t + norm_x) / (2 * norm_x))
         # return result
 
+    def _build_custom_q(self, mat, b , c):
+        """Build HSDE Q matrix."""
+        if hasattr(mat, 'todense'):
+            mat = mat.todense()
+        dense = np.block([
+            [np.zeros((self.n, self.n)), mat.T , c.reshape(self.n, 1), ],
+            [ -mat, np.zeros((self.m, self.m)), b.reshape(self.m, 1),],
+            [-c.reshape(1, self.n), -b.reshape(1, self.m), np.zeros((1, 1)),],
+        ])
+        return sp.sparse.csc_array(dense)
+
+
 if __name__ == "__main__":
     from tqdm import tqdm
 

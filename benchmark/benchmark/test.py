@@ -19,7 +19,7 @@ import gzip
 import logging
 import os
 
-from unittest import TestCase, main, skipIf
+from unittest import TestCase, main, skip, skipIf
 
 # pylint: disable=unused-import
 
@@ -34,27 +34,42 @@ from .implementations.simple_scs import *
 from .implementations.simple_hsde import SimpleHSDE
 from .implementations.simple_cqr import SimpleCQR
 from .implementations.lm_scs import *
+from .implementations.simple_cpr import SimpleCPR, EquilibratedCPR
+from .implementations.new_cqr import NewCQR
 
 
 SOLVER_CLASS = os.getenv("SOLVER_CLASS")
 NUM_INSTANCES = int(os.getenv("NUM_INSTANCES", "1"))
 MODE = os.getenv("BENCHMARK_MODE", "BENCHMARK") # or "TEST"
+SIZE_CHOICE = os.getenv("SIZE_CHOICE", "NORMAL") # or "SMALL"
 
+PROGRAM_SIZES = {
+    "NORMAL": {
+        "_generate_problem_one":{"m":41, "n":30},
+        "_generate_problem_two":{"m":41, "n":30},
+        "_generate_portfolio_problem":{"n":100}},
+    "SMALL": {
+        "_generate_problem_one":{"m":4, "n":3},
+        "_generate_problem_two":{"m":4, "n":3},
+        "_generate_portfolio_problem":{"n":10}},
+}
 # logging.basicConfig(level='INFO')
 
 class Benchmark(TestCase):
     """Unit tests of the solver class."""
 
     @staticmethod
-    def _generate_problem_one(seed, m=41, n=30):
+    def _generate_problem_one(seed, m=41, n=30, ):
         """Generate a sample LP which can be difficult."""
         np.random.seed(seed)
         x = cp.Variable(n)
         mat = np.random.randn(m, n)
         b = np.random.randn(m)
         objective = cp.norm1(mat @ x - b)
-        d = np.random.randn(n, 5)
-        constraints = [cp.abs(x) <= .75, x @ d == 2.,]
+        d = np.random.randn(n, (m+n)//14)
+        constraints = [cp.abs(x) <= .75]
+        if d.shape[1] > 0:
+            constraints += [x @ d == 2.]
         program = cp.Problem(cp.Minimize(objective), constraints)
         return x, program
 
@@ -84,7 +99,7 @@ class Benchmark(TestCase):
         big_sigma = big_sigma.T @ big_sigma
         eival, eivec = np.linalg.eigh(big_sigma)
         eival *= 1e-4
-        eival = eival[-n//10:]
+        eival = eival[-max(n//10,1):]
 
         # make it feasible; reduce w0 size so that it's in risk cone
         risk = cp.sum_squares((np.diag(np.sqrt(eival))
@@ -121,6 +136,7 @@ class Benchmark(TestCase):
 
     # @skipIf(issubclass(globals()[SOLVER_CLASS], SimpleSHR),
     #     "SOCs not supported with those prototypes.")
+    # @skip("slow test, skip for now")
     def test_po_program(self):
         """Run portf opt class."""
         self._run_benchmark(self._generate_portfolio_problem)
@@ -132,7 +148,9 @@ class Benchmark(TestCase):
             solution_quality_curves = []
             print("PROGRAM", program_generator.__name__)
             for seed in tqdm.tqdm(range(NUM_INSTANCES)):
-                _, prog = program_generator(seed)
+                _, prog = program_generator(
+                    seed,
+                    **PROGRAM_SIZES[SIZE_CHOICE][program_generator.__name__])
                 prog.solve(solver=CvxpyWrapper(
                     solver_class=globals()[SOLVER_CLASS]))
                 sol_qual = np.array(

@@ -31,18 +31,6 @@ class SimpleSCS(BaseSolver):
     # used in SCS algorithm
     hsde_q_used = "hsde_q"
 
-    # used in subclasses
-    def _build_custom_q(self, mat, b , c):
-        """Build HSDE Q matrix."""
-        if hasattr(mat, 'todense'):
-            mat = mat.todense()
-        dense = np.block([
-            [np.zeros((self.n, self.n)), mat.T , c.reshape(self.n, 1), ],
-            [ -mat, np.zeros((self.m, self.m)), b.reshape(self.m, 1),],
-            [-c.reshape(1, self.n), -b.reshape(1, self.m), np.zeros((1, 1)),],
-        ])
-        return sp.sparse.csc_array(dense)
-
     def prepare_loop(self):
         """Define anything we need to re-use."""
         self.matrix_solve = sp.sparse.linalg.splu(
