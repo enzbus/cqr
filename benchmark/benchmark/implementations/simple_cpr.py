@@ -27,7 +27,7 @@ class SimpleCPR(BaseSolver):
 
     # class constants possibly overwritten by subclasses
     epsilon_convergence = 1e-12
-    lsqr_iters = 10
+    lsqr_iters = 5
     max_iterations = 100000//(lsqr_iters * 2)
 
     hsde_q_used = "hsde_q"
@@ -48,18 +48,18 @@ class SimpleCPR(BaseSolver):
         residual = self.u - getattr(self, self.hsde_q_used) @ self.u - self.z
 
         # works with the first part zeroed out also
-        # step0 = self.matrix_solve.solve(2 * self.u - self.z) - self.u
+        step0 = self.matrix_solve.solve(2 * self.u - self.z) - self.u
         # step0[:self.n+self.zero] = 0.
 
         # doesn't work
         # step0 = self.u - self.z
 
         # trying this
-        v = self.hsde_q @ self.u # jury's out on this
-        # v = self.u - self.z # this makes no sense, gets always zero grad
-        v_cone_proj = self.project_v(v)
-        grad = self.hsde_q.T @ (v - v_cone_proj)
-        step0 = -grad
+        # v = self.hsde_q @ self.u # jury's out on this
+        # # v = self.u - self.z # this makes no sense, gets always zero grad
+        # v_cone_proj = self.project_v(v)
+        # grad = self.hsde_q.T @ (v - v_cone_proj)
+        # step0 = -grad
 
         result = sp.sparse.linalg.lsqr(
             sp.sparse.linalg.LinearOperator(

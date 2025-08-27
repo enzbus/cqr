@@ -18,8 +18,12 @@ brscs:
 
 newcqr:
 	SOLVER_CLASS=NewCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+lmnewcqr:
+	SOLVER_CLASS=LevMarNewCQR NUM_INSTANCES=10 env/bin/python -m benchmark.test
+
 cpr:
-	SOLVER_CLASS=SimpleCPR NUM_INSTANCES=100 SIZE_CHOICE=SMALL env/bin/python -m benchmark.test
+	SOLVER_CLASS=SimpleCPR NUM_INSTANCES=10 SIZE_CHOICE=NORMAL env/bin/python -m benchmark.test
 
 eqcpr:
 	SOLVER_CLASS=EquilibratedCPR NUM_INSTANCES=10 env/bin/python -m benchmark.test

@@ -35,7 +35,7 @@ from .implementations.simple_hsde import SimpleHSDE
 from .implementations.simple_cqr import SimpleCQR
 from .implementations.lm_scs import *
 from .implementations.simple_cpr import SimpleCPR, EquilibratedCPR
-from .implementations.new_cqr import NewCQR
+from .implementations.new_cqr import NewCQR, LevMarNewCQR
 
 
 SOLVER_CLASS = os.getenv("SOLVER_CLASS")
