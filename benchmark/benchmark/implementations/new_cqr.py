@@ -29,19 +29,25 @@ class NewCQR(BaseSolver):
 
     max_iterations = 100000
 
+    used_matrix = "matrix"
+    used_b = "b"
+    used_c = "c"
+
     def prepare_loop(self):
         """Define anything we need to re-use."""
 
+        matrix = getattr(self, self.used_matrix)
+
         if NUMPY:
             q, r = np.linalg.qr(
-                self.matrix.todense(), mode='complete')
+                getattr(self, self.used_matrix).todense(), mode='complete')
             self.qr_matrix = q[:, :self.n].A
             self.nullspace = q[:, self.n:].A
             self.triangular = r[:self.n].A
         if PYSPQR:
-            self.matrix.indices = self.matrix.indices.astype(np.int32)
-            self.matrix.indptr = self.matrix.indptr.astype(np.int32)
-            q, r, e = qr(self.matrix, ordering='AMD')
+            matrix.indices = matrix.indices.astype(np.int32)
+            matrix.indptr = matrix.indptr.astype(np.int32)
+            q, r, e = qr(matrix, ordering='AMD')
             shape1 = min(self.n, self.m)
             self.qr_matrix = sp.sparse.linalg.LinearOperator(
                 shape=(self.m, shape1),
@@ -62,22 +68,24 @@ class NewCQR(BaseSolver):
             self.triangular_solve_transpose = sp.sparse.linalg.splu(self.triangular.T)
 
         # assert np.allclose(
-        #     self.qr_matrix @ self.triangular, self.matrix.todense())
+        #     self.qr_matrix @ self.triangular, matrix.todense())
 
         if NUMPY:
             self.c_qr = sp.linalg.solve_triangular(
-                self.triangular.T, self.c, lower=True)
+                self.triangular.T, getattr(self, self.used_c), lower=True)
         if PYSPQR:
-            self.c_qr = self.triangular_solve_transpose.solve(self.c)
+            self.c_qr = self.triangular_solve_transpose.solve(
+                getattr(self, self.used_c))
 
         # shift in the linspace projector
         self.e = self.nullspace @ self.nullspace.T @ (
-            self.qr_matrix @ self.c_qr - self.b) - self.qr_matrix @ self.c_qr
+            self.qr_matrix @ self.c_qr - getattr(self, self.used_b)
+                ) - self.qr_matrix @ self.c_qr
 
         # # shift in the linspace projector
         # self.e = (self.nullspace @ self.nullspace.T) @ (
-        #     self.matrix @ self.c - self.b) - self.matrix @ self.c
-        
+        #     matrix @ self.c - self.b) - matrix @ self.c
+
         self.z = np.zeros(self.m)
         self.y = np.zeros(self.m)
         self.s = np.zeros(self.m)
@@ -94,22 +102,23 @@ class NewCQR(BaseSolver):
 
     def iterate(self):
         """Simple Douglas Rachford iteration."""
-        # self.y[:] = self.cone_project(self.z)
+        self.y[:] = self.cone_project(self.z)
         step = self.linspace_project(2 * self.y - self.z) - self.y
         # print(np.linalg.norm(step))
         self.z[:] = self.z + step
-        self.y[:] = self.cone_project(self.z)
+        # self.y[:] = self.cone_project(self.z)
 
     def obtain_x_and_y(self):
         """Redefine if/as needed."""
         self.y[:] = self.cone_project(self.z)
         self.s[:] = self.y - self.z
-        x_qr = self.qr_matrix.T @ (self.b - self.s)
+        x_qr = self.qr_matrix.T @ (getattr(self, self.used_b) - self.s)
         # breakpoint()
         if NUMPY:
             self.x[:] = sp.linalg.solve_triangular(self.triangular, x_qr, lower=False)
         if PYSPQR:
             self.x[:] = self.triangular_solve.solve(x_qr)
+        # breakpoint()
 
 
 class LevMarNewCQR(NewCQR):
@@ -148,7 +157,6 @@ class LevMarNewCQR(NewCQR):
         self.y[:] = self.cone_project(self.z)
         step = self.linspace_project(2 * self.y - self.z) - self.y
 
-
         result = sp.sparse.linalg.lsqr(
             sp.sparse.linalg.LinearOperator(
                 shape=(self.m, self.m),
@@ -177,3 +185,71 @@ class LevMarNewCQR(NewCQR):
         """Multiply by Jacobian of DR step operator transpose."""
         tmp = self.linspace_project_derivative(dr)
         return self.multiply_cone_project_derivative(z, 2 * tmp - dr) - tmp
+
+
+class EquilibratedNewCQR(NewCQR):
+    """With Ruiz equilibration."""
+
+    # max_iterations = 1000
+
+    used_matrix = "eq_matrix"
+    used_b = "eq_b"
+    used_c = "eq_c"
+
+    def prepare_loop(self):
+        """Do Ruiz equilibration."""
+        if len(self.soc) > 0:
+            raise ValueError()
+        matrix = self.matrix.todense()
+        concatenated = np.block(
+            [[matrix, self.b.reshape(self.m, 1)],
+            [self.c.reshape(1, self.n), np.zeros((1, 1))]]).A
+        work_matrix = np.copy(concatenated)
+
+        def norm_cols(concatenated):
+            return np.max(np.abs(concatenated), axis=0)
+
+        def norm_rows(concatenated):
+            return np.max(np.abs(concatenated), axis=1)
+
+        m, n = matrix.shape
+
+        d_and_rho = np.ones(m+1)
+        e_and_sigma = np.ones(n+1)
+
+        for i in range(100):
+
+            nr = norm_rows(work_matrix)
+            nc = norm_cols(work_matrix)
+
+            r1 = max(nr[nr > 0]) / min(nr[nr > 0])
+            r2 = max(nc[nc > 0]) / min(nc[nc > 0])
+            # print(r1, r2)
+            if (r1-1 < 1e-5) and (r2-1 < 1e-5):
+                # logger.info('Equilibration converged.')
+                break
+
+            # print(r1, r2)
+
+            d_and_rho[nr > 0] *= nr[nr > 0]**(-0.5)
+            e_and_sigma[nc > 0] *= ((m+1)/(n+1))**(0.25) * nc[nc > 0]**(-0.5)
+
+            work_matrix = ((concatenated * e_and_sigma).T * d_and_rho).T
+
+        self.equil_e = e_and_sigma[:-1]
+        self.equil_d = d_and_rho[:-1]
+        self.equil_sigma = e_and_sigma[-1]
+        self.equil_rho = d_and_rho[-1]
+
+        self.eq_matrix = sp.sparse.csc_matrix(work_matrix[:-1, :-1])
+        self.eq_b = work_matrix[:-1, -1]
+        self.eq_c = work_matrix[-1, :-1]
+
+        super().prepare_loop()
+
+    def obtain_x_and_y(self):
+        """Redefine if/as needed."""
+        super().obtain_x_and_y()
+
+        self.x = (self.equil_e * self.x) / self.equil_sigma
+        self.y = (self.equil_d * self.y) / self.equil_rho

@@ -16,8 +16,14 @@ fix:
 brscs:
 	SOLVER_CLASS=BroydenSCS env/bin/python -m benchmark.test
 
+realscs:
+	SOLVER_CLASS=RealSCS NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
 newcqr:
 	SOLVER_CLASS=NewCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+eqnewcqr:
+	SOLVER_CLASS=EquilibratedNewCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
 
 lmnewcqr:
 	SOLVER_CLASS=LevMarNewCQR NUM_INSTANCES=10 env/bin/python -m benchmark.test

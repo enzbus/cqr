@@ -35,8 +35,8 @@ from .implementations.simple_hsde import SimpleHSDE
 from .implementations.simple_cqr import SimpleCQR
 from .implementations.lm_scs import *
 from .implementations.simple_cpr import SimpleCPR, EquilibratedCPR
-from .implementations.new_cqr import NewCQR, LevMarNewCQR
-
+from .implementations.new_cqr import NewCQR, LevMarNewCQR, EquilibratedNewCQR
+from .implementations.real_scs import RealSCS
 
 SOLVER_CLASS = os.getenv("SOLVER_CLASS")
 NUM_INSTANCES = int(os.getenv("NUM_INSTANCES", "1"))
@@ -45,13 +45,13 @@ SIZE_CHOICE = os.getenv("SIZE_CHOICE", "NORMAL") # or "SMALL"
 
 PROGRAM_SIZES = {
     "NORMAL": {
-        "_generate_problem_one":{"m":41, "n":30},
-        "_generate_problem_two":{"m":41, "n":30},
-        "_generate_portfolio_problem":{"n":100}},
+        "_generate_problem_one": {"m": 41, "n": 30},
+        "_generate_problem_two": {"m": 41, "n": 30},
+        "_generate_portfolio_problem": {"n": 100}},
     "SMALL": {
-        "_generate_problem_one":{"m":4, "n":3},
-        "_generate_problem_two":{"m":4, "n":3},
-        "_generate_portfolio_problem":{"n":10}},
+        "_generate_problem_one": {"m": 4, "n": 3},
+        "_generate_problem_two": {"m": 4, "n": 3},
+        "_generate_portfolio_problem": {"n": 10}},
 }
 # logging.basicConfig(level='INFO')
 
@@ -99,7 +99,7 @@ class Benchmark(TestCase):
         big_sigma = big_sigma.T @ big_sigma
         eival, eivec = np.linalg.eigh(big_sigma)
         eival *= 1e-4
-        eival = eival[-max(n//10,1):]
+        eival = eival[-max(n//10, 1):]
 
         # make it feasible; reduce w0 size so that it's in risk cone
         risk = cp.sum_squares((np.diag(np.sqrt(eival))

@@ -122,7 +122,6 @@ class BaseSolver:
 
     def loop(self):
         """Either use this default loop, or redefine based on your needs."""
-        self.prepare_loop()
         try:
             # for _ in tqdm.tqdm(range(self.max_iterations)):
             for _ in range(self.max_iterations):

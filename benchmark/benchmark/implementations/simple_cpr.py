@@ -32,7 +32,6 @@ class SimpleCPR(BaseSolver):
 
     hsde_q_used = "hsde_q"
 
-
     def prepare_loop(self):
         """Define anything we need to re-use."""
         self.z = np.zeros(self.n + self.m + 1)
