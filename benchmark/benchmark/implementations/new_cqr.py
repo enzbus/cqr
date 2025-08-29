@@ -91,6 +91,17 @@ class NewCQR(BaseSolver):
         self.s = np.zeros(self.m)
         self.x = np.zeros(self.n)
 
+         # some diagnostic
+        # import matplotlib.pyplot as plt
+        # plt.plot(
+        #      np.log10(np.sort(np.abs(self.matrix.data))), label='matrix data')
+        # plt.plot(np.log10(np.sort(np.abs(self.b))), label='b')
+        # plt.plot(np.log10(np.sort(np.abs(self.c))), label='c')
+        # plt.plot(np.log10(np.sort(np.abs(self.e))), label='e')
+        # plt.title(f"{self.__class__.__name__} LOG10 SORTED ABS OF DATA")
+        # plt.legend()
+        # plt.show()
+
     def cone_project(self, z):
         """Project on y cone."""
         return self.composed_cone_project(
@@ -198,8 +209,8 @@ class EquilibratedNewCQR(NewCQR):
 
     def prepare_loop(self):
         """Do Ruiz equilibration."""
-        if len(self.soc) > 0:
-            raise ValueError()
+        # if len(self.soc) > 0:
+        #     raise ValueError()
         matrix = self.matrix.todense()
         concatenated = np.block(
             [[matrix, self.b.reshape(self.m, 1)],
@@ -221,6 +232,13 @@ class EquilibratedNewCQR(NewCQR):
 
             nr = norm_rows(work_matrix)
             nc = norm_cols(work_matrix)
+
+            # equalize nr for SOCs
+            cur = self.zero + self.nonneg
+            for soc_dim in self.soc:
+                nr[cur:cur+soc_dim] = np.max(nr[cur:cur+soc_dim])
+                cur += soc_dim
+            # breakpoint()
 
             r1 = max(nr[nr > 0]) / min(nr[nr > 0])
             r2 = max(nc[nc > 0]) / min(nc[nc > 0])
@@ -246,6 +264,7 @@ class EquilibratedNewCQR(NewCQR):
         self.eq_c = work_matrix[-1, :-1]
 
         super().prepare_loop()
+
 
     def obtain_x_and_y(self):
         """Redefine if/as needed."""
