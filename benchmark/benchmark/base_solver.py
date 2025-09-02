@@ -210,7 +210,8 @@ class BaseSolver:
 
     # see options for compatibility across models
     def composed_cone_project(
-        self, conic_variable, has_zero=False, has_free=False, has_hsde=False):
+        self, conic_variable, has_zero=False, has_free=False, has_hsde=False,
+        has_hsde_first=False):
         """Project on composed cone, allowing for alternative formulations.
         
         :param conic_variable: Variable to project
@@ -228,6 +229,11 @@ class BaseSolver:
 
         result = np.empty_like(conic_variable)
         cur = 0
+
+        # optional HSDE first part
+        if has_hsde_first:
+            result[0] = np.maximum(conic_variable[0], 0.)
+            cur += 1
 
         # optional zero or free cone part
         if has_zero:

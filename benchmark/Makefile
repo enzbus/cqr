@@ -22,11 +22,23 @@ realscs:
 newcqr:
 	SOLVER_CLASS=NewCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
 
+# hsdenewcqr:
+# 	SOLVER_CLASS=HSDENewCQR NUM_INSTANCES=1 env/bin/python -m benchmark.test
+
 eqnewcqr:
 	SOLVER_CLASS=EquilibratedNewCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
 
+l2eqnewcqr:
+	SOLVER_CLASS=L2EquilibratedNewCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+eqlmnewcqr:
+	SOLVER_CLASS=EquilibratedLevMarNewCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
 lmnewcqr:
-	SOLVER_CLASS=LevMarNewCQR NUM_INSTANCES=10 env/bin/python -m benchmark.test
+	SOLVER_CLASS=LevMarNewCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+lmudnewcqr:
+	SOLVER_CLASS=LevMarUnitDampNewCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
 
 cpr:
 	SOLVER_CLASS=SimpleCPR NUM_INSTANCES=10 SIZE_CHOICE=NORMAL env/bin/python -m benchmark.test

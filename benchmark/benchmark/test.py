@@ -21,7 +21,7 @@ import os
 
 from unittest import TestCase, main, skip, skipIf
 
-# pylint: disable=unused-import
+# pylint: disable=unused-import,unused-wildcard-import,wildcard-import
 
 import cvxpy as cp
 import numpy as np
@@ -35,7 +35,7 @@ from .implementations.simple_hsde import SimpleHSDE
 from .implementations.simple_cqr import SimpleCQR
 from .implementations.lm_scs import *
 from .implementations.simple_cpr import SimpleCPR, EquilibratedCPR
-from .implementations.new_cqr import NewCQR, LevMarNewCQR, EquilibratedNewCQR
+from .implementations.new_cqr import *
 from .implementations.real_scs import RealSCS
 
 SOLVER_CLASS = os.getenv("SOLVER_CLASS")
@@ -183,9 +183,19 @@ class Benchmark(TestCase):
                         prog.solver_stats.extra_stats['solution_qualities'])
                     # breakpoint()
                     self.assertLess(sol_qual[-1], sol_qual[0])
-
         else:
-            raise ValueError("Wrong BENCHMARK_MODE env var value.")
+            # try integer single-seed mode
+            print('solver class', SOLVER_CLASS)
+            print("PROGRAM", program_generator.__name__)
+            for seed in tqdm.tqdm([int(MODE)]):
+                _, prog = program_generator(
+                    seed,
+                    **PROGRAM_SIZES[SIZE_CHOICE][program_generator.__name__])
+                prog.solve(solver=CvxpyWrapper(
+                    solver_class=globals()[SOLVER_CLASS]))
+                sol_qual = np.array(
+                    prog.solver_stats.extra_stats['solution_qualities'])
+                breakpoint() # pylint: disable=forgotten-debug-statement
 
 if __name__ == '__main__':  # pragma: no cover
     main()

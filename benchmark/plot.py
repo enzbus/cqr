@@ -44,7 +44,7 @@ for result_file in list(Path('results/').glob(f"{solver}*.npy.gz")):
     plt.semilogy(sol_quals.quantile(.99, axis=1).values, label=solver + ", 99%")
     plt.semilogy(sol_quals.max(axis=1).values, label=solver + ", max")
     plt.legend()
-    plt.title(f"{solver}, {program_name}")
+    plt.title(f"{solver}, {program_name}, worst seed {sol_quals.iloc[-1].argmax()}")
 
 plt.show()        # import matplotlib.pyplot as plt
 

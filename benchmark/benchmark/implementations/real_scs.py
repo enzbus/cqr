@@ -35,8 +35,8 @@ class RealSCS(BaseSolver):
         data = {
             "P": sp.sparse.csc_array((self.n, self.n)),
             "A": self.matrix, "b": self.b, "c": self.c}
-        assert len(self.soc) == 0
-        cone = {"z": self.zero, "l": self.nonneg}
+        # assert len(self.soc) == 0
+        cone = {"z": self.zero, "l": self.nonneg, "q": np.array(self.soc)}
         solver_iters = np.arange(0, 101000, 1000)[1:]
         # for max_iters in tqdm.tqdm(solver_iters):
         for max_iters in solver_iters:
