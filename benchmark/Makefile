@@ -34,6 +34,16 @@ l2eqnewcqr:
 eqlmnewcqr:
 	SOLVER_CLASS=EquilibratedLevMarNewCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
 
+posteqlmnewcqr:
+	SOLVER_CLASS=PostEquilibratedLevMarNewCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+eqlmnewcqr2:
+	SOLVER_CLASS=EquilibratedLevMarNewCQR2Iter NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+eqlmnewcqr10:
+	SOLVER_CLASS=EquilibratedLevMarNewCQR10Iter NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+
 lmnewcqr:
 	SOLVER_CLASS=LevMarNewCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
 

@@ -510,3 +510,121 @@ class L2EquilibratedNewCQR(EquilibratedNewCQR):
 
 class EquilibratedLevMarNewCQR(EquilibratedNewCQR, LevMarNewCQR):
     """Equilibrated Lev Mar."""
+
+
+class EquilibratedLevMarNewCQR10Iter(EquilibratedNewCQR, LevMarNewCQR):
+    """Equilibrated Lev Mar."""
+
+    lsqr_iters = 10
+    max_iterations = 100000//(2 * lsqr_iters + 1)
+
+class EquilibratedLevMarNewCQR2Iter(EquilibratedNewCQR, LevMarNewCQR):
+    """Equilibrated Lev Mar."""
+
+    lsqr_iters = 2
+    max_iterations = 100000//(2 * lsqr_iters + 1)
+
+
+def l2_ruiz(matrix, d=None, e=None):
+    """Simple Ruiz L2 equilibration."""
+
+    def norm_cols(matrix):
+        return np.linalg.norm(matrix, axis=0)
+
+    def norm_rows(matrix):
+        return np.linalg.norm(matrix, axis=1)
+
+    m, n = matrix.shape
+    if d is None:
+        d = np.ones(m)
+    if e is None:
+        e = np.ones(n)
+
+    work_matrix = ((matrix * e).T * d).T
+
+    for i in range(100):
+
+        nr = norm_rows(work_matrix)
+        nc = norm_cols(work_matrix)
+
+        r1 = np.max(nr[nr > 0]) / np.min(nr[nr > 0])
+        r2 = np.max(nc[nc > 0]) / np.min(nc[nc > 0])
+        # print(r1, r2)
+        if (r1-1 < 1e-5) and (r2-1 < 1e-5):
+            # logger.info('Equilibration converged.')
+            break
+
+        # print(r1, r2)
+
+        d[nr > 0] *= nr[nr > 0]**(-0.5)
+        e[nc > 0] *= ((m+1)/(n+1))**(0.25) * nc[nc > 0]**(-0.5)
+
+        work_matrix = ((matrix * e).T * d).T
+    return d, e
+
+
+class PostEquilibratedLevMarNewCQR(EquilibratedNewCQR, LevMarNewCQR):
+    """Idea with also diagonal equilibration of LevMar system."""
+
+    lsqr_iters = 5
+    max_iterations = 100000//(2 * lsqr_iters + 1)
+    damp = 0.
+
+    def prepare_loop(self):
+        """Skip SOCs."""
+        assert len(self.soc) == 0
+        super().prepare_loop()
+
+        mat = self.nullspace @ self.nullspace.T
+        mat[np.abs(mat) < np.finfo(float).eps] = 0.
+        self.base_mat = sp.sparse.csc_array(mat)
+        self.post_d = np.ones(self.m)
+        self.post_e = np.ones(self.m)
+
+
+    def iterate(self):
+        """Do one iteration."""
+
+        mask = np.ones(self.m)
+        mask[self.zero:] = self.z[self.zero:] > 0
+        actual_mat = self.base_mat @ sp.sparse.diags(
+            2 * mask - 1.) - sp.sparse.diags(mask)
+
+        m = actual_mat.todense()
+        self.post_d[:], self.post_e[:] = l2_ruiz(
+            m, d=self.post_d, e=self.post_e)
+
+        d = self.post_d
+        e = self.post_e
+
+        # why is this??
+        assert np.allclose(d, e)
+        internal_mat = sp.sparse.diags(d) @ actual_mat @ sp.sparse.diags(e)
+
+        # breakpoint()        
+
+        self.y[:] = self.cone_project(self.z)
+        step = self.linspace_project(2 * self.y - self.z) - self.y
+        # print(np.linalg.norm(step))
+
+        result = sp.sparse.linalg.lsqr(
+                    internal_mat, -sp.sparse.diags(d) @ step,
+                    x0=sp.sparse.diags(1./e) @ step,
+                    damp=0., # might make sense to change this?
+                    atol=0., btol=0., # might make sense to change this
+                    iter_lim=self.lsqr_iters)
+        # breakpoint()
+        # print(result[1:-1])
+        self.z[:] = self.z + sp.sparse.diags(e) @ result[0]
+
+
+
+        # import matplotlib.pyplot as plt
+        # breakpoint()
+        # plt.plot(np.linalg.norm(m, axis=0))
+        # plt.plot(np.linalg.norm(m, axis=1))
+        # plt.show()
+
+        # # breakpoint()
+
+        # super().iterate()
