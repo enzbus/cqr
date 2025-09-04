@@ -37,6 +37,8 @@ from .implementations.lm_scs import *
 from .implementations.simple_cpr import SimpleCPR, EquilibratedCPR
 from .implementations.new_cqr import *
 from .implementations.real_scs import RealSCS
+from .implementations.real_osqp import RealOSQP
+
 
 SOLVER_CLASS = os.getenv("SOLVER_CLASS")
 NUM_INSTANCES = int(os.getenv("NUM_INSTANCES", "1"))
