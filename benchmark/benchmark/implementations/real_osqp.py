@@ -48,10 +48,11 @@ class RealOSQP(BaseSolver):
             eps_abs=1e-16,
             eps_rel=1e-16,
             warm_starting=False,
+            polishing=True,
             # verbose=True
             )
 
-        for max_iter in np.linspace(0,100000,11,dtype=int):
+        for max_iter in np.linspace(0,10000,101,dtype=int):
             if max_iter > 0:
                 m.update_settings(max_iter=max_iter)
                 results = m.solve()
@@ -61,5 +62,5 @@ class RealOSQP(BaseSolver):
                 self.callback_iterate()
             except StopIteration:
                 break
-        print(self.solution_qualities)
+        # print(self.solution_qualities)
         # breakpoint()

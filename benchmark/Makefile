@@ -20,7 +20,7 @@ realscs:
 	SOLVER_CLASS=RealSCS NUM_INSTANCES=1000 env/bin/python -m benchmark.test
 
 realosqp:
-	SOLVER_CLASS=RealOSQP NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+	SOLVER_CLASS=RealOSQP NUM_INSTANCES=1000 SIZE_CHOICE=NORMAL env/bin/python -m benchmark.test
 
 newcqr:
 	SOLVER_CLASS=NewCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
