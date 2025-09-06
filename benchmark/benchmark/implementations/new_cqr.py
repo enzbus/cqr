@@ -78,9 +78,8 @@ class NewCQR(BaseSolver):
                 getattr(self, self.used_c))
 
         # shift in the linspace projector
-        self.e = self.nullspace @ self.nullspace.T @ (
-            self.qr_matrix @ self.c_qr - getattr(self, self.used_b)
-                ) - self.qr_matrix @ self.c_qr
+        # self.e = self.nullspace @ self.nullspace.T @ (self.qr_matrix @ self.c_qr - getattr(self, self.used_b)) - self.qr_matrix @ self.c_qr
+        self.e = -self.nullspace @ self.nullspace.T @ getattr(self, self.used_b) - self.qr_matrix @ self.c_qr
 
         # # shift in the linspace projector
         # self.e = (self.nullspace @ self.nullspace.T) @ (

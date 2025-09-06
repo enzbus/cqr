@@ -19,8 +19,11 @@ import numpy as np
 import scipy as sp
 
 from .simple_scs import DouglasRachfordSCS
-from cqr.ql_transform import data_ql_transform
-
+try:
+    from cqr.ql_transform import data_ql_transform
+except ImportError:
+    import warnings
+    warnings.warn("QL Transform unplugged, this solver disabled!")
 
 class SimpleCQR(DouglasRachfordSCS):
     """With "Abc" QR factorization."""
