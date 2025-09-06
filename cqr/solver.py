@@ -39,6 +39,8 @@ class Unbounded(Exception):
 class Infeasible(Exception):
     """Program infeasible."""
 
+class CQRError(Exception):
+    """Base class for CQR error."""
 
 class Solver:
     """Solver class.
@@ -83,7 +85,7 @@ class Solver:
         assert qr in ['NUMPY', 'PYSPQR']
         self.qr = qr
         self.verbose = verbose
-        self.ruiz_iters=int(ruiz_iters)
+        self.ruiz_iters = int(ruiz_iters)
         assert self.ruiz_iters > 0
 
         if self.verbose:
@@ -294,8 +296,8 @@ class Solver:
         for i in range(max_iter):
             self.y_equil[:] = self.dual_cone_project_basic(self.newcqr_z)
             step = self.nullspace_projector @ (self.nullspace_projector.T @ (
-                    2 * self.y_equil - self.newcqr_z)) 
-            step += self.linspace_project_shift 
+                    2 * self.y_equil - self.newcqr_z))
+            step += self.linspace_project_shift
             step -= self.y_equil
             losses.append(np.linalg.norm(step))
             self.newcqr_z[:] += step
@@ -307,8 +309,33 @@ class Solver:
         self.x_transf[:] = self.matrix_qr_transf.T @ (
             self.b_qr_transf - self.s_equil)
 
+        gap = self.c_qr_transf @ self.x_transf + self.b_qr_transf @ self.y_equil
+        print('gap', gap)
+
+        if not np.isclose(gap, 0.):
+            ## UNBOUNDED
+            self.x_transf[:] = (self.matrix_qr_transf.T @ step)
+
+            ## INFEASIBLE
+            self.y_equil[:] = step
+
+            if self.c_qr_transf @ self.x_transf < -1e-8:
+                raise Unbounded()
+            if self.b_qr_transf @ self.y_equil < -1e-8:
+                raise Infeasible()
+
+            raise CQRError()
+
+            # breakpoint()
+
+            # raise Unbounded()
+
+        # self.y_equil[:] = self.dual_cone_project_basic(step)
+        # self.s_equil[:] = self.y_equil - step
+        # self.x_transf[:] = self.matrix_qr_transf.T @ (
+        #     self.b_qr_transf - self.s_equil)
         # breakpoint()
-        
+
         # import matplotlib.pyplot as plt
         # plt.semilogy(losses)
         # plt.show()
