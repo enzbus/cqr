@@ -73,7 +73,7 @@ class Solver:
 
     def __init__(
             self, matrix, b, c, zero, nonneg, soc=(), x0=None, y0=None,
-            qr='PYSPQR', ruiz_iters=5, verbose=True):
+            qr='PYSPQR', ruiz_iters=5, verbose=True, lsqr_iters=1, damp=0.):
 
         # process program data
         self.matrix = sp.sparse.csc_matrix(matrix)
@@ -95,6 +95,11 @@ class Solver:
         self.verbose = verbose
         self.ruiz_iters = int(ruiz_iters)
         assert self.ruiz_iters > 0
+
+        self.lsqr_iters = int(lsqr_iters)
+        assert self.lsqr_iters >= 0
+        self.damp = float(damp)
+        assert self.damp >= 0.
 
         if self.verbose:
             print(
@@ -352,6 +357,45 @@ class Solver:
             self.y_equil[:] = y_cert
             raise Unbounded()
 
+    def multiply_cone_project_derivative(self, z, dz):
+        """Derivative projection on y cone."""
+
+        result = np.zeros_like(z)
+
+        # zero cone
+        result[:self.zero] = dz[:self.zero]
+        cur = self.zero
+
+        # nonneg cone
+        result[cur:cur+self.nonneg] = (
+            z[cur:cur+self.nonneg] > 0.) * dz[cur:cur+self.nonneg]
+        cur += self.nonneg
+
+        # soc cones
+        for soc_dim in self.soc:
+            result[cur:cur+soc_dim] = \
+                self.multiply_jacobian_second_order_project(
+                    z[cur:cur+soc_dim], dz[cur:cur+soc_dim])
+            cur += soc_dim
+        assert cur == self.m
+
+        return result
+
+    def linspace_project_derivative(self, dz):
+        """Derivative linspace project (y+s) -> y."""
+        return self.nullspace_projector @ (self.nullspace_projector.T @ dz)
+
+    def multiply_jacobian_dstep(self, z, dz):
+        """Multiply by Jacobian of DR step operator."""
+        # breakpoint()
+        tmp = self.multiply_cone_project_derivative(z, dz)
+        return self.linspace_project_derivative(2 * tmp - dz) - tmp
+
+    def multiply_jacobian_dstep_transpose(self, z, dr):
+        """Multiply by Jacobian of DR step operator transpose."""
+        tmp = self.linspace_project_derivative(dr)
+        return self.multiply_cone_project_derivative(z, 2 * tmp - dr) - tmp
+
     def _new_cqr(self, max_iter=int(1e5), eps=1e-12):
         """Main ADMM iterations."""
         # this should come down from equil instead?
@@ -376,7 +420,22 @@ class Solver:
             self.step[:] += self.linspace_project_shift
             self.step[:] -= self.y_equil
             losses.append(np.linalg.norm(self.step))
-            self.newcqr_z[:] += self.step
+
+            if (self.lsqr_iters) > 0 and (self.lsqr_iters < self.iter):
+                result = sp.sparse.linalg.lsqr(
+                    sp.sparse.linalg.LinearOperator(
+                        shape=(self.m, self.m),
+                        matvec=lambda dz: self.multiply_jacobian_dstep(self.newcqr_z, dz),
+                        rmatvec=lambda dr: self.multiply_jacobian_dstep_transpose(
+                            self.newcqr_z, dr)), -np.copy(self.step),
+                            x0=np.copy(self.step),
+                            damp=self.damp, # might make sense to change this?
+                            atol=0., btol=0., # might make sense to change this
+                            iter_lim=self.lsqr_iters)
+                self.newcqr_z[:] += result[0]
+            else:
+                self.newcqr_z[:] += self.step
+
             if losses[-1] < eps:
                 break
 
@@ -388,6 +447,8 @@ class Solver:
         gap = self.c_qr_transf @ self.x_transf + self.b_qr_transf @ self.y_equil
         print('gap', gap)
 
+        # TODO: this is the "inaccurate" part; we should decide which mode
+        # is better to return
         if not np.isclose(gap, 0.):
             ## UNBOUNDED
             self.x_transf[:] = (self.matrix_qr_transf.T @ self.step)
@@ -449,7 +510,46 @@ class Solver:
         #             # print('INFEASIBLE')
         #             break
 
-    # TODO: From here down it's probably all to rewrite
+    @staticmethod
+    def multiply_jacobian_second_order_project(z, dz):
+        """Multiply by Jacobian of projection on second-order cone.
+
+        We follow the derivation in `Solution Refinement at Regular Points of
+        Conic Problems
+        <https://stanford.edu/~boyd/papers/pdf/cone_prog_refine.pdf>`_.
+
+        :param z: Point at which the Jacobian is computed.
+        :type z: np.array
+        :param dz: Input array.
+        :type dz: np.array
+
+        :return: Multiplication of dz by the Jacobian
+        :rtype: np.array
+        """
+
+        assert len(z) >= 2
+        assert len(z) == len(dz)
+        result = np.zeros_like(z)
+
+        x, t = z[1:], z[0]
+
+        norm_x = np.linalg.norm(x)
+
+        if norm_x <= t:
+            result[:] = dz
+            return result
+
+        if norm_x <= -t:
+            return result
+
+        dx, dt = dz[1:], dz[0]
+
+        result[0] = norm_x * dt + x.T @ dx
+        result[1:] = x * dt + (t + norm_x) * dx - t * x * (
+            x.T @ dx) / (norm_x**2)
+        return result / (2 * norm_x)
+
+    # TODO: From here down it's probably all to throw
 
     def _qr_transform_dual_space(self):
         """Apply QR transformation to dual space."""
