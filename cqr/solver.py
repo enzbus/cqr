@@ -22,6 +22,8 @@ Each method, which should be very small and simple, translates to a C function.
 Experiments (new features, ...) should be done as subclasses.
 """
 
+import logging
+
 # import cvxpy as cp
 import numpy as np
 import scipy as sp
@@ -31,13 +33,19 @@ from .equilibrate import hsde_ruiz_equilibration
 
 from pyspqr import qr
 
+logger = logging.getLogger(__name__)
+
+class CQRFlow(Exception):
+    """Base exception used to control program flow."""
 
 class Unbounded(Exception):
     """Program unbounded."""
 
-
 class Infeasible(Exception):
     """Program infeasible."""
+
+class Solved(Exception):
+    """Solution found."""
 
 class CQRError(Exception):
     """Base class for CQR error."""
@@ -284,23 +292,100 @@ class Solver:
             self.nullspace_projector.T @ self.b_qr_transf
                 ) - self.matrix_qr_transf @ self.c_qr_transf
 
-    def _new_cqr(self, max_iter=int(1e4), eps=1e-12):
+    def _stats_convergence(self):
+        """Evaluate statistics, determine convergence, write logs."""
+        self.y_equil[:] = self.dual_cone_project_basic(self.newcqr_z)
+        self.s_equil[:] = self.y_equil - self.newcqr_z
+        self.x_transf[:] = self.matrix_qr_transf.T @ (
+            self.b_qr_transf - self.s_equil)
+
+        eps_infeas = 1e-12
+        eps_unbound = 1e-12
+        eps_pri = 1e-12
+        eps_dua = 1e-12
+        eps_gap = 1e-12
+
+        # all metrics should be normalized using SCS paper formulas
+
+        # need to de-equilibrate this
+        primal_residual_equil = self.matrix_qr_transf @ self.x_transf - self.b_qr_transf + self.s_equil
+        # need to de-qr and de-equilibrate this
+        dual_residual_qr = self.matrix_qr_transf.T @ self.y_equil + self.c_qr_transf
+        # this one should be good to go
+        gap = self.c_qr_transf @ self.x_transf + self.b_qr_transf @ self.y_equil
+
+        # unbounded
+        x_cert = (self.matrix_qr_transf.T @ self.step)
+        # de-equil
+        s_cert = -self.matrix_qr_transf @ x_cert
+        unbound_err = np.linalg.norm(self.cone_project(s_cert) - s_cert)
+        # should be good
+        unbound_gap = self.c_qr_transf.T @ x_cert
+
+        # infeasible
+        y_cert = self.step
+        # de-qr and de-equil
+        infeas_err_1 = np.linalg.norm(self.matrix_qr_transf.T @ y_cert)
+        # de-equil
+        infeas_err_2 = np.linalg.norm(self.dual_cone_project_basic(y_cert) - y_cert)
+        # should be good
+        infeas_gap = self.b_qr_transf.T @ y_cert
+
+        logger.info(
+            "it=%5d pri=%.2e dua=%.2e  gap=%.2e; inf=(%.1e, %.1e, %.1e), unb=(%.1e, %.1e)",
+            self.iter, np.linalg.norm(primal_residual_equil),
+            np.linalg.norm(dual_residual_qr), gap,
+            infeas_err_1, infeas_err_2, infeas_gap,
+            unbound_err, unbound_gap,
+        )
+
+        if np.abs(gap) < eps_gap and np.linalg.norm(primal_residual_equil) < eps_pri and np.linalg.norm(dual_residual_qr) < eps_dua:
+            print("SOLVED")
+            raise Solved()
+
+        if infeas_gap < 0 and (infeas_err_1 / (-infeas_gap) < eps_infeas) and (infeas_err_2 / (-infeas_gap) < eps_infeas):
+            self.x_transf[:] = x_cert
+            self.y_equil[:] = y_cert
+            raise Infeasible()
+
+        if unbound_gap < 0 and (unbound_err / (-unbound_gap) < eps_unbound):
+            self.x_transf[:] = x_cert
+            self.y_equil[:] = y_cert
+            raise Unbounded()
+
+        # print("PRIMAL SYSTEM LOSS",
+        # np.linalg.norm(self.matrix_qr_transf @ self.x_transf - self.b_qr_transf + self.s_equil))
+        # print("DUAL SYSTEM LOSS",
+        # np.linalg.norm(self.matrix_qr_transf.T @ self.y_equil + self.c_qr_transf))
+        # gap = self.c_qr_transf @ self.x_transf + self.b_qr_transf @ self.y_equil
+        # print("GAP",gap
+        # )
+
+    def _new_cqr(self, max_iter=int(1e5), eps=1e-14):
         """Main ADMM iterations."""
         # this should come down from equil instead?
         self.s_equil = self.b_qr_transf - (
             self.matrix_qr_transf @ self.x_transf)
         self.newcqr_z = self.y_equil - self.s_equil
+        self.step = np.zeros_like(self.newcqr_z)
 
         losses = []
 
-        for i in range(max_iter):
+        for self.iter in range(max_iter):
             self.y_equil[:] = self.dual_cone_project_basic(self.newcqr_z)
-            step = self.nullspace_projector @ (self.nullspace_projector.T @ (
+
+            if self.iter % 100 == 0:
+                try:
+                    self._stats_convergence()
+                except Solved:
+                    break
+
+            self.step[:] = self.nullspace_projector @ (self.nullspace_projector.T @ (
                     2 * self.y_equil - self.newcqr_z))
-            step += self.linspace_project_shift
-            step -= self.y_equil
-            losses.append(np.linalg.norm(step))
-            self.newcqr_z[:] += step
+            self.step[:] += self.linspace_project_shift
+            self.step[:] -= self.y_equil
+            losses.append(np.linalg.norm(self.step))
+            self.newcqr_z[:] += self.step
             if losses[-1] < eps:
                 break
 
@@ -314,16 +399,17 @@ class Solver:
 
         if not np.isclose(gap, 0.):
             ## UNBOUNDED
-            self.x_transf[:] = (self.matrix_qr_transf.T @ step)
+            self.x_transf[:] = (self.matrix_qr_transf.T @ self.step)
 
             ## INFEASIBLE
-            self.y_equil[:] = step
+            self.y_equil[:] = self.step
 
             if self.c_qr_transf @ self.x_transf < -1e-8:
                 raise Unbounded()
             if self.b_qr_transf @ self.y_equil < -1e-8:
                 raise Infeasible()
 
+            breakpoint()
             raise CQRError()
 
             # breakpoint()
