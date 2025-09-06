@@ -340,7 +340,6 @@ class Solver:
         )
 
         if np.abs(gap) < eps_gap and np.linalg.norm(primal_residual_equil) < eps_pri and np.linalg.norm(dual_residual_qr) < eps_dua:
-            print("SOLVED")
             raise Solved()
 
         if infeas_gap < 0 and (infeas_err_1 / (-infeas_gap) < eps_infeas) and (infeas_err_2 / (-infeas_gap) < eps_infeas):
@@ -353,15 +352,7 @@ class Solver:
             self.y_equil[:] = y_cert
             raise Unbounded()
 
-        # print("PRIMAL SYSTEM LOSS",
-        # np.linalg.norm(self.matrix_qr_transf @ self.x_transf - self.b_qr_transf + self.s_equil))
-        # print("DUAL SYSTEM LOSS",
-        # np.linalg.norm(self.matrix_qr_transf.T @ self.y_equil + self.c_qr_transf))
-        # gap = self.c_qr_transf @ self.x_transf + self.b_qr_transf @ self.y_equil
-        # print("GAP",gap
-        # )
-
-    def _new_cqr(self, max_iter=int(1e5), eps=1e-14):
+    def _new_cqr(self, max_iter=int(1e5), eps=1e-12):
         """Main ADMM iterations."""
         # this should come down from equil instead?
         self.s_equil = self.b_qr_transf - (
@@ -409,8 +400,8 @@ class Solver:
             if self.b_qr_transf @ self.y_equil < -1e-8:
                 raise Infeasible()
 
-            breakpoint()
-            raise CQRError()
+            # breakpoint()
+            # raise CQRError()
 
             # breakpoint()
 
