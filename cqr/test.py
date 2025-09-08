@@ -504,20 +504,33 @@ class TestSolverClass(TestCase):
         w0 -= np.sum(w0)/len(w0)
         w0 /= np.sum(np.abs(w0))
         mu = np.random.randn(n) * 1e-3
-        Sigma = np.random.randn(n, n)
-        Sigma = Sigma.T @ Sigma
-        eival, eivec = np.linalg.eigh(Sigma)
+        big_sigma = np.random.randn(n, n)
+        big_sigma = big_sigma.T @ big_sigma
+        eival, eivec = np.linalg.eigh(big_sigma)
         eival *= 1e-4
-        eival = eival[-n//10:]
+        eival = eival[-max(n//10, 1):]
+
+        # make it feasible; reduce w0 size so that it's in risk cone
+        risk = cp.sum_squares((np.diag(np.sqrt(eival))
+                @ eivec[:, -n//10:].T) @ w)
+        risk_limit = 0.00005
+
+        for _ in range(10):
+            w.value = w0
+            if risk.value < risk_limit:
+                break
+            w0 /= 2.
+        else:
+            raise ValueError("Increase counter, wasn't enough.")
 
         # Sigma = eivec @ np.diag(eival) @ eivec.T
         objective = w.T @ mu + 1e-5 * cp.norm1(w-w0)
         constraints = [#w >=0, #w<=w_max,
             cp.sum(w) == 0, cp.norm1(w-w0) <= 0.05,
             cp.norm1(w) <= 1,
-            cp.sum_squares((np.diag(np.sqrt(eival)) @ eivec[:, -n//10:].T) @ w) <= 0.00005]
+            risk <= risk_limit]
         program = cp.Problem(cp.Minimize(objective), constraints)
-        program.solve(solver='SCS', verbose=True, eps=1e-14)
+        # program.solve(solver='SCS', verbose=True, eps=1e-14)
         return w, program
 
     # @skip("slow test, skip for now")

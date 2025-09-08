@@ -28,7 +28,7 @@ import logging
 import numpy as np
 import scipy as sp
 
-from .equilibrate import hsde_ruiz_equilibration
+from .equilibrate import hsde_ruiz_equilibration #, new_equilibrate
 # from .line_search import LineSearcher, LineSearchFailed
 
 from pyspqr import qr
@@ -73,7 +73,13 @@ class Solver:
 
     def __init__(
             self, matrix, b, c, zero, nonneg, soc=(), x0=None, y0=None,
-            qr='PYSPQR', ruiz_iters=5, verbose=True, lsqr_iters=1, damp=0.):
+            qr='PYSPQR',
+            ruiz_iters=5, # very unclear heavier equilibration helps
+            ruiz_norm=2, # very unclear np.inf is better
+            verbose=True,
+            lsqr_iters=2,
+            damp=1e-8, # in some corner cases with zero damp LSQR fails, change to CG
+            ):
 
         # process program data
         self.matrix = sp.sparse.csc_matrix(matrix)
@@ -94,8 +100,9 @@ class Solver:
         self.qr = qr
         self.verbose = verbose
         self.ruiz_iters = int(ruiz_iters)
-        assert self.ruiz_iters > 0
-
+        assert self.ruiz_iters >= 0
+        self.ruiz_norm = ruiz_norm
+        assert self.ruiz_norm in [2, np.inf]
         self.lsqr_iters = int(lsqr_iters)
         assert self.lsqr_iters >= 0
         self.damp = float(damp)
@@ -128,38 +135,6 @@ class Solver:
             self.status = 'Unbounded'
 
         self._invert_equilibrate()
-
-        #     # breakpoint()
-
-        #     self._qr_transform_dual_space()
-        #     self._qr_transform_gap()
-
-        #     self.admm_intercept = self.admm_linspace_project(np.zeros(self.m*2))
-
-        #     #### self.toy_solve()
-        #     ##### self.x_transf, self.y = self.solve_program_cvxpy(
-        #     #####     self.matrix_qr_transf, b, self.c_qr_transf)
-
-        #     # self.new_toy_solve()
-        #     # self.var_reduced = self.toy_admm_solve(self.var_reduced)
-        #     # self.var_reduced = self.old_toy_douglas_rachford_solve(self.var_reduced)
-
-        #     # self.decide_solution_or_certificate()
-        #     # self.toy_douglas_rachford_solve()
-        #     self.new_toy_douglas_rachford_solve()
-        #     self.decide_solution_or_certificate()
-
-        #     self._invert_qr_transform_gap()
-        #     self._invert_qr_transform_dual_space()
-        #     self._invert_qr_transform()
-        #     self.status = 'Optimal'
-        # except Infeasible:
-        #     self.status = 'Infeasible'
-        # except Unbounded:
-        #     self._invert_qr_transform()
-        #     self.status = 'Unbounded'
-
-        # self._invert_equilibrate()
 
         print('Resulting status:', self.status)
 
@@ -220,7 +195,7 @@ class Solver:
                 self.matrix, self.b, self.c, dimensions={
                     'zero': self.zero, 'nonneg': self.nonneg,
                     'second_order': self.soc},
-                max_iters=self.ruiz_iters, l_norm=2, eps_cols=1e-5,
+                max_iters=self.ruiz_iters, l_norm=self.ruiz_norm, eps_cols=1e-5,
                 eps_rows=1e-5)
 
         self.x_equil = self.equil_sigma * (self.x / self.equil_e)
@@ -460,55 +435,6 @@ class Solver:
                 raise Unbounded()
             if self.b_qr_transf @ self.y_equil < -1e-8:
                 raise Infeasible()
-
-            # breakpoint()
-            # raise CQRError()
-
-            # breakpoint()
-
-            # raise Unbounded()
-
-        # self.y_equil[:] = self.dual_cone_project_basic(step)
-        # self.s_equil[:] = self.y_equil - step
-        # self.x_transf[:] = self.matrix_qr_transf.T @ (
-        #     self.b_qr_transf - self.s_equil)
-        # breakpoint()
-
-        # import matplotlib.pyplot as plt
-        # plt.semilogy(losses)
-        # plt.show()
-
-        # breakpoint()
-
-        # self.y[:] = self.cone_project(self.z)
-        # step = self.linspace_project(2 * self.y - self.z) - self.y
-        # # print(np.linalg.norm(step))
-        # self.z[:] = self.z + step
-
-        # for i in range(max_iter):
-        #     step = self.douglas_rachford_step(dr_y)
-        #     losses.append(np.linalg.norm(step))
-        #     # xs.append(dr_y)
-        #     # steps.append(step)
-        #     # print(f'iter {i} loss {losses[-1]:.2e}')
-        #     if np.linalg.norm(step) < eps:
-        #         print(f'converged in {i} iterations')
-        #         break
-
-        #     dr_y = np.copy(dr_y + step)
-
-        #     # infeas / unbound
-        #     if i % 100 == 99:
-        #         tmp = self.admm_linspace_project(dr_y)
-        #         cert = tmp - self.admm_cone_project(tmp)
-        #         # y_cert = cert[:self.m]
-        #         # s_cert = cert[self.m:]
-        #         # x_cert = self.matrix_qr_transf.T @ cert[self.m:]
-        #         cert /= np.linalg.norm(cert) # no, shoud normalize y by b and x,s by c
-        #         # TODO double check this logic
-        #         if (np.linalg.norm(self.matrix_qr_transf.T @ cert[:self.m]) < eps) and (np.linalg.norm(self.matrix_qr_transf @ self.matrix_qr_transf.T @ cert[self.m:] - cert[self.m:]) < eps):
-        #             # print('INFEASIBLE')
-        #             break
 
     @staticmethod
     def multiply_jacobian_second_order_project(z, dz):
