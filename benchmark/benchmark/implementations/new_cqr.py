@@ -252,6 +252,60 @@ class NewCQR(BaseSolver):
 #     #     self.y[:] = self.u_ykappa[1:] / np.abs(kappa)
 #     #     self.x[:] = sp.linalg.solve_triangular(self.triangular, self.u_x, lower=False)
 
+class BaseBroydenCQR(NewCQR):
+    """Add logic to save dz's and dstep's."""
+
+    memory = 10
+
+    def prepare_loop(self):
+        """Create storage arrays."""
+        super().prepare_loop()
+        self.dzs = np.empty((self.memory, self.m), dtype=float)
+        self.dsteps = np.empty((self.memory, self.m), dtype=float)
+        self.old_z = np.empty(self.m, dtype=float)
+        self.old_step = np.empty(self.m, dtype=float)
+
+    def iterate(self):
+        """Simple Douglas Rachford iteration with Broyden update to override.
+        """
+
+        self.dzs[
+            len(self.solution_qualities) % self.memory] = self.z - self.old_z
+        self.old_z[:] = self.z
+
+        self.y[:] = self.cone_project(self.z)
+        step = self.linspace_project(2 * self.y - self.z) - self.y
+        print(np.linalg.norm(step))
+
+        self.dsteps[
+            len(self.solution_qualities) % self.memory] = step - self.old_step
+        self.old_step[:] = step
+
+        if len(self.solution_qualities) > self.memory + 2: # + 1 should suffice
+            newstep = self.compute_broyden_step(step)
+            self.z[:] = self.z - newstep
+        else:
+            self.z[:] = self.z + step
+
+    def compute_broyden_step(self, step):
+        """Base method to compute a Broyden-style approximate Newton step."""
+        return step
+
+class ToyBroydenCQR(BaseBroydenCQR):
+    """Temporary."""
+
+    def compute_broyden_step(self, step):
+        """Temporary."""
+        import cvxpy as cp
+        Jacobian = cp.Variable((self.m, self.m))
+        objective = cp.Minimize(cp.sum_squares(Jacobian + np.eye(self.m)))
+        constraints = [Jacobian @ self.dzs.T == self.dsteps.T]
+        # constraints = [Jacobian @ self.dsteps.T == self.dzs.T]
+        cp.Problem(objective, constraints).solve(verbose=False)
+        newstep = np.linalg.solve(Jacobian.value, step)
+        # newstep = Jacobian.value @ step
+        return newstep
+
 
 class LevMarNewCQR(NewCQR):
     """Using Levemberg Marquardt."""
@@ -580,7 +634,6 @@ class PostEquilibratedLevMarNewCQR(EquilibratedNewCQR, LevMarNewCQR):
         self.post_d = np.ones(self.m)
         self.post_e = np.ones(self.m)
 
-
     def iterate(self):
         """Do one iteration."""
 
@@ -600,7 +653,7 @@ class PostEquilibratedLevMarNewCQR(EquilibratedNewCQR, LevMarNewCQR):
         assert np.allclose(d, e)
         internal_mat = sp.sparse.diags(d) @ actual_mat @ sp.sparse.diags(e)
 
-        # breakpoint()        
+        # breakpoint()
 
         self.y[:] = self.cone_project(self.z)
         step = self.linspace_project(2 * self.y - self.z) - self.y
@@ -615,8 +668,6 @@ class PostEquilibratedLevMarNewCQR(EquilibratedNewCQR, LevMarNewCQR):
         # breakpoint()
         # print(result[1:-1])
         self.z[:] = self.z + sp.sparse.diags(e) @ result[0]
-
-
 
         # import matplotlib.pyplot as plt
         # breakpoint()

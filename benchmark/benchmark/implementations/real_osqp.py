@@ -52,7 +52,7 @@ class RealOSQP(BaseSolver):
             # verbose=True
             )
 
-        for max_iter in np.linspace(0,10000,101,dtype=int):
+        for max_iter in np.linspace(0, 10000, 101, dtype=int):
             if max_iter > 0:
                 m.update_settings(max_iter=max_iter)
                 results = m.solve()
