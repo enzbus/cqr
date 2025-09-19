@@ -101,10 +101,10 @@ class NewCQR(BaseSolver):
         """Linspace project (y+s) -> y."""
         return self.nullspace @ (self.nullspace.T @ y_plus_s) + self.e
 
-    # def dr_step(self, z):
-    #     """DR step."""
-    #     y = self.cone_project(z)
-    #     return self.linspace_project(2 * y - z) - y
+    def dr_step(self, z):
+        """DR step."""
+        y = self.cone_project(z)
+        return self.linspace_project(2 * y - z) - y
 
     def iterate(self):
         """Simple Douglas Rachford iteration."""
@@ -116,9 +116,30 @@ class NewCQR(BaseSolver):
 
         # self.allsteps.append(np.copy(step))
 
-        # if len(self.solution_qualities) > 50000:
-        #     import matplotlib.pyplot as plt
-        #     breakpoint()
+        #if len(self.solution_qualities) > 50000:
+#         if  len(self.solution_qualities) > 10000 and (
+#             self.solution_qualities[-1] > 1e-6) and (
+#             (self.solution_qualities[-1] - self.solution_qualities[-2]) > -1e-10):
+#             import matplotlib.pyplot as plt
+
+# myz = self.z - step
+# curstep = self.dr_step(myz)
+# nextstep = self.dr_step(myz + curstep)
+# nextnextstep = self.dr_step(myz + curstep + nextstep)
+# plt.plot(curstep)
+# plt.plot(nextstep)
+# plt.plot(nextnextstep)
+# plt.show()
+
+
+# J = -np.eye(self.m)
+# dz = self.dr_step(self.z)
+# df = self.dr_step(self.z + dz) - self.dr_step(self.z)
+# num = dz - J @ df
+# den = dz @ J @ df
+# J_plus = J + np.outer(num, dz @ J) / den
+
+#             breakpoint()
 
     def obtain_x_and_y(self):
         """Redefine if/as needed."""
@@ -255,7 +276,8 @@ class NewCQR(BaseSolver):
 class BaseBroydenCQR(NewCQR):
     """Add logic to save dz's and dstep's."""
 
-    memory = 10
+    memory = 1
+    max_iterations = 100000
 
     def prepare_loop(self):
         """Create storage arrays."""
@@ -289,7 +311,150 @@ class BaseBroydenCQR(NewCQR):
 
     def compute_broyden_step(self, step):
         """Base method to compute a Broyden-style approximate Newton step."""
-        return step
+        return -step
+
+class SparseBroydenCQR(BaseBroydenCQR):
+    """Test sparse 1-memory."""
+    max_iterations = 100000
+    memory = 1
+    def compute_broyden_step(self, step):
+        """1-Memory sparse update."""
+
+        J0 = sp.sparse.linalg.LinearOperator(
+            shape=(self.m, self.m),
+            matvec = lambda x: -x
+        )
+
+        ds = self.dsteps[0,:]
+        ds_norm = np.linalg.norm(ds)
+        ds_normed = ds / ds_norm
+        dz = self.dzs[0,:]
+        dz_snormed = dz / ds_norm
+
+        def matvec(x, ds_normed, dz_snormed, J_minus1):
+            ds_component = x @ ds_normed
+            return J_minus1 @ (
+                x - ds_normed * ds_component) + dz_snormed * ds_component
+
+        J1 = sp.sparse.linalg.LinearOperator(
+            shape=(self.m, self.m),
+            matvec = lambda x: matvec(x,  ds_normed, dz_snormed, J0)
+        )
+        # breakpoint()
+        assert np.allclose(J1 @ self.dsteps[0], self.dzs[0])
+        return J1 @ step
+
+class Sparse2BroydenCQR(BaseBroydenCQR):
+    """Test sparse 2-memory."""
+    max_iterations = 100_000
+    memory = 2
+    def compute_broyden_step(self, step):
+        """2-Memory sparse update."""
+
+        mystep = np.copy(step)
+        result = np.zeros_like(step)
+
+        # this should be correct
+        current_index = len(self.solution_qualities) % self.memory
+        previous_index = 1 - current_index
+
+        # correction by current index
+        ds = self.dsteps[current_index,:]
+        ds_norm = np.linalg.norm(ds)
+        ds_normed = ds / ds_norm
+        dz = self.dzs[current_index,:]
+        dz_snormed = dz / ds_norm
+
+        ds_component = mystep @ ds_normed
+        mystep -= ds_normed * ds_component
+        result +=  dz_snormed * ds_component
+
+        # correction by previous index
+        ds = self.dsteps[previous_index,:]
+        ds_norm = np.linalg.norm(ds)
+        ds_normed = ds / ds_norm
+        dz = self.dzs[previous_index,:]
+        dz_snormed = dz / ds_norm
+
+        ds_component = mystep @ ds_normed
+        mystep -= ds_normed * ds_component
+        result +=  dz_snormed * ds_component
+
+        # final correction
+        result -= mystep
+
+        return result
+
+class Sparse3BroydenCQR(BaseBroydenCQR):
+    """Test sparse 2-memory."""
+    max_iterations = 100_000
+    memory = 3
+    def compute_broyden_step(self, step):
+        """2-Memory sparse update."""
+
+        mystep = np.copy(step)
+        result = np.zeros_like(step)
+
+        # this should be correct
+        current_index = len(self.solution_qualities) % self.memory
+        previous_index = (len(self.solution_qualities)-1) % self.memory
+        previous_previous_index = (len(self.solution_qualities)-2) % self.memory
+
+        # correction by current index
+        ds = self.dsteps[current_index,:]
+        ds_norm = np.linalg.norm(ds)
+        ds_normed = ds / ds_norm
+        dz = self.dzs[current_index,:]
+        dz_snormed = dz / ds_norm
+
+        ds_component = mystep @ ds_normed
+        mystep -= ds_normed * ds_component
+        result +=  dz_snormed * ds_component
+
+        # correction by previous index
+        ds = self.dsteps[previous_index,:]
+        ds_norm = np.linalg.norm(ds)
+        ds_normed = ds / ds_norm
+        dz = self.dzs[previous_index,:]
+        dz_snormed = dz / ds_normkkkkkkkkkk
+
+        ds_component = mystep @ ds_normed
+        mystep -= ds_normed * ds_component
+        result +=  dz_snormed * ds_component
+
+        # correction by previous previous index
+        ds = self.dsteps[previous_previous_index,:]
+        ds_norm = np.linalg.norm(ds)
+        ds_normed = ds / ds_norm
+        dz = self.dzs[previous_previous_index,:]
+        dz_snormed = dz / ds_norm
+
+        ds_component = mystep @ ds_normed
+        mystep -= ds_normed * ds_component
+        result +=  dz_snormed * ds_component
+
+        # final correction
+        result -= mystep
+
+        return result
+
+class DenseBroydenCQR(BaseBroydenCQR):
+    """Add logic to save dz's and dstep's."""
+    max_iterations = 100
+    memory = 1
+    def compute_broyden_step(self, step):
+        """1-Memory dense update."""
+        J0 = -np.eye(self.m)
+        ds = self.dsteps[0,:]
+        dz = self.dzs[0,:]
+        corr_1 = np.outer(dz/np.linalg.norm(ds), ds/np.linalg.norm(ds))
+        corr_2 = np.outer(J0 @ (ds/np.linalg.norm(ds)), ds/np.linalg.norm(ds))
+        J1 = J0 + corr_1 - corr_2
+        assert np.allclose(J1 @ self.dsteps.T, self.dzs.T)
+        return J1 @ step
+
+
+
 
 class ToyBroydenCQR(BaseBroydenCQR):
     """Temporary."""
@@ -299,11 +464,11 @@ class ToyBroydenCQR(BaseBroydenCQR):
         import cvxpy as cp
         Jacobian = cp.Variable((self.m, self.m))
         objective = cp.Minimize(cp.sum_squares(Jacobian + np.eye(self.m)))
-        constraints = [Jacobian @ self.dzs.T == self.dsteps.T]
-        # constraints = [Jacobian @ self.dsteps.T == self.dzs.T]
+        # constraints = [Jacobian @ self.dzs.T == self.dsteps.T]
+        constraints = [Jacobian @ self.dsteps.T == self.dzs.T]
         cp.Problem(objective, constraints).solve(verbose=False)
-        newstep = np.linalg.solve(Jacobian.value, step)
-        # newstep = Jacobian.value @ step
+        # newstep = np.linalg.solve(Jacobian.value, step)
+        newstep = Jacobian.value @ step
         return newstep
 
 
@@ -311,7 +476,7 @@ class LevMarNewCQR(NewCQR):
     """Using Levemberg Marquardt."""
 
     lsqr_iters = 5
-    max_iterations = 100000//(2 * lsqr_iters + 1)
+    max_iterations = 100000//(2 * lsqr_iters + 2)
     damp = 0.
 
     def multiply_cone_project_derivative(self, z, dz):
@@ -373,6 +538,136 @@ class LevMarNewCQR(NewCQR):
         """Multiply by Jacobian of DR step operator transpose."""
         tmp = self.linspace_project_derivative(dr)
         return self.multiply_cone_project_derivative(z, 2 * tmp - dr) - tmp
+
+
+class LevMarCGNewCQR(LevMarNewCQR):
+    """Using Levemberg Marquardt, with explicit CG formulation."""
+
+    cg_iters = 100
+    max_iterations = 100000
+    matmul_count = 1 # used below
+
+    # def prepare_loop(self):
+    #     """Test preconditioner."""
+    #     super().prepare_loop()
+    #     self.preconditioner = np.linalg.pinv(
+    #         self.nullspace @ (self.nullspace.T))
+    #     # breakpoint()
+
+    def cg_multiply(self, z, input):
+        """CG matrix multiplication."""
+        return self.multiply_jacobian_dstep_transpose(
+            z, self.multiply_jacobian_dstep(z, input))
+
+    def iterate(self):
+        """Do one iteration."""
+
+        self.y[:] = self.cone_project(self.z)
+        step = self.linspace_project(2 * self.y - self.z) - self.y
+        # print(np.linalg.norm(step))
+
+        self.matmul_count = 2
+
+        def _callback(_):
+            self.matmul_count += 1
+
+        cg_matrix = sp.sparse.linalg.LinearOperator(
+            shape=(self.m, self.m),
+            matvec=lambda input: self.cg_multiply(self.z, input))
+        rhs = -self.multiply_jacobian_dstep_transpose(self.z, step)
+
+        result = sp.sparse.linalg.cg(
+            cg_matrix, rhs, x0=step,
+            rtol=min(0.5, np.sqrt(np.linalg.norm(rhs))),
+            maxiter=min(self.cg_iters, len(self.solution_qualities)),
+            # M = self.preconditioner,
+            callback=_callback)
+        # breakpoint()
+        # print(result[-1])
+        self.z[:] = self.z + result[0]
+
+        if len(self.solution_qualities) > 20000:
+            import matplotlib.pyplot as plt
+
+            myz = self.z - result[0]
+            for i in range(10):
+                curstep = self.dr_step(myz)
+                plt.plot(curstep, label=f'step {i}')
+                myz += curstep
+            plt.legend()
+            plt.show()
+
+
+
+            cg_matrix = self._densify_square(cg_matrix)
+            plt.imshow(cg_matrix)
+            plt.colorbar()
+            plt.title("CG MATRIX")
+            plt.figure()
+            plt.plot(rhs)
+            plt.title("RHS")
+            plt.figure()
+            plt.plot(step)
+            plt.title("STEP")
+            plt.show()
+            breakpoint()
+
+    @staticmethod
+    def _densify_square(linear_operator):
+        """Create Numpy 2-d array from a sparse LinearOperator."""
+        assert linear_operator.shape[0] == linear_operator.shape[1]
+        result = np.eye(linear_operator.shape[0], dtype=float)
+        for i in range(len(result)):
+            result[:, i] = linear_operator.matvec(result[:, i])
+        return result
+
+    def callback_iterate(self):
+        """You can probably re-use this with custom loops.
+
+        :raises StopIteration:
+        """
+        self.obtain_x_and_y()
+        # extend
+        if self.matmul_count > 1:
+            self.solution_qualities += [self.solution_qualities[-1]] * (
+                self.matmul_count - 1)
+        if len(self.solution_qualities) > self.max_iterations:
+            raise StopIteration
+        self.solution_qualities.append(self.check_solution_quality())
+        if self.solution_qualities[-1] < self.epsilon_convergence:
+            raise StopIteration
+
+    # S(z) = PiLin(2 * PiCon(z) - z) - PiCon(z)
+    # DS = DLin @ (2 * DCon - I) - DCon
+    #
+    # Useful identities:
+    # DLin = DLin.T
+    # DCon = Dcon.T # I guess also extends to non-symmetric cones
+    # DLin @ Dlin = DLin # not true for the cone one apparently
+    # Dlin @ PiLin(z) = PiLin(z)
+    # DCon @ PiCon(z) = PiCon(z)
+    #
+    # We need:
+    # DS.T @ DS
+    # DS.T @ S(z)
+    #
+    # It appears we don't save anything with this
+    #
+    # DS.T @ DS = ((2 * DCon - I) @ DLin - DCon) @ (DLin @ (2 * DCon - I) - DCon)
+    # = (2 * DCon @ DLin - Dlin - DCon) @ (DLin @ (2 * DCon) - Dlin - DCon)
+    # = 4 * DCon @ DLin @ DCon - 2 * Dcon @ Dlin - 2 * Dcon @ Dlin @ Dcon
+    #   - 2 * Dlin  @ Dcon + Dlin + Dlin @ Dcon
+    #   - 2 * Dcon @ Dlin @ Dcon + Dcon @ Dlin + Dcon @ Dcon
+    # = - 2 * Dcon @ Dlin - 2 * Dlin @ Dcon + Dlin + Dlin @ Dcon + Dcon @ Dlin + Dcon @ Dcon
+    # = - Dcon @ Dlin - Dlin @ Dcon + Dlin + Dcon @ Dcon
+    # = (-DCon + I) @ (DLin) @ (-DCon + I) + (DCon) @ (DLin) @ (DCon) + Dcon @ Dcon
+    # = (-DCon + I) @ (DLin + I) @ (-DCon + I) + (DCon) @ (DLin) @ (DCon) - I + 2 * DCon
+    #
+    # DS.T @ S(z) = ((2 * DCon - I) @ DLin - DCon) @ (PiLin(2 * PiCon(z) - z) - PiCon(z))
+    # = (2 * DCon @ DLin - Dlin - DCon) @ (PiLin(2 * PiCon(z) - z) - PiCon(z))
+    # = (2 * DCon @ PiLin(2 * PiCon(z) - z) - PiLin(2 * PiCon(z) - z) - DCon @ PiLin(2 * PiCon(z) - z)
+    #   - 2 * DCon @ DLin @ PiCon(z) + DLin @ PiCon(z) + PiCon(z)
+
 
 class LevMarUnitDampNewCQR(LevMarNewCQR):
     """Using Levemberg Marquardt."""

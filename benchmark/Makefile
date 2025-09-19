@@ -31,6 +31,21 @@ newcqr:
 eqnewcqr:
 	SOLVER_CLASS=EquilibratedNewCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
 
+broydencqr:
+	SOLVER_CLASS=BaseBroydenCQR NUM_INSTANCES=10 env/bin/python -m benchmark.test
+
+sparsebroydencqr:
+	SOLVER_CLASS=SparseBroydenCQR NUM_INSTANCES=10 env/bin/python -m benchmark.test
+
+sparse2broydencqr:
+	SOLVER_CLASS=Sparse2BroydenCQR NUM_INSTANCES=10 env/bin/python -m benchmark.test
+
+sparse3broydencqr:
+	SOLVER_CLASS=Sparse3BroydenCQR NUM_INSTANCES=10 env/bin/python -m benchmark.test
+
+toybroydencqr:
+	SOLVER_CLASS=ToyBroydenCQR NUM_INSTANCES=1 env/bin/python -m benchmark.test
+
 l2eqnewcqr:
 	SOLVER_CLASS=L2EquilibratedNewCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
 
