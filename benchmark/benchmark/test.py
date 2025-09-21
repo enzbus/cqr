@@ -197,6 +197,7 @@ class Benchmark(TestCase):
                     solver_class=globals()[SOLVER_CLASS]))
                 sol_qual = np.array(
                     prog.solver_stats.extra_stats['solution_qualities'])
+                import matplotlib.pyplot as plt
                 breakpoint() # pylint: disable=forgotten-debug-statement
 
 if __name__ == '__main__':  # pragma: no cover

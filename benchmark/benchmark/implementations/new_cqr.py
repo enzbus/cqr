@@ -276,7 +276,7 @@ class NewCQR(BaseSolver):
 class BaseBroydenCQR(NewCQR):
     """Add logic to save dz's and dstep's."""
 
-    memory = 1
+    memory = 10
     max_iterations = 100000
 
     def prepare_loop(self):
@@ -297,7 +297,7 @@ class BaseBroydenCQR(NewCQR):
 
         self.y[:] = self.cone_project(self.z)
         step = self.linspace_project(2 * self.y - self.z) - self.y
-        print(np.linalg.norm(step))
+        # print(np.linalg.norm(step))
 
         self.dsteps[
             len(self.solution_qualities) % self.memory] = step - self.old_step
@@ -305,6 +305,8 @@ class BaseBroydenCQR(NewCQR):
 
         if len(self.solution_qualities) > self.memory + 2: # + 1 should suffice
             newstep = self.compute_broyden_step(step)
+            # if len(self.solution_qualities) > 50000:
+            #     breakpoint()
             self.z[:] = self.z - newstep
         else:
             self.z[:] = self.z + step
@@ -317,32 +319,120 @@ class SparseBroydenCQR(BaseBroydenCQR):
     """Test sparse 1-memory."""
     max_iterations = 100000
     memory = 1
+    # def compute_broyden_step(self, step):
+    #     """1-Memory sparse update."""
+
+    #     J0 = sp.sparse.linalg.LinearOperator(
+    #         shape=(self.m, self.m),
+    #         matvec = lambda x: -x
+    #     )
+
+    #     ds = self.dsteps[0,:]
+    #     ds_norm = np.linalg.norm(ds)
+    #     ds_normed = ds / ds_norm
+    #     dz = self.dzs[0,:]
+    #     dz_snormed = dz / ds_norm
+
+    #     def matvec(x, ds_normed, dz_snormed, J_minus1):
+    #         ds_component = x @ ds_normed
+    #         return J_minus1 @ (
+    #             x - ds_normed * ds_component) + dz_snormed * ds_component
+
+    #     J1 = sp.sparse.linalg.LinearOperator(
+    #         shape=(self.m, self.m),
+    #         matvec = lambda x: matvec(x,  ds_normed, dz_snormed, J0)
+    #     )
+    #     # breakpoint()
+    #     assert np.allclose(J1 @ self.dsteps[0], self.dzs[0])
+    #     return J1 @ step
+
     def compute_broyden_step(self, step):
         """1-Memory sparse update."""
 
-        J0 = sp.sparse.linalg.LinearOperator(
-            shape=(self.m, self.m),
-            matvec = lambda x: -x
-        )
+        mystep = np.copy(step)
+        result = np.zeros_like(step)
 
-        ds = self.dsteps[0,:]
+        # correction by current index
+        ds = self.dsteps[0, :]
         ds_norm = np.linalg.norm(ds)
         ds_normed = ds / ds_norm
-        dz = self.dzs[0,:]
+        dz = self.dzs[0, :]
         dz_snormed = dz / ds_norm
 
-        def matvec(x, ds_normed, dz_snormed, J_minus1):
-            ds_component = x @ ds_normed
-            return J_minus1 @ (
-                x - ds_normed * ds_component) + dz_snormed * ds_component
+        ds_component = mystep @ ds_normed
+        mystep -= ds_normed * ds_component
+        result +=  dz_snormed * ds_component
 
-        J1 = sp.sparse.linalg.LinearOperator(
-            shape=(self.m, self.m),
-            matvec = lambda x: matvec(x,  ds_normed, dz_snormed, J0)
-        )
-        # breakpoint()
-        assert np.allclose(J1 @ self.dsteps[0], self.dzs[0])
-        return J1 @ step
+        # final correction
+        result -= mystep
+
+        # # cur step len
+        # cur_step_len = np.linalg.norm(step)
+        # # next step len
+        # next_step_len = np.linalg.norm(self.dr_step(self.z - result))
+        # if next_step_len > 9 * cur_step_len:
+        #     breakpoint()
+
+        return result
+
+
+class SparseSoftBroydenCQR(BaseBroydenCQR):
+    """Test 1-memory dividing by 2 the update."""
+    max_iterations = 100000
+    memory = 1
+
+    def compute_broyden_step(self, step):
+        """1-Memory sparse update."""
+
+        mystep = np.copy(step)
+        result = np.zeros_like(step)
+
+        # correction by current index
+        ds = self.dsteps[0, :]
+        ds_norm = np.linalg.norm(ds)
+        ds_normed = ds / ds_norm
+        dz = self.dzs[0, :]
+        dz_norm = np.linalg.norm(dz)
+        # print('norm(dz)/norm(ds)', dz_norm/ds_norm)
+        # dz_snormed = dz / ds_norm
+        dz_normed = dz / dz_norm
+        # this is how much we accelerate along rank1 Jinverse
+        scale_factor = dz_norm / ds_norm
+
+        # this is how much we reduce the correction
+        reducer = self.scale_reducer(scale_factor)
+
+        ds_component = (mystep @ ds_normed)
+        # remove component along direction
+        mystep -= ds_normed * (ds_component / reducer)
+        # add rank1 J1 inverse piece
+        result +=  (ds_component * scale_factor / reducer) * dz_normed
+
+        # final correction
+        result -= mystep
+
+        return result
+
+    def scale_reducer(self, scale_factor):
+        """Test scale reducer."""
+        return 2.
+
+class SparseSoftSqrtBroydenCQR(SparseSoftBroydenCQR):
+    """Test 1-memory with sqrt scaling update."""
+
+    def scale_reducer(self, scale_factor):
+        """Test scale reducer."""
+        return np.sqrt(scale_factor)
+
+class SparseSoftInvCorrBroydenCQR(SparseSoftBroydenCQR):
+    """Test 1-memory with inverse correction scaling update."""
+
+    correction_scale = 100.
+
+    def scale_reducer(self, scale_factor):
+        """Test scale reducer."""
+        return 1./(1./scale_factor + 1./self.correction_scale)
+
 
 class Sparse2BroydenCQR(BaseBroydenCQR):
     """Test sparse 2-memory."""
@@ -359,10 +449,10 @@ class Sparse2BroydenCQR(BaseBroydenCQR):
         previous_index = 1 - current_index
 
         # correction by current index
-        ds = self.dsteps[current_index,:]
+        ds = self.dsteps[current_index, :]
         ds_norm = np.linalg.norm(ds)
         ds_normed = ds / ds_norm
-        dz = self.dzs[current_index,:]
+        dz = self.dzs[current_index, :]
         dz_snormed = dz / ds_norm
 
         ds_component = mystep @ ds_normed
@@ -370,10 +460,10 @@ class Sparse2BroydenCQR(BaseBroydenCQR):
         result +=  dz_snormed * ds_component
 
         # correction by previous index
-        ds = self.dsteps[previous_index,:]
+        ds = self.dsteps[previous_index, :]
         ds_norm = np.linalg.norm(ds)
         ds_normed = ds / ds_norm
-        dz = self.dzs[previous_index,:]
+        dz = self.dzs[previous_index, :]
         dz_snormed = dz / ds_norm
 
         ds_component = mystep @ ds_normed
@@ -401,10 +491,10 @@ class Sparse3BroydenCQR(BaseBroydenCQR):
         previous_previous_index = (len(self.solution_qualities)-2) % self.memory
 
         # correction by current index
-        ds = self.dsteps[current_index,:]
+        ds = self.dsteps[current_index, :]
         ds_norm = np.linalg.norm(ds)
         ds_normed = ds / ds_norm
-        dz = self.dzs[current_index,:]
+        dz = self.dzs[current_index, :]
         dz_snormed = dz / ds_norm
 
         ds_component = mystep @ ds_normed
@@ -412,21 +502,21 @@ class Sparse3BroydenCQR(BaseBroydenCQR):
         result +=  dz_snormed * ds_component
 
         # correction by previous index
-        ds = self.dsteps[previous_index,:]
+        ds = self.dsteps[previous_index, :]
         ds_norm = np.linalg.norm(ds)
         ds_normed = ds / ds_norm
-        dz = self.dzs[previous_index,:]
-        dz_snormed = dz / ds_normkkkkkkkkkk
+        dz = self.dzs[previous_index, :]
+        dz_snormed = dz / ds_norm
 
         ds_component = mystep @ ds_normed
         mystep -= ds_normed * ds_component
         result +=  dz_snormed * ds_component
 
         # correction by previous previous index
-        ds = self.dsteps[previous_previous_index,:]
+        ds = self.dsteps[previous_previous_index, :]
         ds_norm = np.linalg.norm(ds)
         ds_normed = ds / ds_norm
-        dz = self.dzs[previous_previous_index,:]
+        dz = self.dzs[previous_previous_index, :]
         dz_snormed = dz / ds_norm
 
         ds_component = mystep @ ds_normed
@@ -445,15 +535,13 @@ class DenseBroydenCQR(BaseBroydenCQR):
     def compute_broyden_step(self, step):
         """1-Memory dense update."""
         J0 = -np.eye(self.m)
-        ds = self.dsteps[0,:]
-        dz = self.dzs[0,:]
+        ds = self.dsteps[0, :]
+        dz = self.dzs[0, :]
         corr_1 = np.outer(dz/np.linalg.norm(ds), ds/np.linalg.norm(ds))
         corr_2 = np.outer(J0 @ (ds/np.linalg.norm(ds)), ds/np.linalg.norm(ds))
         J1 = J0 + corr_1 - corr_2
         assert np.allclose(J1 @ self.dsteps.T, self.dzs.T)
         return J1 @ step
-
-
 
 
 class ToyBroydenCQR(BaseBroydenCQR):
@@ -596,8 +684,6 @@ class LevMarCGNewCQR(LevMarNewCQR):
                 myz += curstep
             plt.legend()
             plt.show()
-
-
 
             cg_matrix = self._densify_square(cg_matrix)
             plt.imshow(cg_matrix)

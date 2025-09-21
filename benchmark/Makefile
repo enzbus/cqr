@@ -35,10 +35,19 @@ broydencqr:
 	SOLVER_CLASS=BaseBroydenCQR NUM_INSTANCES=10 env/bin/python -m benchmark.test
 
 sparsebroydencqr:
-	SOLVER_CLASS=SparseBroydenCQR NUM_INSTANCES=10 env/bin/python -m benchmark.test
+	SOLVER_CLASS=SparseBroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+sparsesoftbroydencqr:
+	SOLVER_CLASS=SparseSoftBroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+sparsesoftsqrtbroydencqr:
+	SOLVER_CLASS=SparseSoftSqrtBroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+sparsesofticbroydencqr:
+	SOLVER_CLASS=SparseSoftInvCorrBroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
 
 sparse2broydencqr:
-	SOLVER_CLASS=Sparse2BroydenCQR NUM_INSTANCES=10 env/bin/python -m benchmark.test
+	SOLVER_CLASS=Sparse2BroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
 
 sparse3broydencqr:
 	SOLVER_CLASS=Sparse3BroydenCQR NUM_INSTANCES=10 env/bin/python -m benchmark.test
