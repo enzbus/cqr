@@ -315,6 +315,108 @@ class BaseBroydenCQR(NewCQR):
         """Base method to compute a Broyden-style approximate Newton step."""
         return -step
 
+class QRBroydenCQR(BaseBroydenCQR):
+    """Test with QR of the diffs."""
+    max_iterations = 1000
+    memory = 10
+    def compute_broyden_step(self, step):
+        """With QR."""
+
+        mystep = np.copy(step)
+        result = np.zeros_like(step)
+        # breakpoint()
+
+        # H @ self.dsteps.T = self.dzs.T
+        q, r = np.linalg.qr(self.dsteps.T)
+        # H @ (q @ r) = self.dzs.T
+        # H @ q = self.dzs.T @ (r^-1)
+
+        # assert np.allclose(
+        #     sp.linalg.solve_triangular(r.T, self.dzs, lower=True).T,
+        #     self.dzs.T @ np.linalg.inv(r))
+
+        rhs = sp.linalg.solve_triangular(
+            r.T, self.dzs, lower=True).T
+        # rhs = self.dzs.T @ np.linalg.inv(r)
+        components = (q.T @ mystep)
+
+        # remove components
+        mystep -= q @ components
+        result += rhs @ components
+        # result += self.dzs.T @ np.linalg.inv(r) @ components
+        # breakpoint()
+        # result += self.dzs.T @ sp.linalg.solve_triangular(
+        #     r, components, lower=False)
+
+        # add rest
+        result -= mystep
+
+        return result
+
+class QRNormBroydenCQR(BaseBroydenCQR):
+    """Test with QR of the diffs and diagonal normalization."""
+    max_iterations = 1000
+    memory = 10
+    def compute_broyden_step(self, step):
+        """With QR."""
+        print(np.linalg.norm(step))
+
+        # diagonal equilibration
+        dsteps_norm = np.linalg.norm(self.dsteps, axis=0)
+        # dsteps_norm[:] = 1.
+        dsteps_norm[dsteps_norm == 0.] = 1.
+
+        dzs_norm = np.linalg.norm(self.dzs, axis=0) + 1e-8
+        # dzs_norm[:] = 1.
+        dzs_norm[dzs_norm == 0.] = 1.
+
+        mystep = np.copy(step)
+        result = np.zeros_like(step)
+
+        # H @ diag(dsn) @ diag(dsn^-1) @ self.dsteps.T = diag(dzn) @ diag(dzn^-1) @ self.dzs.T
+        q, r = np.linalg.qr((self.dsteps / dsteps_norm).T)
+        # q @ r = diag(dsn^-1) @ self.dsteps.T
+
+        rhs = sp.linalg.solve_triangular(
+            r.T, (self.dzs / dzs_norm),
+            lower=True).T
+        # rhs = diag(dzn^-1) @ self.dzs.T @ np.linalg.inv(r)
+
+        # so
+        # H @ diag(dsn) @ q = diag(dzn) @ rhs
+        # (diag(dzn^-1) H @ diag(dsn)) @ q = rhs
+        # Hscal = (diag(dzn^-1) H @ diag(dsn))
+        # Hscal @ q = rhs
+
+        import cvxpy as cp
+        H = cp.Variable((self.m, self.m))
+        H0 = -np.eye(self.m)
+        Hscal = np.diag(dzs_norm**-1) @ H @ np.diag(dsteps_norm)
+        H0scal = np.diag(dzs_norm**-1) @ H0 @ np.diag(dsteps_norm)
+        objective = cp.Minimize(cp.sum_squares(Hscal - H0scal))
+        constraints = [Hscal @ q == rhs]
+        cp.Problem(objective, constraints).solve()
+        assert np.allclose(Hscal.value @ q, rhs)
+
+        result =  H.value @ mystep
+        # print(result)
+        return result
+        # breakpoint()
+
+        # we used to have:
+        # H = H0 (I - np.outer(q, q)) + np.outer(rhs, q)
+
+        components = (q.T @ (mystep))
+
+        # remove components
+        mystep -= q @ components
+        result += rhs @ components
+
+        # add rest
+        result -= mystep
+
+        return result
+
 class SparseBroydenCQR(BaseBroydenCQR):
     """Test sparse 1-memory."""
     max_iterations = 100000
@@ -559,7 +661,6 @@ class ToyBroydenCQR(BaseBroydenCQR):
         newstep = Jacobian.value @ step
         return newstep
 
-
 class LevMarNewCQR(NewCQR):
     """Using Levemberg Marquardt."""
 
@@ -627,6 +728,58 @@ class LevMarNewCQR(NewCQR):
         tmp = self.linspace_project_derivative(dr)
         return self.multiply_cone_project_derivative(z, 2 * tmp - dr) - tmp
 
+class QRLevMarBroydenCQR(BaseBroydenCQR, LevMarNewCQR):
+    """Test with QR of the diffs."""
+    lsqr_iters = 0
+    max_iterations = 10000 // (2 * lsqr_iters + 2)
+    memory = 10
+    def compute_broyden_step(self, step):
+        """With QR."""
+        # print(np.linalg.norm(step))
+        mystep = np.copy(step)
+        result = np.zeros_like(step)
+        # breakpoint()
+
+        # H @ self.dsteps.T = self.dzs.T
+        q, r = np.linalg.qr(self.dsteps.T)
+        # H @ (q @ r) = self.dzs.T
+        # H @ q = self.dzs.T @ (r^-1)
+
+        # assert np.allclose(
+        #     sp.linalg.solve_triangular(r.T, self.dzs, lower=True).T,
+        #     self.dzs.T @ np.linalg.inv(r))
+
+        rhs = sp.linalg.solve_triangular(
+            r.T, self.dzs, lower=True).T
+        # rhs = self.dzs.T @ np.linalg.inv(r)
+        components = (q.T @ mystep) / 1.
+
+        # remove components
+        mystep -= q @ components
+        result += rhs @ components
+        # result += self.dzs.T @ np.linalg.inv(r) @ components
+        # breakpoint()
+        # result += self.dzs.T @ sp.linalg.solve_triangular(
+        #     r, components, lower=False)
+
+        # add rest
+        # result -= mystep
+
+        result_levmar = sp.sparse.linalg.lsqr(
+            sp.sparse.linalg.LinearOperator(
+                shape=(self.m, self.m),
+                matvec=lambda dz: self.multiply_jacobian_dstep(self.z, dz),
+                rmatvec=lambda dr: self.multiply_jacobian_dstep_transpose(
+                    self.z, dr)), -mystep,
+                    x0=mystep,
+                    damp=0., # might make sense to change this?
+                    atol=0., btol=0., # might make sense to change this
+                    iter_lim=self.lsqr_iters)
+        # breakpoint()
+        # add final part
+        result -= result_levmar[0]
+
+        return result
 
 class LevMarCGNewCQR(LevMarNewCQR):
     """Using Levemberg Marquardt, with explicit CG formulation."""
