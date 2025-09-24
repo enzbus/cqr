@@ -38,6 +38,7 @@ from .implementations.simple_cpr import SimpleCPR, EquilibratedCPR
 from .implementations.new_cqr import *
 from .implementations.real_scs import RealSCS
 from .implementations.real_osqp import RealOSQP
+from .implementations.new_euromir import *
 
 
 SOLVER_CLASS = os.getenv("SOLVER_CLASS")

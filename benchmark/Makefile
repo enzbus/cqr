@@ -52,6 +52,9 @@ sparse2broydencqr:
 sparse3broydencqr:
 	SOLVER_CLASS=Sparse3BroydenCQR NUM_INSTANCES=10 env/bin/python -m benchmark.test
 
+qr3broydencqr:
+	SOLVER_CLASS=QR3BroydenCQR NUM_INSTANCES=100 env/bin/python -m benchmark.test
+
 toybroydencqr:
 	SOLVER_CLASS=ToyBroydenCQR NUM_INSTANCES=1 env/bin/python -m benchmark.test
 
