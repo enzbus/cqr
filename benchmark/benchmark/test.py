@@ -47,6 +47,10 @@ MODE = os.getenv("BENCHMARK_MODE", "BENCHMARK") # or "TEST"
 SIZE_CHOICE = os.getenv("SIZE_CHOICE", "NORMAL") # or "SMALL"
 
 PROGRAM_SIZES = {
+    "LARGE": {
+        "_generate_problem_one": {"m": 410, "n": 300},
+        "_generate_problem_two": {"m": 410, "n": 300},
+        "_generate_portfolio_problem": {"n": 200}},
     "NORMAL": {
         "_generate_problem_one": {"m": 41, "n": 30},
         "_generate_problem_two": {"m": 41, "n": 30},

@@ -32,19 +32,20 @@ class NewCQR(BaseSolver):
     used_matrix = "matrix"
     used_b = "b"
     used_c = "c"
+    use_numpy = True
 
     def prepare_loop(self):
         """Define anything we need to re-use."""
 
         matrix = getattr(self, self.used_matrix)
 
-        if NUMPY:
+        if self.use_numpy:
             q, r = np.linalg.qr(
                 getattr(self, self.used_matrix).todense(), mode='complete')
             self.qr_matrix = q[:, :self.n].A
             self.nullspace = q[:, self.n:].A
             self.triangular = r[:self.n].A
-        if PYSPQR:
+        else:
             matrix.indices = matrix.indices.astype(np.int32)
             matrix.indptr = matrix.indptr.astype(np.int32)
             q, r, e = qr(matrix, ordering='AMD')
@@ -62,20 +63,26 @@ class NewCQR(BaseSolver):
                 rmatvec=lambda y: (
                     q.T @ np.array(y, copy=True).reshape(y.size))[self.m-shape2:]
             )
+            self.pyspqr_r = r[:self.n]
+            self.pyspqr_e = e
             self.triangular = sp.sparse.csc_array((r.todense() @ e)[:self.n])
             # of course this is inefficient
-            self.triangular_solve = sp.sparse.linalg.splu(self.triangular)
-            self.triangular_solve_transpose = sp.sparse.linalg.splu(self.triangular.T)
+            # self.triangular_solve = sp.sparse.linalg.splu(self.triangular)
+            # self.triangular_solve_transpose = sp.sparse.linalg.splu(self.triangular.T)
 
         # assert np.allclose(
         #     self.qr_matrix @ self.triangular, matrix.todense())
 
-        if NUMPY:
+        if self.use_numpy:
             self.c_qr = sp.linalg.solve_triangular(
                 self.triangular.T, getattr(self, self.used_c), lower=True)
-        if PYSPQR:
-            self.c_qr = self.triangular_solve_transpose.solve(
-                getattr(self, self.used_c))
+        else:
+            self.c_qr = sp.sparse.linalg.spsolve_triangular(
+                self.pyspqr_r.T, self.pyspqr_e @ getattr(
+                    self, self.used_c), lower=True)
+            # self.c_qr = self.triangular_solve_transpose.solve(
+            #     getattr(self, self.used_c))
+            # breakpoint()
 
         # shift in the linspace projector
         # self.e = self.nullspace @ self.nullspace.T @ (self.qr_matrix @ self.c_qr - getattr(self, self.used_b)) - self.qr_matrix @ self.c_qr
@@ -147,10 +154,13 @@ class NewCQR(BaseSolver):
         self.s[:] = self.y - self.z
         x_qr = self.qr_matrix.T @ (getattr(self, self.used_b) - self.s)
         # breakpoint()
-        if NUMPY:
+        if self.use_numpy:
             self.x[:] = sp.linalg.solve_triangular(self.triangular, x_qr, lower=False)
-        if PYSPQR:
-            self.x[:] = self.triangular_solve.solve(x_qr)
+        else:
+            # self.x[:] = self.triangular_solve.solve(x_qr)
+            self.x[:] = self.pyspqr_e.T @ sp.sparse.linalg.spsolve_triangular(
+                self.pyspqr_r, x_qr, lower=False)
+            # breakpoint()
         # breakpoint()
 
 # def data_ql_transform(A: np.array, b: np.array, c: np.array):
@@ -278,6 +288,8 @@ class BaseBroydenCQR(NewCQR):
 
     memory = 10
     max_iterations = 100000
+    myverbose = False
+    sample_period = 1
 
     def prepare_loop(self):
         """Create storage arrays."""
@@ -290,20 +302,29 @@ class BaseBroydenCQR(NewCQR):
     def iterate(self):
         """Simple Douglas Rachford iteration with Broyden update to override.
         """
+        if self.memory == 0:
+            step = self.dr_step(self.z)
+            if self.myverbose:
+                print(np.linalg.norm(step))
+            self.z[:] += step
+            return
 
-        self.dzs[
-            len(self.solution_qualities) % self.memory] = self.z - self.old_z
-        self.old_z[:] = self.z
+        if len(self.solution_qualities) % self.sample_period == 0:
+            self.dzs[
+                len(self.solution_qualities) % self.memory] = self.z - self.old_z
+            self.old_z[:] = self.z
 
         self.y[:] = self.cone_project(self.z)
         step = self.linspace_project(2 * self.y - self.z) - self.y
-        # print(np.linalg.norm(step))
+        if self.myverbose:
+            print(np.linalg.norm(step))
 
-        self.dsteps[
-            len(self.solution_qualities) % self.memory] = step - self.old_step
-        self.old_step[:] = step
+        if len(self.solution_qualities) % self.sample_period == 0:
+            self.dsteps[
+                len(self.solution_qualities) % self.memory] = step - self.old_step
+            self.old_step[:] = step
 
-        if len(self.solution_qualities) > self.memory + 2: # + 1 should suffice
+        if len(self.solution_qualities) > self.memory * self.sample_period + 2: # + 1 should suffice
             newstep = self.compute_broyden_step(step)
             # if len(self.solution_qualities) > 50000:
             #     breakpoint()
@@ -811,6 +832,132 @@ class SparseNTestBroydenCQR(BaseBroydenCQR):
         result -= mystep
         return result
 
+class SparseNTestAdaCapBroydenCQR(BaseBroydenCQR):
+    """Test same acceleration cap but with adaptive scheme.
+    
+    (case 1) Cap not hit; do nothing.
+    (case 2) Cap hit and len of next step greater than curret; decrease cap;
+        accept this step anyways for now (so we don't increase overall cost).
+    (case 3) Cap hit and len of n.s. smaller; accept update; increase cap.
+    """
+    max_iterations = 100_000
+    memory = 20
+
+    # initial value
+    acceleration_cap = 5
+    cap_decrease_factor = 0.9
+    cap_increase_factor = 1.005
+    cap_floor = 1.
+    cap_ceil = 50.
+
+    def compute_broyden_step(self, step):
+        """N-Memory sparse update."""
+
+        cap_hit = False
+
+        mystep = np.copy(step)
+        current_step_len = np.linalg.norm(step)
+
+        result = np.zeros_like(step)
+        # step_norm = np.linalg.norm(step)
+        # diagnostic
+        # components = np.zeros(self.memory)
+        # accelerations = np.zeros(self.memory)
+
+        # this should be correct
+        for back_index in range(self.memory):
+            current_index = (len(
+                self.solution_qualities) - back_index) % self.memory
+
+            # correction by current index
+            ds = self.dsteps[current_index, :]
+            ds_norm = np.linalg.norm(ds)
+            ds_normed = ds / ds_norm
+            dz = self.dzs[current_index, :]
+            dz_norm = np.linalg.norm(dz)
+            # dz_normed = dz / dz_norm
+            dz_snormed = dz / ds_norm
+            acceleration = dz_norm / ds_norm
+
+            # we cap the acceleration
+            if acceleration > self.acceleration_cap:
+                reduction_factor = acceleration / self.acceleration_cap
+                cap_hit = True
+            else:
+                reduction_factor = 1.
+
+            ds_component_reduced = (mystep @ ds_normed) / reduction_factor
+            # components[back_index] = ds_component
+            # accelerations[back_index] = np.linalg.norm(dz_snormed)
+            mystep -= ds_normed * ds_component_reduced
+            result +=  (dz_snormed * ds_component_reduced)
+        # final correction
+        result -= mystep
+
+        # logic for update
+        if cap_hit:
+            # with refactoring we won't need to calculate this twice
+            next_step_len = np.linalg.norm(self.dr_step(self.z - result))
+            it = len(self.solution_qualities)
+            if next_step_len < current_step_len:
+                # print(f'ITER {it} CURRENT ACCEL {self.acceleration_cap}, INCREASING')
+                self.acceleration_cap *= self.cap_increase_factor
+                self.acceleration_cap = np.minimum(self.cap_ceil, self.acceleration_cap)
+            else:
+                # print(f'ITER {it} CURRENT ACCEL {self.acceleration_cap}, DECREASING')
+                self.acceleration_cap *= self.cap_decrease_factor
+                self.acceleration_cap = np.maximum(self.cap_floor, self.acceleration_cap)
+        return result
+
+
+class SparseNAltAccelCapBroydenCQR(BaseBroydenCQR):
+    """Full memory BrCQR, testing normalization."""
+    max_iterations = 100_000
+    memory = 20
+    alt_acceleration_cap = 20
+    def compute_broyden_step(self, step):
+        """N-Memory sparse update."""
+
+        mystep = np.copy(step)
+        result = np.zeros_like(step)
+        # step_norm = np.linalg.norm(step)
+        # diagnostic
+        # components = np.zeros(self.memory)
+        # accelerations = np.zeros(self.memory)
+
+        # this should be correct
+        for back_index in range(self.memory):
+            current_index = (len(
+                self.solution_qualities) - back_index) % self.memory
+
+            # correction by current index
+            ds = self.dsteps[current_index, :]
+            ds_norm = np.linalg.norm(ds)
+            ds_normed = ds / ds_norm
+            dz = self.dzs[current_index, :]
+            dz_norm = np.linalg.norm(dz)
+            # dz_normed = dz / dz_norm
+            dz_snormed = dz / ds_norm
+            acceleration = dz_norm / ds_norm
+
+            nrm_mystep = np.linalg.norm(mystep)
+            exposure_accel = acceleration * ((mystep @ ds_normed) / nrm_mystep)
+            exposure_accel_capped = np.clip(
+                exposure_accel,
+                min=-self.alt_acceleration_cap, max=self.alt_acceleration_cap)
+            if exposure_accel != exposure_accel_capped:
+                print(exposure_accel, exposure_accel_capped)
+            ds_component_reduced = (exposure_accel_capped * nrm_mystep) / acceleration
+
+            # ds_component_reduced = (mystep @ ds_normed) / reduction_factor
+            # components[back_index] = ds_component
+            # accelerations[back_index] = np.linalg.norm(dz_snormed)
+            mystep -= ds_normed * ds_component_reduced
+            result +=  (dz_snormed * ds_component_reduced)
+        # final correction
+        result -= mystep
+        return result
+
 class SparseTestTestBroydenCQR(SparseNTestBroydenCQR):
     """Full memory BrCQR, testing normalization."""
     max_iterations = 100_000
@@ -1293,14 +1440,186 @@ class EquilibratedNewCQR(NewCQR):
         self.y = (self.equil_d * self.y) / self.equil_rho
 
 
+class AlternativeEquilibration(NewCQR):
+    """Idea of alternative eq scheme."""
+    used_matrix = "eq_matrix"
+    used_b = "eq_b"
+    used_c = "eq_c"
+    def prepare_loop(self):
+        """Do Ruiz equilibration."""
+        if len(self.soc) > 0:
+            raise ValueError()
+        matrix = self.matrix.todense()
+        concatenated = np.block(
+            [[matrix, self.b.reshape(self.m, 1)],
+            [self.c.reshape(1, self.n), np.zeros((1, 1))]]).A
+        work_matrix = np.copy(concatenated)
+
+        m = sp.sparse.coo_array(work_matrix)
+        logvals = np.log(np.abs(m.data))
+        import cvxpy as cp
+        x, y = m.coords
+        ex = cp.Variable(m.shape[0])
+        ey = cp.Variable(m.shape[1])
+        equilibrated = logvals + ex[x] + ey[y]
+        x_idx = np.arange(len(x))
+        y_idx = np.arange(len(y))
+        # cp.Problem(cp.Minimize(cp.max(equilibrated) - cp.min(equilibrated))).solve(solver='ECOS', verbose=True)
+        objective = 0
+        x_conds = []
+        for my_x_idx in range(len(x)):
+            used_idxs = x_idx[x == my_x_idx]
+            if len(used_idxs) == 0:
+                continue
+            x_conds.append(cp.max(equilibrated[used_idxs]) - cp.min(equilibrated[used_idxs]))
+        y_conds = []
+        for my_y_idx in range(len(y)):
+            used_idxs = y_idx[y == my_y_idx]
+            if len(used_idxs) == 0:
+                continue
+            y_conds.append(cp.max(equilibrated[used_idxs]) - cp.min(equilibrated[used_idxs]))
+        conds = cp.hstack(x_conds + y_conds)
+        cp.Problem(cp.Minimize(cp.max(conds))).solve(solver='ECOS', verbose=True)
+        # breakpoint()
+        # cp.Problem(cp.Minimize(objective)).solve(solver='ECOS', verbose=True)
+        # import matplotlib.pyplot as plt
+        # plt.plot(ex.value)
+        # plt.plot(ey.value)
+        # plt.show()
+        my_d = np.exp(ex.value)
+        my_e = np.exp(ey.value)
+        my_equilibration  = ((work_matrix * my_e).T * my_d).T
+        # breakpoint()
+        print("SORTED D", np.sort(my_d))
+        print('SORTED E', np.sort(my_e))
+        self.equil_e = my_e[:-1]
+        self.equil_d = my_d[:-1]
+        self.equil_sigma = my_e[-1]
+        self.equil_rho = my_d[-1]
+
+        self.eq_matrix = sp.sparse.csc_matrix(my_equilibration[:-1, :-1])
+        self.eq_b = my_equilibration[:-1, -1]
+        self.eq_c = my_equilibration[-1, :-1]
+
+        super().prepare_loop()
+
+    def obtain_x_and_y(self):
+        """Redefine if/as needed."""
+        super().obtain_x_and_y()
+
+        self.x = (self.equil_e * self.x) / self.equil_sigma
+        self.y = (self.equil_d * self.y) / self.equil_rho
+
 class SparseNTestEquilibratedBroydenCQR(SparseNTestBroydenCQR, EquilibratedNewCQR):
     """Full memory BrCQR, testing acceleration cap, Ruiz of program data."""
+    # best test so far 2025-09-27
     max_iterations = 100_000
     memory = 20
     acceleration_cap = 20
     ruiz_rounds = 2
     ruiz_norm = np.inf
 
+class SparseNTestAltEquilibratedBroydenCQR(SparseNTestBroydenCQR, AlternativeEquilibration):
+    """Full memory BrCQR, testing acceleration cap, Ruiz of program data."""
+    max_iterations = 10_000
+    memory = 20
+    acceleration_cap = 20.
+    myverbose = False
+    # ruiz_rounds = 2
+    # ruiz_norm = np.inf
+
+class SparseNAltAccelCapEqBroydenCQR(SparseNAltAccelCapBroydenCQR, EquilibratedNewCQR):
+    """Full memory BrCQR, testing acceleration cap, Ruiz of program data."""
+    max_iterations = 100_000
+    memory = 20
+    alt_acceleration_cap = 5.
+    myverbose = False
+    ruiz_rounds = 2
+    ruiz_norm = np.inf
+
+class SparseNTestEquilibrated1BroydenCQR(SparseNTestEquilibratedBroydenCQR):
+    """Alternative test, more ruiz."""
+    max_iterations = 100_000
+    memory = 20
+    acceleration_cap = 20
+    ruiz_rounds = 5
+    ruiz_norm = np.inf
+
+class SparseNTestEquilibrated2BroydenCQR(SparseNTestEquilibratedBroydenCQR):
+    """Alternative test, less accel cap."""
+    max_iterations = 100_000
+    memory = 20
+    acceleration_cap = 10
+    ruiz_rounds = 2
+    ruiz_norm = np.inf
+
+class SparseNTestEquilibrated3BroydenCQR(SparseNTestEquilibratedBroydenCQR):
+    """Alternative test, more accel cap."""
+    max_iterations = 100_000
+    memory = 20
+    acceleration_cap = 50
+    ruiz_rounds = 2
+    ruiz_norm = np.inf
+
+class SparseNTestEquilibrated4BroydenCQR(SparseNTestBroydenCQR, EquilibratedNewCQR):
+    """Alternative test, more memory."""
+    max_iterations = 100_000
+    memory = 50
+    acceleration_cap = 10
+    ruiz_rounds = 2
+    ruiz_norm = np.inf
+
+class SparseNTestAdaCapEquilibratedBroydenCQR(SparseNTestAdaCapBroydenCQR, EquilibratedNewCQR):
+    """With adaptive cap."""
+    # best test so far, 2025-09-28
+    max_iterations = 100_000
+    memory = 20
+    ruiz_rounds = 2
+    ruiz_norm = np.inf
+
+    # it has more parameters...
+    acceleration_cap = 5 # initial value
+    cap_decrease_factor = 0.9
+    cap_increase_factor = 1.005
+    cap_floor = 1.
+    cap_ceil = 50.
+
+class SparseNTestEquilibrated6BroydenCQR(SparseNTestAdaCapEquilibratedBroydenCQR):
+    """Higher ceil."""
+    # new best test so far, 2025-09-28
+    cap_ceil = 100.
+
+class SparseNTestEquilibrated5BroydenCQR(SparseNTestAdaCapBroydenCQR, EquilibratedNewCQR):
+    """Alternative test, increasing sample period 2."""
+    max_iterations = 100_000
+    memory = 20
+    ruiz_rounds = 2
+    ruiz_norm = np.inf
+    sample_period = 1
+
+    def prepare_loop(self):
+        super().prepare_loop()
+        self.step_lens = []
+
+    def compute_broyden_step(self, step):
+
+        self.step_lens.append(np.linalg.norm(step))
+        # breakpoint()
+        if len(self.step_lens) > 2 and np.abs(np.diff(np.log(self.step_lens[-2:]))[0]) < 1e-6: # we're stuck
+            if self.sample_period != 2:
+                print('ITER', len(self.solution_qualities), 'SETTING PERIOD TO HIGH')
+                self.sample_period = 2
+                # import matplotlib.pyplot as plt
+                # plt.plot(np.diff(np.log(self.step_lens))); plt.show()
+                # plt.plot(self.dzs @ np.random.randn(self.m))
+                # plt.plot(self.dsteps @ np.random.randn(self.m));
+                # plt.show()
+                # breakpoint()
+        else:
+            if self.sample_period != 1:
+                print('ITER', len(self.solution_qualities), 'SETTING PERIOD TO 1')
+            self.sample_period = 1
+        return super().compute_broyden_step(step)
 
 class L2EquilibratedNewCQR(EquilibratedNewCQR):
     """Same but with l2 equilibration."""

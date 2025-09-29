@@ -1,5 +1,7 @@
 .PHONY: env lint fix scs bfgs hsde
 
+export OPENBLAS_NUM_THREADS=1
+
 env:
 	python -m venv --system-site-packages env
 	env/bin/pip install numpy scipy cvxpy pylint autopep8 matplotlib pandas tqdm
@@ -24,6 +26,36 @@ realosqp:
 
 newcqr:
 	SOLVER_CLASS=NewCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+ntest0brcqr: # w/out eq
+	SOLVER_CLASS=SparseNTestBroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+ntestbrcqr: # best prototype so far
+	SOLVER_CLASS=SparseNTestEquilibratedBroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+ntest1brcqr: # test with more ruiz 
+	SOLVER_CLASS=SparseNTestEquilibrated1BroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+ntest2brcqr: # test with less accel cap
+	SOLVER_CLASS=SparseNTestEquilibrated2BroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+ntest3brcqr: # test with more accel cap
+	SOLVER_CLASS=SparseNTestEquilibrated3BroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+ntest4brcqr: # test with more memory, less cap
+	SOLVER_CLASS=SparseNTestEquilibrated4BroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+adacapeqbrcqr:
+	SOLVER_CLASS=SparseNTestAdaCapEquilibratedBroydenCQR  NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+# ntest5brcqr: # adaptive, first testing with downsampling
+# 	SOLVER_CLASS=SparseNTestEquilibrated5BroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+ntest6brcqr: # adaptive, higher ceil
+	SOLVER_CLASS=SparseNTestEquilibrated6BroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+# testbrcqrlarge:
+# 	SOLVER_CLASS=SparseNTestEquilibrated1BroydenCQR NUM_INSTANCES=1 SIZE_CHOICE=LARGE env/bin/python -m benchmark.test
 
 # hsdenewcqr:
 # 	SOLVER_CLASS=HSDENewCQR NUM_INSTANCES=1 env/bin/python -m benchmark.test
