@@ -317,16 +317,15 @@ class BaseBroydenCQR(NewCQR):
 
 class BaseBroydenMultiScaleCQR(NewCQR):
     """Idea to store EWM multiscales of zs and steps."""
-
+    max_iterations = 1_000
     scales = np.array((1,2,4,8)) # these are half lives; last obs always there
-    max_iterations = 100_000
 
     def prepare_loop(self):
         """Create storage arrays."""
         super().prepare_loop()
-        self.multiscale_zs = np.empty(
+        self.multiscale_zs = np.zeros(
             (len(self.scales), self.m), dtype=float)
-        self.multiscale_steps = np.empty(
+        self.multiscale_steps = np.zeros(
             (len(self.scales), self.m), dtype=float)
         self.multiscale_denominator = np.zeros(len(self.scales))
         self.step = np.zeros_like(self.z)
@@ -362,7 +361,7 @@ class BaseBroydenMultiScaleCQR(NewCQR):
         else:
             self.actual_step[:] = self.step
 
-        # update the stores - fix correct axis align
+        # update the stores
 
         # add the vectors to all rows
         self.multiscale_zs += self.z
@@ -371,16 +370,28 @@ class BaseBroydenMultiScaleCQR(NewCQR):
 
         # divide by the EWM scales
         scalers = np.exp(np.log(2)/self.scales)
-        self.multiscale_zs *= scalers
-        self.multiscale_steps *= scalers
+        # TODO figure out syntax for inlining this
+        self.multiscale_zs = (self.multiscale_zs.T * scalers).T
+        self.multiscale_steps = (self.multiscale_steps.T * scalers).T
         self.multiscale_denominator *= scalers
+        # import matplotlib.pyplot as plt
+        # plt.plot(self.multiscale_zs.T / self.multiscale_denominator)
+        # plt.show()
+        # breakpoint()
+
+        # TODO if logic correct above, we need to periodically normalize values to avoid overflow
 
         # move forward
         self.z[:] += self.actual_step
 
     def compute_broyden_step(self):
         """Base method to compute a Broyden-style approximate Newton step."""
-        return self.step
+        print('iter', len(self.solution_qualities))
+        for (dz, dstep) in self.serve_dz_dstep_pairs():
+            print('norm dz', np.linalg.norm(dz))
+            print('norm dstep', np.linalg.norm(dstep))
+
+        return np.copy(self.step)
 
 class QRBroydenCQR(BaseBroydenCQR):
     """Test with QR of the diffs."""
