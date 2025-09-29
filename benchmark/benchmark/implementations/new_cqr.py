@@ -336,6 +336,84 @@ class BaseBroydenCQR(NewCQR):
         """Base method to compute a Broyden-style approximate Newton step."""
         return -step
 
+class BaseBroydenMultiScaleCQR(NewCQR):
+    """Idea to store EWM multiscales of zs and steps."""
+    max_iterations = 1_000
+    scales = np.array((1,2,4,8)) # these are half lives; last obs always there
+
+    def prepare_loop(self):
+        """Create storage arrays."""
+        super().prepare_loop()
+        self.multiscale_zs = np.zeros(
+            (len(self.scales), self.m), dtype=float)
+        self.multiscale_steps = np.zeros(
+            (len(self.scales), self.m), dtype=float)
+        self.multiscale_denominator = np.zeros(len(self.scales))
+        self.step = np.zeros_like(self.z)
+        self.actual_step = np.zeros_like(self.z)
+        # self.old_z = np.empty(self.m, dtype=float)
+        # self.old_step = np.empty(self.m, dtype=float)
+
+    def serve_dz_dstep_pairs(self):
+        """Iterator to serve (dz, dstep) pairs."""
+        for i, scale in enumerate(self.scales):
+            if i == 0:
+                next_z = self.z
+                next_step = self.step
+            else:
+                next_z = self.multiscale_zs[i-1] / self.multiscale_denominator[i-1]
+                next_step = self.multiscale_steps[i-1] / self.multiscale_denominator[i-1]
+            yield (
+                next_z - self.multiscale_zs[i] / self.multiscale_denominator[i],
+                next_step - self.multiscale_steps[i] / self.multiscale_denominator[i]
+            )
+
+    def iterate(self):
+        """Simple Douglas Rachford iteration with Broyden update to override.
+        """
+
+        # compute DR step
+        self.y[:] = self.cone_project(self.z)
+        self.step[:] = self.linspace_project(2 * self.y - self.z) - self.y
+
+        # compute Broyden step
+        if len(self.solution_qualities) > len(self.scales) + 1: # to change?
+            self.actual_step[:] = self.compute_broyden_step()
+        else:
+            self.actual_step[:] = self.step
+
+        # update the stores
+
+        # add the vectors to all rows
+        self.multiscale_zs += self.z
+        self.multiscale_steps += self.step
+        self.multiscale_denominator += 1
+
+        # divide by the EWM scales
+        scalers = np.exp(np.log(2)/self.scales)
+        # TODO figure out syntax for inlining this
+        self.multiscale_zs = (self.multiscale_zs.T * scalers).T
+        self.multiscale_steps = (self.multiscale_steps.T * scalers).T
+        self.multiscale_denominator *= scalers
+        # import matplotlib.pyplot as plt
+        # plt.plot(self.multiscale_zs.T / self.multiscale_denominator)
+        # plt.show()
+        # breakpoint()
+
+        # TODO if logic correct above, we need to periodically normalize values to avoid overflow
+
+        # move forward
+        self.z[:] += self.actual_step
+
+    def compute_broyden_step(self):
+        """Base method to compute a Broyden-style approximate Newton step."""
+        print('iter', len(self.solution_qualities))
+        for (dz, dstep) in self.serve_dz_dstep_pairs():
+            print('norm dz', np.linalg.norm(dz))
+            print('norm dstep', np.linalg.norm(dstep))
+
+        return np.copy(self.step)
+
 class QRBroydenCQR(BaseBroydenCQR):
     """Test with QR of the diffs."""
     max_iterations = 10000
