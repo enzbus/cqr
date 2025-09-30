@@ -54,6 +54,12 @@ adacapeqbrcqr:
 ntest6brcqr: # adaptive, higher ceil
 	SOLVER_CLASS=SparseNTestEquilibrated6BroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
 
+ntest7brcqr: # exponential multiscale step
+	SOLVER_CLASS=SparseNTestBroydenMSCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+ntest8brcqr: # exponential multiscale step equilibrated
+	SOLVER_CLASS=SparseNTestBroyden2MSCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
 # testbrcqrlarge:
 # 	SOLVER_CLASS=SparseNTestEquilibrated1BroydenCQR NUM_INSTANCES=1 SIZE_CHOICE=LARGE env/bin/python -m benchmark.test
 

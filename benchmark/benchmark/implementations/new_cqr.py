@@ -338,34 +338,30 @@ class BaseBroydenCQR(NewCQR):
 
 class BaseBroydenMultiScaleCQR(NewCQR):
     """Idea to store EWM multiscales of zs and steps."""
-    max_iterations = 1_000
-    scales = np.array((1,2,4,8)) # these are half lives; last obs always there
+    max_iterations = 100
+    alpha_scales = np.array((0., 0.5, 0.66, 0.75, 0.9 , 0.95, 0.975, 0.99)) # reformulate with half lives
 
     def prepare_loop(self):
         """Create storage arrays."""
         super().prepare_loop()
         self.multiscale_zs = np.zeros(
-            (len(self.scales), self.m), dtype=float)
+            (len(self.alpha_scales), self.m), dtype=float)
         self.multiscale_steps = np.zeros(
-            (len(self.scales), self.m), dtype=float)
-        self.multiscale_denominator = np.zeros(len(self.scales))
+            (len(self.alpha_scales), self.m), dtype=float)
         self.step = np.zeros_like(self.z)
-        self.actual_step = np.zeros_like(self.z)
-        # self.old_z = np.empty(self.m, dtype=float)
-        # self.old_step = np.empty(self.m, dtype=float)
 
     def serve_dz_dstep_pairs(self):
         """Iterator to serve (dz, dstep) pairs."""
-        for i, scale in enumerate(self.scales):
+        for i, _ in enumerate(self.alpha_scales):
             if i == 0:
                 next_z = self.z
                 next_step = self.step
             else:
-                next_z = self.multiscale_zs[i-1] / self.multiscale_denominator[i-1]
-                next_step = self.multiscale_steps[i-1] / self.multiscale_denominator[i-1]
+                next_z = self.multiscale_zs[i-1]
+                next_step = self.multiscale_steps[i-1]
             yield (
-                next_z - self.multiscale_zs[i] / self.multiscale_denominator[i],
-                next_step - self.multiscale_steps[i] / self.multiscale_denominator[i]
+                next_z - self.multiscale_zs[i],
+                next_step - self.multiscale_steps[i]
             )
 
     def iterate(self):
@@ -377,33 +373,25 @@ class BaseBroydenMultiScaleCQR(NewCQR):
         self.step[:] = self.linspace_project(2 * self.y - self.z) - self.y
 
         # compute Broyden step
-        if len(self.solution_qualities) > len(self.scales) + 1: # to change?
-            self.actual_step[:] = self.compute_broyden_step()
+        if len(self.solution_qualities) > len(self.alpha_scales) + 1: # to change?
+            actual_step = self.compute_broyden_step()
         else:
-            self.actual_step[:] = self.step
+            actual_step = self.step
 
         # update the stores
-
-        # add the vectors to all rows
-        self.multiscale_zs += self.z
-        self.multiscale_steps += self.step
-        self.multiscale_denominator += 1
-
-        # divide by the EWM scales
-        scalers = np.exp(np.log(2)/self.scales)
-        # TODO figure out syntax for inlining this
-        self.multiscale_zs = (self.multiscale_zs.T * scalers).T
-        self.multiscale_steps = (self.multiscale_steps.T * scalers).T
-        self.multiscale_denominator *= scalers
-        # import matplotlib.pyplot as plt
-        # plt.plot(self.multiscale_zs.T / self.multiscale_denominator)
-        # plt.show()
-        # breakpoint()
-
-        # TODO if logic correct above, we need to periodically normalize values to avoid overflow
+        for idx, alpha_scale in enumerate(self.alpha_scales):
+            if len(self.solution_qualities) == 0:
+                self.multiscale_zs[idx, :] = self.z
+                self.multiscale_steps[idx, :] = self.step
+            self.multiscale_zs[idx, :] = (
+                alpha_scale * self.multiscale_zs[idx]
+                + (1.-alpha_scale) * self.z)
+            self.multiscale_steps[idx, :] = (
+                alpha_scale * self.multiscale_steps[idx]
+                + (1.-alpha_scale) * self.step)
 
         # move forward
-        self.z[:] += self.actual_step
+        self.z[:] += actual_step
 
     def compute_broyden_step(self):
         """Base method to compute a Broyden-style approximate Newton step."""
@@ -413,6 +401,40 @@ class BaseBroydenMultiScaleCQR(NewCQR):
             print('norm dstep', np.linalg.norm(dstep))
 
         return np.copy(self.step)
+
+class SparseNTestBroydenMSCQR(BaseBroydenMultiScaleCQR):
+    """Full memory BrCQR, testing normalization."""
+    max_iterations = 100000
+    acceleration_cap = 20
+    def compute_broyden_step(self):
+        """N-Memory sparse update."""
+
+        mystep = np.copy(self.step)
+        result = np.zeros_like(mystep)
+
+        # this should be correct
+        for (dz, ds) in self.serve_dz_dstep_pairs():
+
+            # correction by current index
+            ds_norm = np.linalg.norm(ds)
+            ds_normed = ds / ds_norm
+            dz_norm = np.linalg.norm(dz)
+            dz_snormed = dz / ds_norm
+            acceleration = dz_norm / ds_norm
+
+            # we cap the acceleration
+            if acceleration > self.acceleration_cap:
+                reduction_factor = acceleration / self.acceleration_cap
+                # breakpoint()
+            else:
+                reduction_factor = 1.
+
+            ds_component_reduced = (mystep @ ds_normed) / reduction_factor
+            mystep -= ds_normed * ds_component_reduced
+            result +=  (dz_snormed * ds_component_reduced)
+        # final correction
+        result -= mystep
+        return -result
 
 class QRBroydenCQR(BaseBroydenCQR):
     """Test with QR of the diffs."""
@@ -1666,6 +1688,13 @@ class SparseNTestEquilibrated6BroydenCQR(SparseNTestAdaCapEquilibratedBroydenCQR
     """Higher ceil."""
     # new best test so far, 2025-09-28
     cap_ceil = 100.
+
+
+class SparseNTestBroyden2MSCQR(SparseNTestBroydenMSCQR, EquilibratedNewCQR):
+    """With equilibration."""
+    # close to best test so far 2025-09-30; probably with better spacing of Br sampling
+    ruiz_rounds = 2
+    ruiz_norm = np.inf
 
 class SparseNTestEquilibrated5BroydenCQR(SparseNTestAdaCapBroydenCQR, EquilibratedNewCQR):
     """Alternative test, increasing sample period 2."""
