@@ -181,12 +181,11 @@ class TestNonSymmSOC(TestCase):
 
     def test_nonsymm_soc(self):
         """Test projection on non-symmetric SOC."""
-        N = 100
         for _ in range(self.num_tests):
             np.random.seed(_)
-            x = np.random.randn(N)
+            x = np.random.randn(self.size_cone)
             # make it difficult enough
-            a = np.random.uniform(0, 10., N-1)**4
+            a = np.random.uniform(0, 10., self.size_cone-1)**5
             pi = project_nonsymm_soc(x, a)
 
             # check pi in cone
