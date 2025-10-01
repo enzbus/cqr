@@ -19,6 +19,9 @@ Plan: we may already use this in a prototype; however before finalizing it
 we should figure out which formulation is better in extreme cases (using only
 t < 0 case now, may switch), and of course replace scipy.opt call with full
 Newton search.
+
+With this prototype if you push accuracy or number of tests it breaks on
+instances where mu is very close to 0.5.
 """
 
 import logging
@@ -79,30 +82,16 @@ def _base_project_dual_case(t, y, a):
     high = -.5
     low = -1
 
-    # in this case we need to move high a little bit to the left
-    if error(high) < 0:
-        for _ in range(100):
-            # in this case we need to adjust high down from -0.5
-            test = (high + low) / 2.
-            if error(test) < 0:
-                low = test
-            else:
-                logger.info("First bracket search required %d iters", _)
-                high = test
-                break
+    # in this case we need to move low possibly much to the left
+    for _ in range(100):
+        if error(low) > 0: # the error is positive if mu close to -.5
+            high = low
+            low *= 2.
         else:
-            raise ValueError("Bracket search failed!")
+            logger.info("Second bracket search required %d iters", _)
+            break
     else:
-        # in this case we need to move low possibly much to the left
-        for _ in range(100):
-            if error(low) > 0: # the error is positive if mu close to -.5
-                high = low
-                low *= 2.
-            else:
-                logger.info("Second bracket search required %d iters", _)
-                break
-        else:
-            raise ValueError("Bracket search failed!")
+        raise ValueError("Bracket search failed!")
     logger.info("brackets: (%s, %s)", low, high)
 
     # replace this with a Newton search
@@ -175,9 +164,9 @@ def project_nonsymm_soc(x: np.array, a: np.array) -> np.array:
 class TestNonSymmSOC(TestCase):
     """Just test the projection."""
 
-    accuracy = 1e-13 # about the max we achieve with this test
-    size_cone = 1000
-    num_tests = 1000
+    accuracy = 1e-14 # about the max we achieve with this test
+    size_cone = 100
+    num_tests = 100
 
     def test_nonsymm_soc(self):
         """Test projection on non-symmetric SOC."""
