@@ -25,6 +25,7 @@ import scipy as sp
 # import tqdm
 
 logger = logging.getLogger()
+from .nonsymm_soc import project_nonsymm_soc
 
 class BaseSolver:
     """Solver class.
@@ -211,7 +212,7 @@ class BaseSolver:
     # see options for compatibility across models
     def composed_cone_project(
         self, conic_variable, has_zero=False, has_free=False, has_hsde=False,
-        has_hsde_first=False):
+        has_hsde_first=False, nonsymm_soc=False):
         """Project on composed cone, allowing for alternative formulations.
         
         :param conic_variable: Variable to project
@@ -222,6 +223,8 @@ class BaseSolver:
         :type has_free: bool
         :param has_hsde: Last element is HSDE variable
         :type has_hsde: bool
+        :param nonsymm_soc: Use non-symmetric SOC projection.
+        :type nonsymm_soc: bool
 
         :returns: Projection
         :rtype: np.array
@@ -250,9 +253,13 @@ class BaseSolver:
         cur += self.nonneg
 
         # SOC part always there
-        for soc_dim in self.soc:
-            self.second_order_project(
-                conic_variable[cur:cur+soc_dim], result[cur:cur+soc_dim])
+        for idx, soc_dim in enumerate(self.soc):
+            if nonsymm_soc:
+                result[cur:cur+soc_dim] = project_nonsymm_soc(
+                    conic_variable[cur:cur+soc_dim], a=self.nonsymm_soc_a[idx])
+            else:
+                self.second_order_project(
+                    conic_variable[cur:cur+soc_dim], result[cur:cur+soc_dim])
             cur += soc_dim
 
         # optional HSDE part

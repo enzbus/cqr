@@ -1467,6 +1467,7 @@ class EquilibratedNewCQR(NewCQR):
     used_c = "eq_c"
     ruiz_rounds = 100
     ruiz_norm = np.inf
+    do_soc_equalization = True
 
     def prepare_loop(self):
         """Do Ruiz equilibration."""
@@ -1503,7 +1504,8 @@ class EquilibratedNewCQR(NewCQR):
             # equalize nr for SOCs
             cur = self.zero + self.nonneg
             for soc_dim in self.soc:
-                nr[cur:cur+soc_dim] = np.max(nr[cur:cur+soc_dim])
+                if self.do_soc_equalization:
+                    nr[cur:cur+soc_dim] = np.max(nr[cur:cur+soc_dim])
                 cur += soc_dim
             # breakpoint()
 
@@ -1539,6 +1541,32 @@ class EquilibratedNewCQR(NewCQR):
         self.x = (self.equil_e * self.x) / self.equil_sigma
         self.y = (self.equil_d * self.y) / self.equil_rho
 
+
+class EquilibratedNewCQRNonSymmSOC(EquilibratedNewCQR):
+    """With equilibration also of SOC rows."""
+
+    do_soc_equalization = False
+    ruiz_rounds = 2
+    max_iterations = 100_000
+
+    def prepare_loop(self):
+        """Compute the a vectors for the nonsymm SOCs."""
+        if len(self.soc) == 0:
+            raise ValueError("skip")
+        super().prepare_loop()
+        self.nonsymm_soc_a = []
+        cur = self.zero + self.nonneg
+        for soc_dim in self.soc:
+            self.nonsymm_soc_a.append(
+                self.equil_d[cur+1:cur + soc_dim]/self.equil_d[cur])
+            cur += soc_dim
+        print('nonsymm_soc_a', self.nonsymm_soc_a)
+
+    def cone_project(self, z):
+        """Project on y cone."""
+        return self.composed_cone_project(
+            z, has_zero=False, has_free=True, has_hsde=False,
+            nonsymm_soc=True)
 
 class AlternativeEquilibration(NewCQR):
     """Idea of alternative eq scheme."""
