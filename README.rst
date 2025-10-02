@@ -3,8 +3,10 @@ CQR: Conic QR Solver
 
 Experimental solver for convex conic programs based on the QR decomposition.
 
-Installation
-------------
+**Work in progress**, not ready for use.
+
+(Pre-alpha) installation
+------------------------
 
 .. code-block::
 
@@ -13,7 +15,7 @@ Installation
 Usage
 -----
 
-From CVXPY:
+From CVXPY < 1.7:
 
 .. code-block:: python
 	
