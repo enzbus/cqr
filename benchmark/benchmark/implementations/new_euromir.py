@@ -28,12 +28,13 @@ class BaseEuroMir(BaseSolver):
     # class constants
     epsilon_convergence = 1e-12
     max_iterations = 10_000
-
+    refuse_soc = True
     used_hsde = "hsde_q"
 
     def prepare_loop(self):
         """Define anything we need to re-use."""
-        assert len(self.soc) == 0
+        if self.refuse_soc:
+            assert len(self.soc) == 0
         self.u = np.zeros(self.n+self.m+1)
         self.u[-1] = 1.
 
@@ -167,6 +168,95 @@ class BaseBroydenEuroMir(BaseEuroMir):
             atol=0., btol=0., iter_lim=1,
             )[0]
         return step
+
+
+class BaseBroydenSimplifiedEuroMir(BaseBroydenEuroMir):
+    """Without LSQR."""
+
+    memory = 10
+    max_iterations = 1000
+    grad_reducer = 1000
+    verbose = False
+    refuse_soc = False
+
+    def minus_gradient_from_residual(self, residual):
+        result = getattr(self, self.used_hsde).T @ residual[-self.m-self.n-1:]
+        result[self.n+self.zero:] += residual[:-self.m-self.n-1]
+        return -result
+
+    def iterate(self):
+        """Simple Douglas Rachford iteration with Broyden update to override.
+        """
+
+        self.dus[
+            len(self.solution_qualities) % self.memory] = self.u - self.old_u
+        self.old_u[:] = self.u
+
+        cur_residual = self.residual(self.u)
+        if self.verbose:
+            print(np.linalg.norm(cur_residual))
+        self.dresiduals[
+            len(self.solution_qualities) % self.memory] = cur_residual - self.old_residual
+        self.old_residual[:] = cur_residual
+
+        if len(self.solution_qualities) > self.memory + 2:
+            newstep = self.compute_broyden_step(cur_residual)
+            self.u[:] = self.u + newstep/self.grad_reducer
+        else:
+            step = self.minus_gradient_from_residual(-cur_residual)
+            self.u[:] = self.u + step/self.grad_reducer
+
+    def compute_broyden_step(self, cur_residual):
+        """Base method to compute a Broyden-style approximate Newton step."""
+        # breakpoint()
+        step = self.minus_gradient_from_residual(-cur_residual)
+        return step
+
+class SparseBroydenSimplEuroMir(BaseBroydenSimplifiedEuroMir):
+    """Test with sparse update like done for CQR."""
+    memory = 10
+    lsqr_iters = 1
+    damp = 1e-8
+    max_iterations = 10000 // 2
+    acceleration_cap = 10
+    grad_reducer = 10000
+
+    def compute_broyden_step(self, cur_residual):
+        """1-Memory sparse update."""
+
+        mycur_residual = np.copy(cur_residual)
+        result = np.zeros_like(self.u)
+
+        for back_index in range(self.memory):
+            current_index = (len(
+                self.solution_qualities) - back_index) % self.memory
+
+            # correction by current index
+            dres = self.dresiduals[current_index, :]
+            dres_norm = np.linalg.norm(dres)
+            dres_normed = dres / dres_norm
+            du = self.dus[current_index, :]
+            du_norm = np.linalg.norm(du)
+            du_resnormed = du / dres_norm
+
+            acceleration = du_norm / dres_norm
+
+            # we cap the acceleration
+            if acceleration > self.acceleration_cap:
+                reduction_factor = acceleration / self.acceleration_cap
+                # print(f"HIT CAP, ITER {len(self.solution_qualities)}, update {back_index}")
+            else:
+                reduction_factor = 1.
+
+            # I had to adjust the signs, not sure why
+            dres_component = -mycur_residual @ dres_normed / reduction_factor
+            mycur_residual += dres_normed * dres_component
+            result += du_resnormed * dres_component
+            # breakpoint()
+        lsqr_result = self.minus_gradient_from_residual(-mycur_residual)
+        # final correction
+        result += lsqr_result
+        return result
 
 class SparseBroydenEuroMir(BaseBroydenEuroMir):
     """Test with sparse update like done for CQR."""
@@ -304,6 +394,9 @@ class EquilibratedEuroMir(BaseEuroMir):
 
         self.x = (self.equil_e * self.x) / self.equil_sigma
         self.y = (self.equil_d * self.y) / self.equil_rho
+
+class BaseBroydenSimplifiedEqEuroMir(BaseBroydenSimplifiedEuroMir, EquilibratedEuroMir):
+    """Test."""
 
 class SparseBroydenEquilibratedEuroMir(EquilibratedEuroMir, SparseBroydenEuroMir):
     """With equilibration."""

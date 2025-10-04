@@ -109,9 +109,9 @@ class Benchmark(TestCase):
         eival = eival[-max(n//10, 1):]
 
         # make it feasible; reduce w0 size so that it's in risk cone
-        risk = cp.sum_squares((np.diag(np.sqrt(eival))
+        risk = cp.norm2((np.diag(np.sqrt(eival))
                 @ eivec[:, -n//10:].T) @ w)
-        risk_limit = 0.00005
+        risk_limit = np.sqrt(0.00005)
 
         for _ in range(10):
             w.value = w0

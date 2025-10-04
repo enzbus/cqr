@@ -1519,7 +1519,7 @@ class EquilibratedNewCQR(NewCQR):
             # print(r1, r2)
 
             d_and_rho[nr > 0] *= nr[nr > 0]**(-0.5)
-            e_and_sigma[nc > 0] *= ((m+1)/(n+1))**(0.25) * nc[nc > 0]**(-0.5)
+            e_and_sigma[nc > 0] *= ((m+1)/(n+1))**(1./(2 * self.ruiz_norm)) * nc[nc > 0]**(-0.5)
 
             work_matrix = ((concatenated * e_and_sigma).T * d_and_rho).T
 
@@ -1567,6 +1567,53 @@ class EquilibratedNewCQRNonSymmSOC(EquilibratedNewCQR):
         return self.composed_cone_project(
             z, has_zero=False, has_free=True, has_hsde=False,
             nonsymm_soc=True)
+
+    # def iterate(self):
+    #     if len(self.solution_qualities) > 50000:
+    #         breakpoint()
+    #     super().iterate()
+
+class AdaCapEquilibratedNSSOCBroydenCQR(SparseNTestAdaCapBroydenCQR, EquilibratedNewCQRNonSymmSOC):
+    """With adaptive cap, testing NS SOC."""
+    max_iterations = 100_000
+    memory = 20
+    ruiz_rounds = 2
+    ruiz_norm = np.inf
+
+    acceleration_cap = 5 # initial value
+    cap_decrease_factor = 0.9
+    cap_increase_factor = 1.005
+    cap_floor = 1.
+    cap_ceil = 100.
+
+class AdaCapEquilibrate2dNSSOCBroydenCQR(AdaCapEquilibratedNSSOCBroydenCQR):
+    ruiz_norm = 2
+    ruiz_rounds = 2
+
+class AdaCapEquilibrate2ComparisondNSSOCBroydenCQR(AdaCapEquilibratedNSSOCBroydenCQR):
+    ruiz_norm = np.inf
+    ruiz_rounds = 100
+    do_soc_equalization = False # True
+
+    # def iterate(self):
+    #     if len(self.solution_qualities) > 100:
+    #         import matplotlib.pyplot as plt
+    #         plt.plot(self.e); plt.plot(self.eq_b); plt.show()
+    #         breakpoint()
+    #     super().iterate()
+
+class AdaCapEquilibrate2Comparison2dNSSOCBroydenCQR(AdaCapEquilibratedNSSOCBroydenCQR):
+    ruiz_norm = np.inf
+    ruiz_rounds = 100
+    do_soc_equalization = True # True
+
+    # def iterate(self):
+    #     if len(self.solution_qualities) > 100:
+    #         import matplotlib.pyplot as plt
+    #         plt.plot(self.e); plt.plot(self.eq_b); plt.show()
+    #         breakpoint()
+    #     super().iterate()
+
 
 class AlternativeEquilibration(NewCQR):
     """Idea of alternative eq scheme."""

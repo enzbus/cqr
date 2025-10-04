@@ -11,7 +11,7 @@ env:
 
 lint:
 	env/bin/python -m pylint benchmark
-	
+
 fix:
 	env/bin/python -m autopep8 --in-place benchmark/*.py benchmark/*/*.py
 
@@ -26,6 +26,9 @@ realosqp:
 
 newcqr:
 	SOLVER_CLASS=NewCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+nonsymmsoc:
+	SOLVER_CLASS=EquilibratedNewCQRNonSymmSOC NUM_INSTANCES=1000 env/bin/python -m benchmark.test
 
 ntest0brcqr: # w/out eq
 	SOLVER_CLASS=SparseNTestBroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
