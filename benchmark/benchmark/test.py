@@ -42,7 +42,6 @@ from .implementations.new_euromir import *
 from .implementations.new_new_cqr import *
 
 
-
 SOLVER_CLASS = os.getenv("SOLVER_CLASS")
 NUM_INSTANCES = int(os.getenv("NUM_INSTANCES", "1"))
 MODE = os.getenv("BENCHMARK_MODE", "BENCHMARK") # or "TEST"

@@ -276,7 +276,7 @@ class BroydenEqNNCQR(EquilibratedNewNewCQR):
         self.dzs_norms[self.cur_index] = dznorm_candidate
         self.dsteps[self.cur_index] = dstep_candidate
         self.dsteps_norms[self.cur_index] = dstepnorm_candidate
-    
+
         if (len(self.solution_qualities) > self.memory + 1) and (
                      dznorm_candidate / dstepnorm_candidate > self.skip_threshold):
             self.used_memory = 0

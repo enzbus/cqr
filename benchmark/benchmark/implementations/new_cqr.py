@@ -169,12 +169,54 @@ class NewCQR(BaseSolver):
 
 class NewCQRWithPriDuaScaling(NewCQR):
     """Test adding primal-dual scaling."""
-    pd_scale = 0.01
+    pd_scale = 1.0
+
+    update_thres = 2
+    update_period = 100 #000000
+    update_exp = 1
+
+    def change_scale(self, newscale):
+        print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {newscale}")
+        y = self.cone_project(self.z)
+        s = y - self.z
+        s /= self.pd_scale
+        self.pd_scale = newscale
+        s *= self.pd_scale
+        self.z[:] = y - s
+        self.e = -self.pd_scale * (self.nullspace @ self.nullspace.T @ getattr(
+            self, self.used_b)) - self.qr_matrix @ self.c_qr
 
     def prepare_loop(self):
         super().prepare_loop()
-        self.e = -self.pd_scale * (self.nullspace @ self.nullspace.T @ getattr(
-            self, self.used_b)) - self.qr_matrix @ self.c_qr
+
+        self.pri_ress = []
+        self.dua_ress = []
+
+    def iterate(self):
+        mystep = self.dr_step(self.z)
+        dua_res = np.linalg.norm(self.qr_matrix.T @ mystep) / self.pd_scale
+        pri_res = np.linalg.norm(self.nullspace.T @ mystep)
+        self.pri_ress.append(pri_res)
+        self.dua_ress.append(dua_res)
+        # if dua_res > 100 * pri_res:
+        #     import matplotlib.pyplot as plt
+        #     breakpoint()
+        # if pri_res > 100 * dua_res:
+        #     import matplotlib.pyplot as plt
+        #     breakpoint()
+        if len(self.solution_qualities) > 0 and len(self.solution_qualities) % self.update_period == 0:
+            ratio = np.exp(np.mean(np.log(np.array(self.pri_ress) / np.array(self.dua_ress))[:]))
+            if ratio > self.update_thres:
+                self.change_scale((ratio)**self.update_exp)
+                # import matplotlib.pyplot as plt
+                # plt.semilogy(self.dua_ress); plt.semilogy(self.pri_ress); plt.semilogy(self.solution_qualities); plt.show()
+                # breakpoint()
+            if ratio < 1./self.update_thres:
+                self.change_scale((ratio)**self.update_exp)
+                # import matplotlib.pyplot as plt
+                # plt.semilogy(self.dua_ress); plt.semilogy(self.pri_ress); plt.semilogy(self.solution_qualities); plt.show()
+                # breakpoint()
+        super().iterate()
 
     def obtain_x_and_y(self):
         """Redefine if/as needed."""
