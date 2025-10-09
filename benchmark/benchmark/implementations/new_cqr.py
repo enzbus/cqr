@@ -108,6 +108,10 @@ class NewCQR(BaseSolver):
         """Linspace project (y+s) -> y."""
         return self.nullspace @ (self.nullspace.T @ y_plus_s) + self.e
 
+    def linspace_project_noconst(self, y_plus_s):
+        """Linspace project (y+s) -> y."""
+        return self.nullspace @ (self.nullspace.T @ y_plus_s)
+
     def dr_step(self, z):
         """DR step."""
         y = self.cone_project(z)
@@ -162,6 +166,26 @@ class NewCQR(BaseSolver):
                 self.pyspqr_r, x_qr, lower=False)
             # breakpoint()
         # breakpoint()
+
+class NewCQRWithPriDuaScaling(NewCQR):
+    """Test adding primal-dual scaling."""
+    pd_scale = 0.01
+
+    def prepare_loop(self):
+        super().prepare_loop()
+        self.e = -self.pd_scale * (self.nullspace @ self.nullspace.T @ getattr(
+            self, self.used_b)) - self.qr_matrix @ self.c_qr
+
+    def obtain_x_and_y(self):
+        """Redefine if/as needed."""
+        self.y[:] = self.cone_project(self.z)
+        self.s[:] = (self.y - self.z) / self.pd_scale
+        x_qr = self.qr_matrix.T @ (getattr(self, self.used_b) - self.s)
+        if self.use_numpy:
+            self.x[:] = sp.linalg.solve_triangular(self.triangular, x_qr, lower=False)
+        else:
+            self.x[:] = self.pyspqr_e.T @ sp.sparse.linalg.spsolve_triangular(
+                self.pyspqr_r, x_qr, lower=False)
 
 # def data_ql_transform(A: np.array, b: np.array, c: np.array):
 #     """Prototype using numpy."""
@@ -290,6 +314,8 @@ class BaseBroydenCQR(NewCQR):
     max_iterations = 100000
     myverbose = False
     sample_period = 1
+    alternative_scheme = False
+    debug_breakpoint_at_iter = np.inf
 
     def prepare_loop(self):
         """Create storage arrays."""
@@ -302,6 +328,9 @@ class BaseBroydenCQR(NewCQR):
     def iterate(self):
         """Simple Douglas Rachford iteration with Broyden update to override.
         """
+        if len(self.solution_qualities) > self.debug_breakpoint_at_iter:
+            import matplotlib.pyplot as plt
+            breakpoint()
         if self.memory == 0:
             step = self.dr_step(self.z)
             if self.myverbose:
@@ -311,23 +340,27 @@ class BaseBroydenCQR(NewCQR):
 
         if len(self.solution_qualities) % self.sample_period == 0:
             self.dzs[
-                len(self.solution_qualities) % self.memory] = self.z - self.old_z
+                len(self.solution_qualities) % self.memory] = (
+                    self.z - self.old_z) if not self.alternative_scheme else self.z
             self.old_z[:] = self.z
 
         self.y[:] = self.cone_project(self.z)
-        step = self.linspace_project(2 * self.y - self.z) - self.y
+        if self.alternative_scheme:
+            step_base = self.linspace_project_noconst(2 * self.y - self.z) - self.y
+            step = step_base + self.e
+        else:
+            step = self.linspace_project(2 * self.y - self.z) - self.y
         if self.myverbose:
             print(np.linalg.norm(step))
 
         if len(self.solution_qualities) % self.sample_period == 0:
             self.dsteps[
-                len(self.solution_qualities) % self.memory] = step - self.old_step
+                len(self.solution_qualities) % self.memory] = (
+                    step - self.old_step) if not self.alternative_scheme else step_base
             self.old_step[:] = step
 
         if len(self.solution_qualities) > self.memory * self.sample_period + 2: # + 1 should suffice
             newstep = self.compute_broyden_step(step)
-            # if len(self.solution_qualities) > 50000:
-            #     breakpoint()
             self.z[:] = self.z - newstep
         else:
             self.z[:] = self.z + step
@@ -950,6 +983,9 @@ class SparseNTestAdaCapBroydenCQR(BaseBroydenCQR):
     cap_floor = 1.
     cap_ceil = 50.
 
+    def final_correction(self, mystep):
+        return -mystep
+
     def compute_broyden_step(self, step):
         """N-Memory sparse update."""
 
@@ -991,8 +1027,9 @@ class SparseNTestAdaCapBroydenCQR(BaseBroydenCQR):
             # accelerations[back_index] = np.linalg.norm(dz_snormed)
             mystep -= ds_normed * ds_component_reduced
             result +=  (dz_snormed * ds_component_reduced)
+
         # final correction
-        result -= mystep
+        result += self.final_correction(mystep)
 
         # logic for update
         if cap_hit:
@@ -1008,7 +1045,6 @@ class SparseNTestAdaCapBroydenCQR(BaseBroydenCQR):
                 self.acceleration_cap *= self.cap_decrease_factor
                 self.acceleration_cap = np.maximum(self.cap_floor, self.acceleration_cap)
         return result
-
 
 class SparseNAltAccelCapBroydenCQR(BaseBroydenCQR):
     """Full memory BrCQR, testing normalization."""
@@ -1161,6 +1197,24 @@ class LevMarNewCQR(NewCQR):
         """Multiply by Jacobian of DR step operator transpose."""
         tmp = self.linspace_project_derivative(dr)
         return self.multiply_cone_project_derivative(z, 2 * tmp - dr) - tmp
+
+
+class SparseNTestAdaCapBroydenCQRLevMar(SparseNTestAdaCapBroydenCQR, LevMarNewCQR):
+    """With final LevMar correction."""
+    lsqr_iters = 1
+    damp = 1e-8
+    def final_correction(self, mystep):
+        return -sp.sparse.linalg.lsqr(
+            sp.sparse.linalg.LinearOperator(
+                shape=(self.m, self.m),
+                matvec=lambda dz: self.multiply_jacobian_dstep(self.z, dz),
+                rmatvec=lambda dr: self.multiply_jacobian_dstep_transpose(
+                    self.z, dr)), -mystep,
+                    x0=mystep,
+                    damp=self.damp, # might make sense to change this?
+                    atol=0., btol=0., # might make sense to change this
+                    iter_lim=self.lsqr_iters)[0]
+
 
 class QRLevMarBroydenCQR(BaseBroydenCQR, LevMarNewCQR):
     """Test with QR of the diffs."""
@@ -1476,7 +1530,9 @@ class EquilibratedNewCQR(NewCQR):
         matrix = self.matrix.todense()
         concatenated = np.block(
             [[matrix, self.b.reshape(self.m, 1)],
-            [self.c.reshape(1, self.n), np.zeros((1, 1))]]).A
+            [self.c.reshape(1, self.n), np.zeros((1, 1))]])
+        if hasattr(concatenated, "A"):
+            concatenated = concatenated.A
         work_matrix = np.copy(concatenated)
 
         def norm_cols(concatenated):
@@ -1505,7 +1561,11 @@ class EquilibratedNewCQR(NewCQR):
             cur = self.zero + self.nonneg
             for soc_dim in self.soc:
                 if self.do_soc_equalization:
-                    nr[cur:cur+soc_dim] = np.max(nr[cur:cur+soc_dim])
+                    if self.ruiz_norm == np.inf:
+                        nr[cur:cur+soc_dim] = np.max(nr[cur:cur+soc_dim])
+                    if self.ruiz_norm == 2:
+                        nr[cur:cur+soc_dim] = np.sqrt(
+                            np.mean((nr[cur:cur+soc_dim])**2))
                 cur += soc_dim
             # breakpoint()
 
@@ -1548,10 +1608,11 @@ class EquilibratedNewCQRNonSymmSOC(EquilibratedNewCQR):
     do_soc_equalization = False
     ruiz_rounds = 2
     max_iterations = 100_000
+    skip_nonsoc = True
 
     def prepare_loop(self):
         """Compute the a vectors for the nonsymm SOCs."""
-        if len(self.soc) == 0:
+        if len(self.soc) == 0 and self.skip_nonsoc:
             raise ValueError("skip")
         super().prepare_loop()
         self.nonsymm_soc_a = []
@@ -1574,7 +1635,10 @@ class EquilibratedNewCQRNonSymmSOC(EquilibratedNewCQR):
     #     super().iterate()
 
 class AdaCapEquilibratedNSSOCBroydenCQR(SparseNTestAdaCapBroydenCQR, EquilibratedNewCQRNonSymmSOC):
-    """With adaptive cap, testing NS SOC."""
+    """With adaptive cap, testing NS SOC.
+    
+    Same as SparseNTestEquilibrated6BroydenCQR, but with equil soc.
+    """
     max_iterations = 100_000
     memory = 20
     ruiz_rounds = 2
@@ -1764,10 +1828,115 @@ class SparseNTestEquilibrated6BroydenCQR(SparseNTestAdaCapEquilibratedBroydenCQR
     # new best test so far, 2025-09-28
     cap_ceil = 100.
 
+class SparseNTestEquilibrated7BroydenCQR(SparseNTestAdaCapEquilibratedBroydenCQR):
+    """With more ruiz, now fixed."""
+    cap_ceil = 100.
+    ruiz_rounds = 5
+
+class SparseNTestEquilibrated8BroydenCQR(SparseNTestEquilibrated7BroydenCQR):
+    """Same as 7, norm2 instead of norminf."""
+    # best test so far 2025-10-05; need to try it with NSSOC
+    ruiz_rounds = 2
+    ruiz_norm = 2.
+
+class SparseNTestEquilibrated8debugBroydenCQR(SparseNTestEquilibrated8BroydenCQR):
+    """Same as 7, norm2 instead of norminf."""
+    # figuring out when stuck, problem_two
+    # SOLVER_CLASS=SparseNTestEquilibrated8debugBroydenCQR BENCHMARK_MODE=676 env/bin/python -m benchmark.test
+    debug_breakpoint_at_iter = 50000
+
+    def prepare_loop(self):
+        super().prepare_loop()
+        self.dual_resid = []
+        self.prim_resid = []
+    def iterate(self):
+        # let's try to save an old one
+        mys = self.dr_step(self.z)
+        self.dual_resid.append(np.linalg.norm(self.qr_matrix.T @ mys))
+        self.prim_resid.append(np.linalg.norm(self.nullspace.T @ mys))
+        if self.prim_resid[-1] > self.dual_resid[-1] * 1000:
+            breakpoint()
+        if len(self.solution_qualities) == 20000:
+            self.one_old_z = np.copy(self.z)
+            self.one_old_step = np.copy(self.dr_step(self.z))
+        super().iterate()
+
+
+class SparseNTest15BroydenCQR(SparseNTestBroydenCQR):
+    alternative_scheme = True
+
+class SparseNTestEquilibrated9BroydenCQR(SparseNTestEquilibrated7BroydenCQR):
+    """Same as 8, 5 instead of 2 rounds."""
+    ruiz_rounds = 5
+    ruiz_norm = 2.
+
+class SparseNTestEquilibrated8LARGEBroydenCQR(SparseNTestEquilibrated8BroydenCQR):
+    """Same as 8, switch to pyspqr to test with larger programs."""
+    use_numpy = False
+
+class SparseNTestEquilibrated10BroydenCQR(SparseNTestEquilibrated7BroydenCQR):
+    """Same as 9, 10 instead of 5 rounds."""
+    ruiz_rounds = 10
+    ruiz_norm = 2.
+
+class SparseNTestEquilibrated11BroydenCQR(SparseNTestAdaCapBroydenCQR, EquilibratedNewCQRNonSymmSOC):
+    """Same as 10, but use nonsymmsoc."""
+    ruiz_rounds = 10
+    ruiz_norm = 2.
+    max_iterations = 100_000
+    memory = 20
+    skip_nonsoc = False
+
+    # it has more parameters...
+    acceleration_cap = 5 # initial value
+    cap_decrease_factor = 0.9
+    cap_increase_factor = 1.005
+    cap_floor = 1.
+    cap_ceil = 100.
+
+class SparseNTestEquilibrated12BroydenCQR(SparseNTestEquilibrated10BroydenCQR):
+    """Same as 10, 20 instead of 10 rounds."""
+    ruiz_rounds = 20
+    ruiz_norm = 2.
+
+class SparseNTestEquilibrated13BroydenCQR(SparseNTestEquilibrated8BroydenCQR):
+    """Same as 8, 200 instead of 100 cap_ceil."""
+    cap_ceil = 200.
+
+
+class SparseNTestEquilibrated14BroydenCQR(SparseNTestAdaCapBroydenCQRLevMar, EquilibratedNewCQR):
+    """Same as 8, using levmar to finish iter."""
+
+    lsqr_iters = 1
+    damp = 1e-8
+
+    max_iterations = 100_000 // (2 * lsqr_iters + 1 + (lsqr_iters > 0))
+    memory = 20
+
+    # it has more parameters...
+    acceleration_cap = 5 # initial value
+    cap_decrease_factor = 0.9
+    cap_increase_factor = 1.005
+    cap_floor = 1.
+    cap_ceil = 100.
+
+    ruiz_rounds = 2
+    ruiz_norm = 2.
+
 
 class SparseNTestBroyden2MSCQR(SparseNTestBroydenMSCQR, EquilibratedNewCQR):
     """With equilibration."""
     # close to best test so far 2025-09-30; probably with better spacing of Br sampling
+    # alpha_scales = np.array((0., 0.5, 0.66, 0.75, 0.9 , 0.95, 0.975, 0.99)) # reformulate with half lives
+    # acceleration_cap = 20
+    ruiz_rounds = 2
+    ruiz_norm = np.inf
+
+class SparseNTestBroyden3MSCQR(SparseNTestBroydenMSCQR, EquilibratedNewCQR):
+    """Trying different scale."""
+    # close to best test so far 2025-09-30; probably with better spacing of Br sampling
+    alpha_scales = np.array((0., 0.25, 0.5, 0.66, 0.75, 0.9 , 0.95, 0.975, 0.99)) # reformulate with half lives
+    # acceleration_cap = 20
     ruiz_rounds = 2
     ruiz_norm = np.inf
 

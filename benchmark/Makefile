@@ -57,10 +57,38 @@ adacapeqbrcqr:
 ntest6brcqr: # adaptive, higher ceil
 	SOLVER_CLASS=SparseNTestEquilibrated6BroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
 
-ntest7brcqr: # exponential multiscale step
+ntest7brcqr: # adaptive, higher ceil
+	SOLVER_CLASS=SparseNTestEquilibrated7BroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+ntest8brcqr: # adaptive, higher ceil, ruiz 2/2
+	SOLVER_CLASS=SparseNTestEquilibrated8BroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+ntest8LARGEbrcqr: # large
+	SOLVER_CLASS=SparseNTestEquilibrated8LARGEBroydenCQR NUM_INSTANCES=1000 SIZE_CHOICE=LARGE env/bin/python -m benchmark.test
+
+ntest9brcqr: # ruiz 2/5
+	SOLVER_CLASS=SparseNTestEquilibrated9BroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+
+ntest10brcqr: # ruiz 2/10
+	SOLVER_CLASS=SparseNTestEquilibrated10BroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+ntest11brcqr: # ruiz 2/10, nssoc
+	SOLVER_CLASS=SparseNTestEquilibrated11BroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+ntest12brcqr: # ruiz 2/20, w/out nssoc
+	SOLVER_CLASS=SparseNTestEquilibrated12BroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+ntest13brcqr:
+	SOLVER_CLASS=SparseNTestEquilibrated13BroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+ntest6brcqrnssoc:
+	SOLVER_CLASS=AdaCapEquilibratedNSSOCBroydenCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
+mstestbrcqr: # exponential multiscale step
 	SOLVER_CLASS=SparseNTestBroydenMSCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
 
-ntest8brcqr: # exponential multiscale step equilibrated
+ms2testbrcqr: # exponential multiscale step equilibrated
 	SOLVER_CLASS=SparseNTestBroyden2MSCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
 
 # testbrcqrlarge:
