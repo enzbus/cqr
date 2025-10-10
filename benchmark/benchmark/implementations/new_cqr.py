@@ -167,11 +167,11 @@ class NewCQR(BaseSolver):
             # breakpoint()
         # breakpoint()
 
-class NewCQRWithPriDuaScaling(NewCQR):
+class NewWithPriDuaScalingCQR(NewCQR):
     """Test adding primal-dual scaling."""
     pd_scale = 1.0
 
-    update_thres = 2
+    update_thres = 1
     update_period = 100 #000000
     update_exp = 1
 
@@ -183,7 +183,7 @@ class NewCQRWithPriDuaScaling(NewCQR):
         self.pd_scale = newscale
         s *= self.pd_scale
         self.z[:] = y - s
-        self.e = -self.pd_scale * (self.nullspace @ self.nullspace.T @ getattr(
+        self.e[:] = -self.pd_scale * (self.nullspace @ self.nullspace.T @ getattr(
             self, self.used_b)) - self.qr_matrix @ self.c_qr
 
     def prepare_loop(self):
@@ -353,6 +353,7 @@ class BaseBroydenCQR(NewCQR):
     """Add logic to save dz's and dstep's."""
 
     memory = 10
+    used_memory = 0
     max_iterations = 100000
     myverbose = False
     sample_period = 1
@@ -402,10 +403,13 @@ class BaseBroydenCQR(NewCQR):
             self.old_step[:] = step
 
         if len(self.solution_qualities) > self.memory * self.sample_period + 2: # + 1 should suffice
+            # if subclass uses self.used_memory we don't need this claus
             newstep = self.compute_broyden_step(step)
             self.z[:] = self.z - newstep
         else:
             self.z[:] = self.z + step
+
+        self.used_memory = min(self.memory, self.used_memory + 1)
 
     def compute_broyden_step(self, step):
         """Base method to compute a Broyden-style approximate Newton step."""
@@ -977,7 +981,7 @@ class SparseNTestBroydenCQR(BaseBroydenCQR):
         # accelerations = np.zeros(self.memory)
 
         # this should be correct
-        for back_index in range(self.memory):
+        for back_index in range(self.used_memory):
             current_index = (len(
                 self.solution_qualities) - back_index) % self.memory
 
@@ -2078,6 +2082,53 @@ class L2EquilibratedNewCQR(EquilibratedNewCQR):
 
 class EquilibratedLevMarNewCQR(EquilibratedNewCQR, LevMarNewCQR):
     """Equilibrated Lev Mar."""
+
+class Equilibrated2LevMarNewCQR(LevMarNewCQR, EquilibratedNewCQR):
+    """New test eq lev-mar."""
+    ruiz_norm = 2
+    ruiz_rounds = 2
+    lsqr_iters = 10
+    max_iterations = 100_000//(2 * lsqr_iters + 2)
+    pd_scale = 1.0
+    damp = 1e-8
+
+    def prepare_loop(self):
+        super().prepare_loop()
+        self.dual_resid = []
+        self.prim_resid = []
+    def iterate(self):
+        # let's try to save an old one
+        mys = self.dr_step(self.z)
+        self.dual_resid.append(np.linalg.norm(self.qr_matrix.T @ mys)/self.pd_scale)
+        self.prim_resid.append(np.linalg.norm(self.nullspace.T @ mys))
+        print(f"PRI RES {self.prim_resid[-1]} DUA RES {self.dual_resid[-1]}")
+        ratio = np.exp(np.mean(np.log(np.array(self.prim_resid) / np.array(self.dual_resid))[:]))
+        self.change_scale(ratio)
+        super().iterate()
+
+    def change_scale(self, newscale):
+        print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {newscale}")
+        y = self.cone_project(self.z)
+        s = y - self.z
+        s /= self.pd_scale
+        self.pd_scale = newscale
+        s *= self.pd_scale
+        self.z[:] = y - s
+        self.e[:] = -self.pd_scale * (self.nullspace @ self.nullspace.T @ getattr(
+            self, self.used_b)) - self.qr_matrix @ self.c_qr
+
+    def obtain_x_and_y(self):
+        """Redefine if/as needed."""
+        self.y[:] = self.cone_project(self.z)
+        self.s[:] = (self.y - self.z) / self.pd_scale
+        x_qr = self.qr_matrix.T @ (getattr(self, self.used_b) - self.s)
+        if self.use_numpy:
+            self.x[:] = sp.linalg.solve_triangular(self.triangular, x_qr, lower=False)
+        else:
+            self.x[:] = self.pyspqr_e.T @ sp.sparse.linalg.spsolve_triangular(
+                self.pyspqr_r, x_qr, lower=False)
+        self.x = (self.equil_e * self.x) / self.equil_sigma
+        self.y = (self.equil_d * self.y) / self.equil_rho
 
 
 class EquilibratedLevMarNewCQR10Iter(EquilibratedNewCQR, LevMarNewCQR):
