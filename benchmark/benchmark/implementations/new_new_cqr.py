@@ -354,7 +354,7 @@ class BroydenEqNNCQR(EquilibratedNewNewCQR):
         #     breakpoint()
 
         # very simple logic, to start
-        new_scale = (np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**.25
+        new_scale = (np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**.5
 
         print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
         self.pd_scale = new_scale
