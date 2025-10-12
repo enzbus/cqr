@@ -1047,7 +1047,7 @@ class SparseNTestAdaCapBroydenCQR(BaseBroydenCQR):
         # accelerations = np.zeros(self.memory)
 
         # this should be correct
-        for back_index in range(self.memory):
+        for back_index in range(self.used_memory):
             current_index = (len(
                 self.solution_qualities) - back_index) % self.memory
 

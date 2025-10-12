@@ -32,6 +32,19 @@ class NewNewCQR(BaseSolver):
     used_b = "b"
     used_c = "c"
     use_numpy = True
+    pd_scale = 1.0
+
+    def change_scale(self, newscale):
+        print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {newscale}")
+        y = self.cone_project(self.z)
+        s = y - self.z
+        s /= self.pd_scale
+        self.pd_scale = newscale
+        s *= self.pd_scale
+        self.z[:] = y - s
+        self.e = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
 
     def prepare_loop(self):
         """Define anything we need to re-use."""
@@ -75,15 +88,13 @@ class NewNewCQR(BaseSolver):
 
         # shift in the linspace projector
         self.e = self.qr_matrix @ (
-            self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
-            ) - getattr(self, self.used_b)
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
 
         self.z = np.zeros(self.m)
         self.y = np.zeros(self.m)
         self.s = np.zeros(self.m)
         self.x = np.zeros(self.n)
-
-        # self.allsteps = []
 
     def cone_project(self, z):
         """Project on y cone."""
@@ -93,6 +104,27 @@ class NewNewCQR(BaseSolver):
     def linspace_project_basic(self, y_plus_s):
         """Linspace project (y+s) -> y, w/out shift."""
         return y_plus_s - self.qr_matrix @ (self.qr_matrix.T @ y_plus_s)
+
+    def compute_pridual_step(self, z):
+        """Compute primal dual things, all descaled; steps are the residuals.
+        
+        So, in basic DR
+        newz = y + dua_step + pd_scale * (-s + pri_step)
+        
+        """
+        y = self.cone_project(z)
+        s = y - z
+        s /= self.pd_scale
+        # step = dr_step(z)
+        # pri_step = self.nullspace @ self.nullspace.T @ step
+        # dua_step = self.qr_matrix @ self.qr_matrix.T @ step = step - pri_step
+        # step = self.nullspace @ (self.nullspace.T @ y) + self.nullspace @ (self.nullspace.T @ s) - y - (self.nullspace @ self.nullspace.T @ getattr(
+        #    self, self.used_b)) - self.qr_matrix @ self.c_qr
+        # step = self.nullspace @ (self.nullspace.T @ (y + s - getattr(self, self.used_b))) - y - self.qr_matrix @ self.c_qr
+        pri_step = self.nullspace @ (self.nullspace.T @ (s - getattr(self, self.used_b)))
+        dua_step = -self.qr_matrix @ (self.qr_matrix.T @ y + self.c_qr)
+        assert np.allclose(self.pd_scale * pri_step + dua_step, self.dr_step(z))
+        return s, y, pri_step, dua_step
 
     def dr_step(self, z):
         """DR step."""
@@ -109,7 +141,7 @@ class NewNewCQR(BaseSolver):
     def obtain_x_and_y(self):
         """Redefine if/as needed."""
         self.y[:] = self.cone_project(self.z)
-        self.s[:] = self.y - self.z
+        self.s[:] = (self.y - self.z) / self.pd_scale
         x_qr = self.qr_matrix.T @ (getattr(self, self.used_b) - self.s)
         if self.use_numpy:
             self.x[:] = sp.linalg.solve_triangular(self.triangular, x_qr, lower=False)
@@ -206,127 +238,166 @@ class EquilibratedNewNewCQR(NewNewCQR):
 class BroydenEqNNCQR(EquilibratedNewNewCQR):
     """Add basic Broyden logic."""
 
-    memory = 10
+    memory = 50
     max_iterations = 100_000
-    do_accumulation = True
-    # accumulation_threshold = 10000
-    skip_threshold = 100
+    acceleration_cap = 100
 
     def prepare_loop(self):
         """Create storage arrays."""
         super().prepare_loop()
-        self.dzs = np.empty((self.memory, self.m), dtype=float)
-        self.dzs_norms = np.empty(self.memory, dtype=float)
-        self.dsteps = np.empty((self.memory, self.m), dtype=float)
-        self.dsteps_norms = np.empty(self.memory, dtype=float)
-        self.old_z = np.empty(self.m, dtype=float)
-        self.old_step_base = np.empty(self.m, dtype=float)
+        self.dys = np.empty((self.memory, self.m), dtype=float)
+        self.dss = np.empty((self.memory, self.m), dtype=float)
+        # self.dzs_norms = np.empty(self.memory, dtype=float)
+        self.dpriress = np.empty((self.memory, self.m), dtype=float)
+        self.dduaress = np.empty((self.memory, self.m), dtype=float)
+        # self.dsteps_norms = np.empty(self.memory, dtype=float)
+        self.old_y = np.empty(self.m, dtype=float)
+        self.old_s = np.empty(self.m, dtype=float)
+        self.old_prires = np.empty(self.m, dtype=float)
+        self.old_duares = np.empty(self.m, dtype=float)
         self.step = np.empty(self.m, dtype=float)
-        self.cur_index = -1
-        self.used_memory = self.memory
+        self.pri_res = np.empty(self.m, dtype=float)
+        self.dua_res = np.empty(self.m, dtype=float)
+        self.used_memory = 0
+        self.nonneg_activity = np.empty(self.nonneg, dtype=bool)
+        self.old_nonneg_activity = np.empty(self.nonneg, dtype=bool)
+        self.soc_activity = np.empty(len(self.soc), dtype=int)
+        self.old_soc_activity = np.empty(len(self.soc), dtype=int)
+
+    def compute_nonneg_activity(self, z):
+        """Compute activity (bool) of nonneg cones."""
+        return z[self.zero: self.zero+self.nonneg] > 0
+
+    def compute_soc_activity(self, z):
+        """Compute activity (-1, 0, 1) of soc cones."""
+        result = np.empty(len(self.soc), dtype=int)
+        cur = self.zero + self.nonneg
+        for index, soc_size in enumerate(self.soc):
+            z_cone = z[cur:cur+soc_size]
+            t, x = z_cone[0], z_cone[1:]
+            nrm = np.linalg.norm(x)
+            if t > nrm:
+                result[index] = 1
+            elif t < -nrm:
+                result[index] = -1
+            else:
+                result[index] = 0
+            cur += soc_size
+        assert cur == self.m
+        return result
 
     def iterate(self):
         """Simple Douglas Rachford iteration with Broyden update to override.
         """
-        if self.memory == 0:
+        if self.memory == 0: # fall back to non-broyden logic
             super().iterate()
+            return
 
-        # self.cur_index = len(self.solution_qualities) % self.memory
+        cur_iter = len(self.solution_qualities)
+        cur_index = cur_iter % self.memory
 
-        # self.dzs[self.cur_index] = self.z - self.old_z
-        # self.dzs_norms[self.cur_index] = np.linalg.norm(self.dzs[self.cur_index])
+        # compute active set; will be factored in projection logic itself
+        # will only need one storage each; probably soc works with just 1 bit
+        self.nonneg_activity = self.compute_nonneg_activity(self.z)
+        self.soc_activity = self.compute_soc_activity(self.z)
+        if cur_iter > 0:
+            if (np.all(self.nonneg_activity == self.old_nonneg_activity)
+                    and np.all(self.soc_activity == self.soc_activity)):
+                active_set_changed = False
+            else:
+                active_set_changed = True
+            self.old_nonneg_activity[:] = self.nonneg_activity
+            self.old_soc_activity[:] = self.soc_activity
 
-        dz_candidate = self.z - self.old_z
-        dznorm_candidate = np.linalg.norm(dz_candidate)
-        self.old_z[:] = self.z
+        # compute DR step
+        # self.y[:] = self.cone_project(self.z)
+        # step_base = self.linspace_project_basic(2 * self.y - self.z) - self.y
+        # self.step[:] = step_base + self.e
+        self.s[:], self.y[:], self.pri_res[:], self.dua_res[:] = self.compute_pridual_step(self.z)
 
-        self.y[:] = self.cone_project(self.z)
-        step_base = self.linspace_project_basic(2 * self.y - self.z) - self.y
-        self.step[:] = step_base + self.e
+        # HERE THE LOGIC TO UPDATE THE SCALE
+        self.update_pd_scale() # change z in place
 
-        # self.dsteps[self.cur_index] = step_base - self.old_step_base
-        dstep_candidate = step_base - self.old_step_base
-        # self.dsteps_norms[self.cur_index] = np.linalg.norm(self.dsteps[self.cur_index])
-        dstepnorm_candidate = np.linalg.norm(dstep_candidate)
-        self.old_step_base[:] = step_base
+        # update Broyden stores
+        if cur_iter > 0:
+            self.dys[cur_index] = self.y - self.old_y
+            self.dss[cur_index] = self.s - self.old_s
+            self.dpriress[cur_index] = self.pri_res - self.old_prires
+            self.dduaress[cur_index] = self.dua_res - self.old_duares
+            # self.dzs_norms[cur_index] = np.linalg.norm(self.dzs[cur_index])
+        self.old_y[:] = self.y
+        self.old_s[:] = self.s
+        self.old_prires[:] = self.pri_res
+        self.old_duares[:] = self.dua_res
 
-        # if self.do_accumulation and (
-        #         len(self.solution_qualities) > self.memory + 1) and (
-        #             dznorm_candidate / dstepnorm_candidate > self.accumulation_threshold):
-        #     # if len(self.solution_qualities) > 5000:
-        #     # breakpoint()
-        #     # print(self.dzs_norms / self.dsteps_norms)
-        #     # breakpoint()
-        #     self.dzs[self.cur_index] += dz_candidate
-        #     self.dzs_norms[self.cur_index] = np.linalg.norm(self.dzs[self.cur_index])
-        #     self.dsteps[self.cur_index] += dstep_candidate
-        #     self.dsteps_norms[self.cur_index] = np.linalg.norm(self.dsteps[self.cur_index])
-        #     self.used_memory = max(self.used_memory - 1, 1)
-            # print(self.dzs_norms / self.dsteps_norms)
-            # and we don't update the index
-            # breakpoint()
-            # self.cur_index = (self.cur_index + 1) % self.memory
-            # self.dzs[self.cur_index] = dz_candidate
-            # self.dzs_norms[self.cur_index] = dznorm_candidate
-            # self.dsteps[self.cur_index] = dstep_candidate
-            # self.dsteps_norms[self.cur_index] = dstepnorm_candidate
-            # self.used_memory = 1
-        self.cur_index = (self.cur_index + 1) % self.memory
-        self.dzs[self.cur_index] = dz_candidate
-        self.dzs_norms[self.cur_index] = dznorm_candidate
-        self.dsteps[self.cur_index] = dstep_candidate
-        self.dsteps_norms[self.cur_index] = dstepnorm_candidate
+        # # update dstep
+        # if cur_iter > 0:
+        #     self.dsteps[cur_index] = self.step - self.old_step
+        #     # self.dsteps_norms[cur_index] = np.linalg.norm(
+        #     #     self.dsteps[cur_index])
+        # self.old_step[:] = self.step
 
-        if (len(self.solution_qualities) > self.memory + 1) and (
-                     dznorm_candidate / dstepnorm_candidate > self.skip_threshold):
+        # update used_memory
+        if cur_iter > 0:
+            self.used_memory = min(self.used_memory + 1, self.memory)
+        if active_set_changed: # we could have skipped saving them...
+            print(f'ITER {cur_iter} SETTING USED_MEMORY TO ZERO B/C ACTIVITY CHANGE')
             self.used_memory = 0
-            if len(self.solution_qualities) > 5000:
-                breakpoint()
-        else:
-            self.used_memory = min(self.memory + 1, self.memory)
 
-        if len(self.solution_qualities) > self.memory + 1:
-            newstep = self.compute_broyden_step()
-            # if len(self.solution_qualities) > 50000:
-            #     breakpoint()
-            self.z[:] = self.z - newstep
-        else:
-            self.z[:] = self.z + self.step[:]
+        # update with Broyden step
+        self.z[:] = self.z[:] - self.compute_broyden_step()
 
-    def compute_broyden_step(self):
-        """Base method to compute a Broyden-style approximate Newton step."""
-        return -self.step[:]
+    def update_pd_scale(self):
+        cur_iter = len(self.solution_qualities)
+        print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+        # if np.abs(np.log10(np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res)) > 3):
+        #     breakpoint()
+
+        # very simple logic, to start
+        new_scale = (np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**.25
+
+        print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
 
     def serve_broyden_elements(self):
         """Serve pieces used for Broyden loop."""
+
+        cur_iter = len(self.solution_qualities)
+        cur_index = cur_iter % self.memory
+
         for back_index in range(self.used_memory):
-            index = (self.cur_index - back_index) % self.memory
+            index = (cur_index - back_index) % self.memory
             yield (
-                self.dzs[index],
-                self.dzs_norms[index],
-                self.dsteps[index],
-                self.dsteps_norms[index]
+                self.dss[index],
+                self.dys[index],
+                self.dpriress[index],
+                self.dduaress[index],
                 )
 
-class SparseBasicBroydenEqNNCQR(BroydenEqNNCQR):
-    """Full memory BrCQR, testing normalization."""
-    max_iterations = 100_000
-    acceleration_cap = 1000
-
     def compute_broyden_step(self):
-        """N-Memory sparse update."""
-
-        mystep = np.copy(self.step)
+        """Base method to compute a Broyden-style approximate Newton step."""
+        mystep = self.pd_scale * self.pri_res + self.dua_res
         result = np.zeros_like(mystep)
 
         # this should be correct
-        for _, (dz, dz_norm, ds, ds_norm) in enumerate(
+        for _, (ds, dy, dprires, dduares) in enumerate(
             self.serve_broyden_elements()):
 
+            dz = dy - self.pd_scale * ds
+            dstep = self.pd_scale * dprires + dduares
+
+            dz_norm = np.linalg.norm(dz)
+            dstep_norm = np.linalg.norm(dstep)
+
             # correction by current index
-            ds_normed = ds / ds_norm
-            dz_snormed = dz / ds_norm
-            acceleration = dz_norm / ds_norm
+            dstep_normed = dstep / dstep_norm
+            dz_snormed = dz / dstep_norm
+            acceleration = dz_norm / dstep_norm
 
             # we cap the acceleration
             if acceleration > self.acceleration_cap:
@@ -334,43 +405,10 @@ class SparseBasicBroydenEqNNCQR(BroydenEqNNCQR):
             else:
                 reduction_factor = 1.
 
-            ds_component_reduced = (mystep @ ds_normed) / reduction_factor
-            mystep -= ds_normed * ds_component_reduced
-            result +=  (dz_snormed * ds_component_reduced)
-        # final correction
-        result -= mystep
+            dstep_component_reduced = (mystep @ dstep_normed) / reduction_factor
+            mystep -= dstep_normed * dstep_component_reduced
+            result +=  (dz_snormed * dstep_component_reduced)
 
-        return result
-
-class SparseAccumulateBroydenEqNNCQR(BroydenEqNNCQR):
-    """Testing accumulation of updates."""
-    max_iterations = 100_000
-    acceleration_cap = 20
-
-    def compute_broyden_step(self):
-        """N-Memory sparse update."""
-
-        mystep = np.copy(self.step)
-        result = np.zeros_like(mystep)
-
-        # this should be correct
-        for _, (dz, dz_norm, ds, ds_norm) in enumerate(
-            self.serve_broyden_elements()):
-
-            # correction by current index
-            acceleration = dz_norm / ds_norm
-
-            # we cap the acceleration
-            if acceleration > self.acceleration_cap:
-                reduction_factor = acceleration / self.acceleration_cap
-            else:
-                reduction_factor = 1.
-
-            ds_normed = ds / ds_norm
-            dz_snormed = dz / ds_norm
-            ds_component_reduced = (mystep @ ds_normed) / reduction_factor
-            mystep -= ds_normed * ds_component_reduced
-            result +=  (dz_snormed * ds_component_reduced)
         # final correction
         result -= mystep
 
