@@ -127,12 +127,10 @@ def hsde_ruiz_equilibration(  # pylint: disable=too-many-arguments
             norm_cols_and_b[-1] = np.linalg.norm(work_b)
 
         elif l_norm == np.inf:
-            # was missing this!!!!
-            work_matrix.data[:] = np.abs(work_matrix.data)
             # breakpoint()
             norm_rows_and_c[:-1] = work_matrix.max(axis=1).todense().flatten()
-            norm_rows_and_c[:-1] = np.maximum(norm_rows_and_c[:-1], np.abs(work_b))
-            norm_rows_and_c[-1] = np.max(np.abs(work_c))
+            norm_rows_and_c[:-1] = np.maximum(norm_rows_and_c[:-1], work_b)
+            norm_rows_and_c[-1] = np.max(work_c)
 
             # here we apply the cones separation, each block gets equal values
             maxes = np.array(
@@ -141,8 +139,8 @@ def hsde_ruiz_equilibration(  # pylint: disable=too-many-arguments
             norm_rows_and_c = cones_mapper.T @ maxes
 
             norm_cols_and_b[:-1] = work_matrix.max(axis=0).todense().flatten()
-            norm_cols_and_b[:-1] = np.maximum(norm_cols_and_b[:-1], np.abs(work_c))
-            norm_cols_and_b[-1] = np.max(np.abs(work_b))
+            norm_cols_and_b[:-1] += np.maximum(norm_cols_and_b[:-1], work_c)
+            norm_cols_and_b[-1] = np.max(work_b)
 
         else:
             raise SyntaxError("L-norm not supported!")
@@ -155,9 +153,6 @@ def hsde_ruiz_equilibration(  # pylint: disable=too-many-arguments
         logger.info('Equilibration iter %s: r1=%s, r2=%s', i, r1, r2)
         if (r1-1 < eps_rows) and (r2-1 < eps_cols):
             logger.info('Equilibration converged.')
-            # recompute it
-            work_matrix = sp.diags(d_and_rho[:-1]
-                ) @ matrix @ sp.diags(e_and_sigma[:-1])
             break
 
         d_and_rho[norm_rows_and_c > 0] *= \
@@ -173,12 +168,7 @@ def hsde_ruiz_equilibration(  # pylint: disable=too-many-arguments
 
     else:
         logger.info('Equilibration reached max. number of iterations.')
-    # import matplotlib.pyplot as plt
-    # plt.imshow(work_matrix.todense()); plt.colorbar(); plt.title("eq matrix")
-    # plt.figure()
-    # plt.imshow(matrix.todense()); plt.colorbar(); plt.title("matrix")
-    # plt.show()
-    # breakpoint()
+
     return (
         d_and_rho[:-1], e_and_sigma[:-1], e_and_sigma[-1], d_and_rho[-1],
         work_matrix, work_b, work_c)
