@@ -263,6 +263,9 @@ class BroydenEqNNCQR(EquilibratedNewNewCQR):
         self.old_nonneg_activity = np.empty(self.nonneg, dtype=bool)
         self.soc_activity = np.empty(len(self.soc), dtype=int)
         self.old_soc_activity = np.empty(len(self.soc), dtype=int)
+        self.pri_res_norms = []
+        self.dua_res_norms = []
+        self.pd_scales = []
 
     def compute_nonneg_activity(self, z):
         """Compute activity (bool) of nonneg cones."""
@@ -316,7 +319,13 @@ class BroydenEqNNCQR(EquilibratedNewNewCQR):
         self.s[:], self.y[:], self.pri_res[:], self.dua_res[:] = self.compute_pridual_step(self.z)
 
         # HERE THE LOGIC TO UPDATE THE SCALE
+        # we store the primal and dual res norms
+        self.pri_res_norms.append(float(np.linalg.norm(self.pri_res)))
+        self.dua_res_norms.append(float(np.linalg.norm(self.dua_res)))
+        # we choose the scale
         self.update_pd_scale() # change z in place
+        # and the primal dual scale chosen
+        self.pd_scales.append(float(self.pd_scale))
 
         # update Broyden stores
         if cur_iter > 0:
@@ -343,6 +352,10 @@ class BroydenEqNNCQR(EquilibratedNewNewCQR):
         if active_set_changed: # we could have skipped saving them...
             print(f'ITER {cur_iter} SETTING USED_MEMORY TO ZERO B/C ACTIVITY CHANGE')
             self.used_memory = 0
+            # reset stores used to choose scale
+            self.pri_res_norms = []
+            self.dua_res_norms = []
+            self.pd_scales = []
 
         # update with Broyden step
         self.z[:] = self.z[:] - self.compute_broyden_step()
@@ -413,3 +426,103 @@ class BroydenEqNNCQR(EquilibratedNewNewCQR):
         result -= mystep
 
         return result
+
+class BroydenAdaScaleEqNNCQR(BroydenEqNNCQR):
+    """Experiment on adaptive scale choice.
+    
+    Close to best test so far, Oct 15; improves the tails but can be further
+    improved.
+    """
+    base_exponent = 0
+    window = 100
+
+    def update_pd_scale(self):
+        cur_iter = len(self.solution_qualities)
+        print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+        # if np.abs(np.log10(np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res)) > 3):
+        #     breakpoint()
+
+        # count how many recent iters we've had same diff sign
+        diffnorms = np.array(self.pri_res_norms) - np.array(self.dua_res_norms)
+        last_diff_sign = np.sign(diffnorms[-1])
+        same_sign = np.sign(diffnorms) == last_diff_sign
+        iters_same_sign = np.argmin(same_sign[::-1])
+        if iters_same_sign == 0:
+            iters_same_sign = len(same_sign)
+
+        # if len(self.pd_scales)>10:
+        #     breakpoint()
+
+        exponent = self.base_exponent + np.tanh(iters_same_sign/self.window) * (1 - self.base_exponent)
+
+        # very simple logic, to start
+        new_scale = (np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**exponent
+
+        print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+    # def update_pd_scale(self):
+    #     cur_iter = len(self.solution_qualities)
+    #     print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+    #     # if np.abs(np.log10(np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res)) > 3):
+    #     #     breakpoint()
+
+    #     if len(self.pd_scales) > 10:
+
+    #         data = np.vstack([
+    #             np.log(self.pri_res_norms),
+    #             np.log(self.dua_res_norms)])
+    #         data = data.T - np.mean(data, axis=1)
+    #         data = data.T
+    #         data = data.T / np.std(data, axis=1)
+    #         data = data.T
+    #         X = data[:, :-1]
+    #         X = np.vstack([X, np.log(self.pd_scales)])
+    #         Y = data[:, 1:]
+    #         X = X.T
+    #         Y = Y.T
+    #         # learn linear rule b/w X and Y
+    #         beta = np.linalg.solve(X.T @ X, X.T @ Y)
+    #         import cvxpy as cp
+    #         log_scale = cp.Variable()
+    #         expected_prires = cp.hstack([Y[-1], log_scale]) @ beta[:,0]
+    #         expected_duares = cp.hstack([Y[-1], log_scale]) @ beta[:,1]
+    #         # breakpoint()
+    #         bounds = [np.log((np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))), np.log((np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**.25)]
+    #         print('BOUNDS', bounds)
+    #         cp.Problem(cp.Minimize(cp.sum_squares(expected_prires - expected_duares)), [log_scale >= min(bounds), log_scale <= max(bounds)]).solve(solver='ECOS')
+    #         new_scale = np.exp(log_scale.value)
+    #         print('chosen scale', np.exp(log_scale.value), 'exp prires', expected_prires.value, 'exp duares', expected_duares.value)
+    #         # breakpoint()
+
+    #         # cp.Problem(cp.Maximize(cp.log(expected_prires + 16) + cp.log(expected_duares + 16))).solve()
+    #         # breakpoint()
+
+    #         # # cp.Problem(cp.Maximize(cp.min(cp.hstack([expected_prires, expected_duares])))).solve()
+    #         # # cp.Problem(cp.Minimize(cp.sum_squares(expected_prires - expected_duares))).solve()
+    #         # print("CHOSEN SCALE", chosen_scale.value, "SQRT", (np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**.5)
+
+    #         # breakpoint()
+    #         # new_scale = chosen_scale.value if chosen_scale.value > 0 else (np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**.5
+    #     else:
+    #         # very simple logic, to start
+    #         new_scale = (np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**.5
+
+    #     print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+    #     self.pd_scale = new_scale
+    #     self.z[:] = self.y - self.s * new_scale
+    #     # for b/w compatibility with dr_step old method
+    #     self.e[:] = self.qr_matrix @ (
+    #         self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+    #         ) - self.pd_scale * getattr(self, self.used_b)
+
+class BroydenAdaScale2EqNNCQR(BroydenAdaScaleEqNNCQR):
+    """Experiment on adaptive scale choice. Doesn't work.
+    """
+    base_exponent = 0.5
+    window = 100

@@ -48,6 +48,10 @@ MODE = os.getenv("BENCHMARK_MODE", "BENCHMARK") # or "TEST"
 SIZE_CHOICE = os.getenv("SIZE_CHOICE", "NORMAL") # or "SMALL"
 
 PROGRAM_SIZES = {
+    "HUGE": {
+        "_generate_problem_one": {"m": 410, "n": 300},
+        "_generate_problem_two": {"m": 410, "n": 300},
+        "_generate_portfolio_problem": {"n": 1000}},
     "LARGE": {
         "_generate_problem_one": {"m": 82, "n": 60},
         "_generate_problem_two": {"m": 82, "n": 60},
@@ -161,10 +165,10 @@ class Benchmark(TestCase):
                     **PROGRAM_SIZES[SIZE_CHOICE][program_generator.__name__])
                 # import time
                 # s = time.time()
-                # prog.solve(solver='CLARABEL')
+                # prog.solve(solver='CLARABEL', verbose=True)
                 # print("CLARABEL took", time.time()-s)
                 # s = time.time()
-                # prog.solve(solver='SCS', eps_abs=1e-8, eps_rel=1e-8)
+                # prog.solve(solver='SCS', eps_abs=1e-8, eps_rel=1e-8, verbose=True)
                 # print("SCS took", time.time()-s)
                 # print("SCS iters", prog.solver_stats.extra_stats['info']['iter'])
                 # breakpoint()
@@ -209,6 +213,15 @@ class Benchmark(TestCase):
                 _, prog = program_generator(
                     seed,
                     **PROGRAM_SIZES[SIZE_CHOICE][program_generator.__name__])
+                # import time
+                # s = time.time()
+                # prog.solve(solver='CLARABEL', verbose=True)
+                # print("CLARABEL took", time.time()-s)
+                # s = time.time()
+                # prog.solve(solver='SCS', eps_abs=1e-8, eps_rel=1e-8, verbose=True)
+                # print("SCS took", time.time()-s)
+                # print("SCS iters", prog.solver_stats.extra_stats['info']['iter'])
+                # # breakpoint()
                 prog.solve(solver=CvxpyWrapper(
                     solver_class=globals()[SOLVER_CLASS]))
                 sol_qual = np.array(

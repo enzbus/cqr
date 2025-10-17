@@ -30,6 +30,9 @@ newcqr:
 newnewcqr1: # best test so far Oct 12; 50 memory, pd_scale=ratio**0.5, active set Broyden reset, Ruiz-2 10% thres; each iter costs twice matrix mult than newcqr
 	OPENBLAS_NUM_THREADS=1 SOLVER_CLASS=BroydenEqNNCQR NUM_INSTANCES=1000 env/bin/python -m benchmark.test
 
+nncqradascale1: # first experiment adaptive scale
+	SOLVER_CLASS= BroydenAdaScaleEqNNCQR  NUM_INSTANCES=1000 env/bin/python -m benchmark.test
+
 nonsymmsoc:
 	SOLVER_CLASS=EquilibratedNewCQRNonSymmSOC NUM_INSTANCES=1000 env/bin/python -m benchmark.test
 
