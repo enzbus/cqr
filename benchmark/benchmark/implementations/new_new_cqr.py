@@ -162,6 +162,7 @@ class EquilibratedNewNewCQR(NewNewCQR):
     ruiz_row_limit = 0.1 # converge if max norms rows <= 1.1 min norms rows
     ruiz_norm = 2
     do_soc_equalization = True
+    internal_verbose = True
 
     def prepare_loop(self):
         """Do Ruiz equilibration."""
@@ -266,6 +267,7 @@ class BroydenEqNNCQR(EquilibratedNewNewCQR):
         self.pri_res_norms = []
         self.dua_res_norms = []
         self.pd_scales = []
+        self.exponents = []
 
     def compute_nonneg_activity(self, z):
         """Compute activity (bool) of nonneg cones."""
@@ -323,6 +325,7 @@ class BroydenEqNNCQR(EquilibratedNewNewCQR):
         self.pri_res_norms.append(float(np.linalg.norm(self.pri_res)))
         self.dua_res_norms.append(float(np.linalg.norm(self.dua_res)))
         # we choose the scale
+        # we append to self.exponents inside this for now...
         self.update_pd_scale() # change z in place
         # and the primal dual scale chosen
         self.pd_scales.append(float(self.pd_scale))
@@ -350,15 +353,21 @@ class BroydenEqNNCQR(EquilibratedNewNewCQR):
         if cur_iter > 0:
             self.used_memory = min(self.used_memory + 1, self.memory)
         if active_set_changed: # we could have skipped saving them...
-            print(f'ITER {cur_iter} SETTING USED_MEMORY TO ZERO B/C ACTIVITY CHANGE')
+            if self.internal_verbose:
+                print(f'ITER {cur_iter} SETTING USED_MEMORY TO ZERO B/C ACTIVITY CHANGE')
             self.used_memory = 0
             # reset stores used to choose scale
-            self.pri_res_norms = []
-            self.dua_res_norms = []
-            self.pd_scales = []
+            self.reset_pd_stores()
 
         # update with Broyden step
         self.z[:] = self.z[:] - self.compute_broyden_step()
+
+    def reset_pd_stores(self):
+        """Reset stores used to choose pd scale."""
+        self.pri_res_norms = []
+        self.dua_res_norms = []
+        self.pd_scales = []
+        self.exponents = []
 
     def update_pd_scale(self):
         cur_iter = len(self.solution_qualities)
@@ -526,3 +535,469 @@ class BroydenAdaScale2EqNNCQR(BroydenAdaScaleEqNNCQR):
     """
     base_exponent = 0.5
     window = 100
+
+class BroydenAdaScaleTest2EqNNCQR(BroydenEqNNCQR):
+    """Experiment on adaptive scale choice.
+    """
+
+    def update_pd_scale(self):
+        cur_iter = len(self.solution_qualities)
+        print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+
+        if len(self.pd_scales) > 10:
+            import matplotlib.pyplot as plt
+            past_logratios = np.log(np.array(self.pri_res_norms) / np.array(self.dua_res_norms))
+            diff_logratios = np.diff(past_logratios)
+            plt.plot(diff_logratios)
+            plt.plot(self.exponents)
+            plt.show()
+
+            # # try linear model
+            # cur_logratios = past_logratios[:-1]
+            # next_logratios = past_logratios[1:]
+            # X = np.zeros((len(cur_logratios), 3))
+            # X[:,0] = cur_logratios
+            # X[:,1] = self.exponents
+            # X[:, 2] = 1.
+            # y = next_logratios
+            # beta = np.linalg.solve(X.T @ X, X.T @ y)
+            # print("BETA", beta)
+            # opt_exponent = -(past_logratios[-1] * beta[0] + beta[2])/beta[1]
+            # print('LIN MODEL OPT EXPONENT', opt_exponent)
+            # exponent = np.clip(opt_exponent, 0.05, 0.75)
+            # print('ACTUAL CHOICE', exponent)
+            # # breakpoint()
+
+            # try linear model
+            last_logratios = past_logratios[:-2]
+            cur_logratios = past_logratios[1:-1]
+            next_logratios = past_logratios[2:]
+            X = np.zeros((len(cur_logratios), 5))
+            X[:, 0] = last_logratios
+            X[:, 1] = cur_logratios
+            X[:, 2] = self.exponents[:-1]
+            X[:, 3] = self.exponents[1:]
+            X[:, 4] = 1.
+            y = next_logratios
+            beta = np.linalg.solve(X.T @ X, X.T @ y)
+            print("BETA", beta)
+            opt_exponent = -(past_logratios[-2] * beta[0] + past_logratios[-1] * beta[1] + self.exponents[-1] * beta[2] + beta[4])/beta[3]
+            print('LIN MODEL OPT EXPONENT', opt_exponent)
+            exponent = np.clip(opt_exponent, 0.05, 0.75)
+            print('ACTUAL CHOICE', exponent)
+            # breakpoint()
+
+        else:
+            exponent = np.random.uniform(0.4, 0.6)
+        self.exponents.append(exponent)
+
+        # very simple logic, to start
+        new_scale = (np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**exponent
+
+        print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+class BroydenAdaScaleTest3EqNNCQR(BroydenEqNNCQR):
+    """Experiment on adaptive scale choice.
+    """
+
+    def update_pd_scale(self):
+        cur_iter = len(self.solution_qualities)
+        print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+
+        # breakpoint()
+
+        # very simple logic, to start
+        new_scale = np.exp(np.mean(np.log(np.array(self.pri_res_norms)/np.array(self.dua_res_norms))))**.75
+
+        print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+class BroydenAdaScaleTest4EqNNCQR(BroydenEqNNCQR):
+    """Experiment on adaptive scale choice.
+    """
+
+    def update_pd_scale(self):
+        cur_iter = len(self.solution_qualities)
+        print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+
+        if len(self.pd_scales) > 10:
+            # import matplotlib.pyplot as plt
+            past_logratios = np.log(np.array(self.pri_res_norms) / np.array(self.dua_res_norms))
+            # diff_logratios = np.diff(past_logratios)
+            # plt.plot(diff_logratios)
+            # plt.plot(np.log(self.pd_scales))
+            # plt.show()
+            # past_logratios -= np.mean(past_logratios)
+            # past_logratios /= np.std(past_logratios)
+            past_logscales = np.log(self.pd_scales)
+            # m,s = np.mean(past_logscales), np.std(past_logscales)
+            # past_logscales -= np.mean(past_logscales)
+            # past_logscales /= np.std(past_logscales)
+
+            # try linear model
+            cur_logratios = past_logratios[:-1]
+            next_logratios = past_logratios[1:]
+            X = np.zeros((len(cur_logratios), 3))
+            X[:, 0] = cur_logratios
+            X[:, 1] = past_logscales
+            X[:, 2] = 1.
+            y = next_logratios
+            beta = np.linalg.solve(X.T @ X, X.T @ y)
+            print("BETA", beta)
+            print("'exponent'", -beta[0]/beta[1], "multiplier", np.exp(-beta[2]/beta[1]))
+            # if beta[1] > 0:
+            #     import matplotlib.pyplot as plt
+            #     diff_logratios = np.diff(past_logratios)
+            #     plt.plot(diff_logratios, label='diff log ratios')
+            #     plt.plot(np.log(self.pd_scales), label='log pd scale')
+            #     plt.legend()
+            #     plt.show()
+            #     breakpoint()
+            opt_logscale = -(past_logratios[-1] * beta[0] + beta[2])/beta[1]
+            # opt_logscale *= s
+            # opt_logscale += m
+            print('OPT LOGSCALE', opt_logscale)
+            # breakpoint()
+            new_scale = np.clip(np.exp(opt_logscale), self.pd_scale * 0.9, self.pd_scale * 1.1)
+            # exponent = np.clip(opt_exponent, 0.05, 0.75)
+            # print('ACTUAL CHOICE', exponent)
+            # breakpoint()
+
+        else:
+            exponent = np.random.uniform(0.45, 0.55)
+            # very simple logic, to start
+            new_scale = (np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**exponent
+
+        print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+
+class BroydenAdaScaleTest5EqNNCQR(BroydenEqNNCQR):
+    """Experiment on adaptive scale choice.
+    """
+
+    def update_pd_scale(self):
+        cur_iter = len(self.solution_qualities)
+        print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+
+        if len(self.pd_scales) > 100:
+            import matplotlib.pyplot as plt
+            plt.plot(np.log(self.pri_res_norms))
+            plt.plot(np.log(self.dua_res_norms))
+            # diff_logratios = np.diff(past_logratios)
+            # plt.plot(diff_logratios)
+            # plt.plot(np.log(self.pd_scales))
+            plt.show()
+            exponent = 0.5
+            breakpoint()
+
+        else:
+            exponent = 0.5
+        # very simple logic, to start
+        new_scale = np.exp(np.mean(np.log(np.array(self.pri_res_norms)[-10:]/np.array(self.dua_res_norms)[-10:])))**exponent
+
+        print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+
+class BroydenAdaScaleTest6EqNNCQR(BroydenEqNNCQR):
+    """Experiment on adaptive scale choice.
+    """
+    base_exponent = 0.0
+    window = 10
+
+    def update_pd_scale(self):
+        cur_iter = len(self.solution_qualities)
+        print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+        # if np.abs(np.log10(np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res)) > 3):
+        #     breakpoint()
+
+        # count how many recent iters we've had same diff sign
+        diffnorms = np.array(self.pri_res_norms) - np.array(self.dua_res_norms)
+        last_diff_sign = np.sign(diffnorms[-1])
+        same_sign = np.sign(diffnorms) == last_diff_sign
+        iters_same_sign = np.argmin(same_sign[::-1])
+        if iters_same_sign == 0:
+            iters_same_sign = len(same_sign)
+
+        # if len(self.pd_scales)>10:
+        #     breakpoint()
+
+        exponent = self.base_exponent + np.tanh(iters_same_sign/self.window) * (1 - self.base_exponent)
+
+        # very simple logic, to start
+        new_scale = (np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**exponent
+
+        print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+
+class BroydenAdaScaleTest7EqNNCQR(BroydenEqNNCQR):
+    """Experiment on adaptive scale choice, first with PID.
+
+    Best test so far, 2025-10-21; parameters can be tuned a little better.
+    """
+    Kp = 0.25
+    Ki = 0.15
+    Kd = 0.075
+
+    plot_iters_pd_scale = 1000
+
+    internal_verbose = True
+
+    # # make plot only once
+    # has_done_plot = False
+
+    def update_pd_scale(self):
+        cur_iter = len(self.solution_qualities)
+
+        errors = np.log(np.array(self.pri_res_norms) / np.array(self.dua_res_norms))
+        error_t = errors[-1]
+        integral_error = np.sum(errors)
+        derivative_error = errors[-1] - errors[-2] if len(errors) > 1 else 0
+        control = self.Kp * error_t + self.Ki * integral_error + self.Kd * derivative_error
+        if self.internal_verbose:
+            print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+            print("ITER", cur_iter, "ERROR", error_t, "INTEGRAL", integral_error, "DERIVATIVE", derivative_error, "CONTROL", control)
+
+        if len(self.pd_scales) > self.plot_iters_pd_scale:
+            # if not self.has_done_plot:
+            import matplotlib.pyplot as plt
+            plt.plot(errors)
+            plt.show()
+
+            plt.plot(
+                1./np.fft.rfftfreq(len(errors)),
+                np.abs(np.fft.rfft(errors)));
+            plt.title("noise energy by period")
+            plt.show()
+            breakpoint()
+                # self.had_done_plot = True
+
+        new_scale = np.exp(control)
+
+        if self.internal_verbose:
+            print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+class BroydenAdaScalePidTest2EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Experiment on adaptive scale choice with PID.
+    
+    Collected all parameters.
+
+    This one changed only Ruiz limits. Worse tails, improves medians. Overall
+    might be BTSF.
+    """
+
+    # technical
+    use_numpy = True
+    internal_verbose = False
+    plot_iters_pd_scale = 1000
+
+    # ruiz
+    ruiz_max_rounds = 100
+    ruiz_col_limit = 0.5 # changed from 0.1
+    ruiz_row_limit = 0.5 # changed from 0.1
+    ruiz_norm = 2
+    do_soc_equalization = True
+
+    # base
+    max_iterations = 100_000
+    epsilon_convergence = 1e-12 # 1e-14 gets stuck in loop with 1e-16ish residuals
+
+    # broyden
+    memory = 50
+    acceleration_cap = 100
+
+    # PID
+    Kp = 0.25
+    Ki = 0.15
+    Kd = 0.075
+
+class BroydenAdaScalePidTest3EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Experiment on adaptive scale choice with PID.
+    
+    Collected all parameters.
+
+    This one changed only Ruiz limits. Seems roughly tied with original (0.1).
+    """
+
+    ruiz_col_limit = 0.2
+    ruiz_row_limit = 0.2
+
+class BroydenAdaScalePidTest4EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Experiment on adaptive scale choice with PID.
+    
+    Collected all parameters.
+
+    This one changed only Ruiz limits; improves tails worse median.
+
+    Might need to recalibrate PID parameters.
+    """
+
+    internal_verbose = False
+    plot_iters_pd_scale = 10_000 # just to run this test
+    ruiz_col_limit = 0.05
+    ruiz_row_limit = 0.05
+
+class BroydenAdaScalePidTest5EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Experiment on adaptive scale choice with PID.
+    
+    Collected all parameters.
+
+    This one changed only Ruiz limits; improved median worse tails.
+    """
+
+    internal_verbose = False
+    ruiz_col_limit = 1.
+    ruiz_row_limit = 1.
+
+class BroydenAdaScalePidTest6EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Experiment on adaptive scale choice with PID.
+    
+    Collected all parameters.
+
+    This one changed only Broyden memory. Seems to improve on num iters, minus
+    one tail, but obv it's too much.
+    """
+
+    internal_verbose = False
+    memory = 100 # making it smaller seems worse - might need to go back to LM
+    # plot_iters_pd_scale = 10_000 # just to run this test
+
+
+class BroydenAdaScalePidTest7EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Experiment on adaptive scale choice with PID. Doesn't work, too slow.
+    
+    Collected all parameters.
+
+    Changed parameters to something closer to typical ones. Changed Ruiz and
+    memory; turns out Ruiz seems more important, less memory makes it slower.
+    """
+
+    internal_verbose = False
+    plot_iters_pd_scale = 10_000 # we hit the 1000 limit
+
+    memory = 20 # 50 is too big, realistically costs like a mat mult
+    ruiz_col_limit = 1.
+    ruiz_row_limit = 1.
+    ruiz_norm = np.inf
+
+    # PID - recalibrated; oscillations with orig values
+    Kp = 0.125 # changed from 0.25
+    Ki = 0.075 # changed from 0.15
+    Kd = 0.0375 # changed from 0.075
+
+
+class BroydenAdaScalePidTest8EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Play with some PID tuning.
+    """
+
+    internal_verbose = False
+    plot_iters_pd_scale = 1_000 # we hit the 1000 limit
+
+    memory = 20 # 50 is too big, realistically costs like a mat mult
+    ruiz_col_limit = 1.
+    ruiz_row_limit = 1.
+    ruiz_norm = np.inf
+
+    # PID - trying recalibration
+    # Kp = 0.5625
+    # Ki = 0.0
+    # Kd = 0.0
+
+    # with (0.5, 0.0, 0.0) we get peak osc period = 167
+    # with (0.55, 0.0, 0.0) we get peak osc period = 200
+    # with (0.5625, 0.0, 0.0) we get super peak osc period = 2
+    # with (0.575, 0.0, 0.0) we get super peak osc period = 2
+    # with (0.6, 0.0, 0.0) we get super peak osc period = 2
+
+    # Let's try Ziegler–Nichols
+    # this one overshoots
+    # Ku = 0.5625
+    # Tu = 2
+    # Kp = Ku * 0.6
+    # Ki = 1.2 * Ku / Tu
+    # Kd = 0.075 * Ku * Tu
+
+    # retried with PI only - super slow
+    Ku = 0.5625
+    Tu = 2
+    Kp = Ku * 0.45
+    Ki = 0.54 * Ku / Tu
+
+class BroydenAdaScalePidTest9EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Experiment on adaptive scale choice with PID.
+
+    Try reducing memory only. Seems we don't need PID recal, so probably it was
+    Ruiz that changed things, or maybe I was over optimizing. This one is
+    slower esp. on the LPs but overall seems to work fine.
+
+    Yes works fine. PO program about the same as with memory = 50; the LPs are
+    about 2 times slower but indeed 50 was too much for them.
+    """
+
+    internal_verbose = False
+    plot_iters_pd_scale = 10_000 # we hit the 1000 limit
+
+    memory = 20 # 50 is too big, realistically costs like a mat mult
+
+
+class BroydenAdaScalePidTest10EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Experiment on adaptive scale choice with PID.
+
+    Same as 9 but with memory = 10. 
+
+    Problem 2 and PO seem to be fine, just slower. Problem 1 has few instances
+    it gets stuck. Maybe more aggressive PD?
+
+    Very interesting, it seems it gets stuck by switching b/w two or more
+    regions of the space (by activity set, in an LP, so polyhedra) and doesn't
+    spend too many iterations in each, so PD scaling is probably not too blame,
+    it doesn't diverge or anything. It may oscillate with some long period but
+    fine that's not a big issue. This seems similar behavior as the "bad" PO
+    problem with the misspecified SOC constraint. So improving quality of step
+    like Broyden with long memroy does can maybe solve this - we can do the
+    same with LM.
+    """
+
+    internal_verbose = True
+    plot_iters_pd_scale = 10_000 # we hit even the 10000 limit
+
+    memory = 10
+
+    # PID
+    Kp = 0.25 # changed from 0.25
+    Ki = 0.15 # changed from 0.15
+    Kd = 0.075 # changed from 0.075

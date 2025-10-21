@@ -51,19 +51,23 @@ PROGRAM_SIZES = {
     "HUGE": {
         "_generate_problem_one": {"m": 410, "n": 300},
         "_generate_problem_two": {"m": 410, "n": 300},
-        "_generate_portfolio_problem": {"n": 1000}},
+        "_generate_portfolio_problem": {"n": 1000},
+        "_generate_portfolio_problem_bad": {"n": 1000}},
     "LARGE": {
         "_generate_problem_one": {"m": 82, "n": 60},
         "_generate_problem_two": {"m": 82, "n": 60},
-        "_generate_portfolio_problem": {"n": 200}},
+        "_generate_portfolio_problem": {"n": 200},
+        "_generate_portfolio_problem_bad": {"n": 200}},
     "NORMAL": {
         "_generate_problem_one": {"m": 41, "n": 30},
         "_generate_problem_two": {"m": 41, "n": 30},
-        "_generate_portfolio_problem": {"n": 100}},
+        "_generate_portfolio_problem": {"n": 100},
+        "_generate_portfolio_problem_bad": {"n": 100}},
     "SMALL": {
         "_generate_problem_one": {"m": 4, "n": 3},
         "_generate_problem_two": {"m": 4, "n": 3},
-        "_generate_portfolio_problem": {"n": 10}},
+        "_generate_portfolio_problem": {"n": 10},
+        "_generate_portfolio_problem_bad": {"n": 10}},
 }
 # logging.basicConfig(level='INFO')
 
@@ -98,6 +102,43 @@ class Benchmark(TestCase):
         constraints = []  # x <= 1., x >= -1]
         program = cp.Problem(cp.Minimize(objective), constraints)
         return x, program
+
+    @staticmethod
+    def _generate_portfolio_problem_bad(seed, n=100):
+        np.random.seed(seed)
+        w = cp.Variable(n)
+        w0 = np.random.randn(n)
+        w0 -= np.sum(w0)/len(w0)
+        w0 /= np.sum(np.abs(w0))
+        mu = np.random.randn(n) * 1e-3
+        big_sigma = np.random.randn(n, n)
+        big_sigma = big_sigma.T @ big_sigma
+        eival, eivec = np.linalg.eigh(big_sigma)
+        eival *= 1e-4
+        eival = eival[-max(n//10, 1):]
+
+        # make it feasible; reduce w0 size so that it's in risk cone
+        risk = cp.sum_squares((np.diag(np.sqrt(eival))
+                @ eivec[:, -n//10:].T) @ w)
+        risk_limit = 0.00005
+
+        for _ in range(10):
+            w.value = w0
+            if risk.value < risk_limit:
+                break
+            w0 /= 2.
+        else:
+            raise ValueError("Increase counter, wasn't enough.")
+
+        # Sigma = eivec @ np.diag(eival) @ eivec.T
+        objective = w.T @ mu + 1e-5 * cp.norm1(w-w0)
+        constraints = [#w >=0, #w<=w_max,
+            cp.sum(w) == 0, cp.norm1(w-w0) <= 0.05,
+            cp.norm1(w) <= 1,
+            risk <= risk_limit]
+        program = cp.Problem(cp.Minimize(objective), constraints)
+        # program.solve(solver='SCS', verbose=True, eps=1e-14)
+        return w, program
 
     @staticmethod
     def _generate_portfolio_problem(seed, n=100):
@@ -141,7 +182,7 @@ class Benchmark(TestCase):
         """Run first program class."""
         self._run_benchmark(self._generate_problem_one)
 
-    # @skip("slow test, skip for now")
+    #@skip("slow test, skip for now")
     def test_program_two(self):
         """Run second program class."""
         self._run_benchmark(self._generate_problem_two)
@@ -152,6 +193,11 @@ class Benchmark(TestCase):
     def test_po_program(self):
         """Run portf opt class."""
         self._run_benchmark(self._generate_portfolio_problem)
+
+    @skip("slow test, skip for now")
+    def test_po_program_bad(self):
+        """Run portf opt class."""
+        self._run_benchmark(self._generate_portfolio_problem_bad)
 
     def _run_benchmark(self, program_generator):
         """Run many instances, save history of solution qualities."""
