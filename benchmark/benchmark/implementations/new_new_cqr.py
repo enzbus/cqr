@@ -23,6 +23,48 @@ import scipy as sp
 from ..base_solver import BaseSolver
 from pyspqr import qr
 
+
+def _cg(A, b, x0, maxiter, callback=None):
+    bnrm2 = np.linalg.norm(b)
+
+    x = np.copy(x0)
+    if bnrm2 == 0:
+        return b, 0
+
+    r = b - A @ x
+
+    # Dummy value to initialize var, silences warnings
+    rho_prev, p = None, None
+
+    for iteration in range(maxiter):
+
+        z = r
+        rho_cur = np.dot(r, z)
+        if iteration > 0:
+            beta = rho_cur / rho_prev
+            p *= beta
+            p += z
+        else:  # First spin
+            p = np.empty_like(r)
+            p[:] = z[:]
+
+        q = A @ p
+        alpha = rho_cur / np.dot(p, q)
+        x += alpha*p
+        r -= alpha*q
+        rho_prev = rho_cur
+
+        if callback:
+            try:
+                callback(x)
+            except StopIteration:
+                return x, iteration
+
+    else:  # for loop exhausted
+        # Return incomplete progress
+        return x, maxiter
+
+
 class NewNewCQR(BaseSolver):
     """New idea for base CQR formulation."""
 
@@ -96,10 +138,24 @@ class NewNewCQR(BaseSolver):
         self.s = np.zeros(self.m)
         self.x = np.zeros(self.n)
 
+        self.nonneg_activity = np.empty(self.nonneg, dtype=bool)
+        self.old_nonneg_activity = np.empty(self.nonneg, dtype=bool)
+        self.soc_activity = np.empty(len(self.soc), dtype=int)
+        self.old_soc_activity = np.empty(len(self.soc), dtype=int)
+
+        self.pri_res_norms = []
+        self.dua_res_norms = []
+        self.pd_scales = []
+        self.exponents = []
+
     def cone_project(self, z):
         """Project on y cone."""
         return self.composed_cone_project(
             z, has_zero=False, has_free=True, has_hsde=False)
+
+    def linspace_project(self, y_plus_s):
+        """Linspace project (y+s) -> y."""
+        return self.nullspace @ (self.nullspace.T @ y_plus_s) + self.e
 
     def linspace_project_basic(self, y_plus_s):
         """Linspace project (y+s) -> y, w/out shift."""
@@ -137,6 +193,7 @@ class NewNewCQR(BaseSolver):
         step = self.linspace_project_basic(2 * self.y - self.z) - self.y + self.e
         # print(np.linalg.norm(step))
         self.z[:] = self.z + step
+        breakpoint()
 
     def obtain_x_and_y(self):
         """Redefine if/as needed."""
@@ -148,6 +205,74 @@ class NewNewCQR(BaseSolver):
         else:
             self.x[:] = self.pyspqr_e.T @ sp.sparse.linalg.spsolve_triangular(
                 self.pyspqr_r, x_qr, lower=False)
+
+    def compute_nonneg_activity(self, z):
+        """Compute activity (bool) of nonneg cones."""
+        return z[self.zero: self.zero+self.nonneg] > 0
+
+    def compute_soc_activity(self, z):
+        """Compute activity (-1, 0, 1) of soc cones."""
+        result = np.empty(len(self.soc), dtype=int)
+        cur = self.zero + self.nonneg
+        for index, soc_size in enumerate(self.soc):
+            z_cone = z[cur:cur+soc_size]
+            t, x = z_cone[0], z_cone[1:]
+            nrm = np.linalg.norm(x)
+            if t > nrm:
+                result[index] = 1
+            elif t < -nrm:
+                result[index] = -1
+            else:
+                result[index] = 0
+            cur += soc_size
+        assert cur == self.m
+        return result
+
+    def reset_pd_stores(self):
+        """Reset stores used to choose pd scale."""
+        self.pri_res_norms = []
+        self.dua_res_norms = []
+        self.pd_scales = []
+        self.exponents = []
+
+    def multiply_cone_project_derivative(self, z, dz):
+        """Derivative projection on y cone."""
+
+        result = np.zeros_like(z)
+
+        # zero cone
+        result[:self.zero] = dz[:self.zero]
+        cur = self.zero
+
+        # nonneg cone
+        result[cur:cur+self.nonneg] = (
+            z[cur:cur+self.nonneg] > 0.) * dz[cur:cur+self.nonneg]
+        cur += self.nonneg
+
+        # soc cones
+        for soc_dim in self.soc:
+            result[cur:cur+soc_dim] = \
+                self.multiply_jacobian_second_order_project(
+                    z[cur:cur+soc_dim], dz[cur:cur+soc_dim])
+            cur += soc_dim
+        assert cur == self.m
+
+        return result
+
+    def linspace_project_derivative(self, dz):
+        """Derivative linspace project (y+s) -> y."""
+        return self.nullspace @ (self.nullspace.T @ dz)
+
+    def multiply_jacobian_dstep(self, z, dz):
+        """Multiply by Jacobian of DR step operator."""
+        # breakpoint()
+        tmp = self.multiply_cone_project_derivative(z, dz)
+        return self.linspace_project_derivative(2 * tmp - dz) - tmp
+
+    def multiply_jacobian_dstep_transpose(self, z, dr):
+        """Multiply by Jacobian of DR step operator transpose."""
+        tmp = self.linspace_project_derivative(dr)
+        return self.multiply_cone_project_derivative(z, 2 * tmp - dr) - tmp
 
 class EquilibratedNewNewCQR(NewNewCQR):
     """With Ruiz equilibration."""
@@ -236,12 +361,145 @@ class EquilibratedNewNewCQR(NewNewCQR):
         self.x = (self.equil_e * self.x) / self.equil_sigma
         self.y = (self.equil_d * self.y) / self.equil_rho
 
+
+class LevMarNNCQR(EquilibratedNewNewCQR):
+    """Add basic Levemberg-Marquardt logic.
+    
+    Turns out breaking loop with AS changes is bad idea.
+    """
+
+    lsqr_iters = 5
+    max_iterations = 100000//(2 * lsqr_iters + 2)
+    damp = 1e-8
+
+    def prepare_loop(self):
+        """Create storage arrays."""
+        super().prepare_loop()
+        self.step = np.empty(self.m, dtype=float)
+        self.pri_res = np.empty(self.m, dtype=float)
+        self.dua_res = np.empty(self.m, dtype=float)
+
+    def test1_cg_operator(self, z, dz):
+        """Using pieces above."""
+        dr = self.multiply_jacobian_dstep(z, dz)
+        return self.multiply_jacobian_dstep_transpose(z, dr)
+
+    def iterate(self):
+        """Simple Lev Mar DR iterate
+        """
+
+        # compute active set; will be factored in projection logic itself
+        # will only need one storage each; probably soc works with just 1 bit
+        self.old_nonneg_activity[:] = self.compute_nonneg_activity(self.z)
+        self.old_soc_activity[:] = self.compute_soc_activity(self.z)
+        # if cur_iter > 0:
+        #     if (np.all(self.nonneg_activity == self.old_nonneg_activity)
+        #             and np.all(self.soc_activity == self.soc_activity)):
+        #         active_set_changed = False
+        #     else:
+        #         active_set_changed = True
+        #     self.old_nonneg_activity[:] = self.nonneg_activity
+        #     self.old_soc_activity[:] = self.soc_activity
+
+        # compute DR step
+        self.s[:], self.y[:], self.pri_res[:], self.dua_res[:] = self.compute_pridual_step(self.z)
+
+        # HERE THE LOGIC TO UPDATE THE SCALE
+        # we store the primal and dual res norms
+        self.pri_res_norms.append(float(np.linalg.norm(self.pri_res)))
+        self.dua_res_norms.append(float(np.linalg.norm(self.dua_res)))
+
+        # we choose the scale
+        new_scale = self.choose_pd_scale()
+
+        # and update
+        self.base_update_pd_scale(new_scale)
+
+        # we append the primal dual scale chosen
+        self.pd_scales.append(float(self.pd_scale))
+
+        # base DR step
+        step = self.pd_scale * self.pri_res + self.dua_res
+        assert np.allclose(self.dr_step(self.z), step)
+
+        # breakpoint()
+        # print(np.linalg.norm(step))
+
+        # we'll have to unpack the algorithm if we end up using it
+        # result_lsqr = sp.sparse.linalg.lsqr(
+        #     sp.sparse.linalg.LinearOperator(
+        #         shape=(self.m, self.m),
+        #         matvec=lambda dz: self.multiply_jacobian_dstep(self.z, dz),
+        #         rmatvec=lambda dr: self.multiply_jacobian_dstep_transpose(
+        #             self.z, dr)), -step,
+        #             x0=step,
+        #             damp=self.damp, # might make sense to change this?
+        #             atol=0., btol=0., # might make sense to change this
+        #             iter_lim=self.lsqr_iters)
+
+        # without any touches CG seems slightly worse than LSQR
+        cg_linop = sp.sparse.linalg.LinearOperator(
+                shape=(self.m, self.m),
+                matvec=lambda dz: self.test1_cg_operator(self.z, dz)
+                    + self.damp**2 * dz)
+        cg_rhs = self.multiply_jacobian_dstep_transpose(self.z, step)
+
+        def _break_if_as_change(z_iter):
+            self.nonneg_activity[:] = self.compute_nonneg_activity(z_iter)
+            self.soc_activity[:] = self.compute_soc_activity(z_iter)
+            if not (np.all(self.nonneg_activity == self.old_nonneg_activity)
+                    and np.all(self.soc_activity == self.soc_activity)):
+                print('BREAKING B/C AS CHANGE')
+                raise StopIteration
+
+        # break already if the AS changes with x0
+        try:
+            _break_if_as_change(self.z + step)
+        except StopIteration:
+            print('BREAKING BEFORE LM STEP')
+            self.z[:] = self.z + step
+            return
+
+        result_cg = _cg(
+            cg_linop, -cg_rhs, x0=step,
+            # atol=0., rtol=0.,
+            maxiter=self.lsqr_iters,
+            callback=_break_if_as_change
+            )
+
+        # assert np.allclose(result_cg[0], result_lsqr[0])
+        # breakpoint()
+        # print(result[1:-1])
+        self.z[:] = self.z + result_cg[0]
+
+    def choose_pd_scale(self):
+        """To override, choose scaling."""
+        return (self.pri_res_norms[-1] / self.dua_res_norms[-1])**.5
+
+    def base_update_pd_scale(self, new_scale):
+        cur_iter = len(self.solution_qualities)
+        print(
+            "ITER", cur_iter, "PRIMAL RESIDUAL",
+            self.pri_res_norms[-1], "DUAL RESIDUAL", self.dua_res_norms[-1],
+            f"CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+
 class BroydenEqNNCQR(EquilibratedNewNewCQR):
     """Add basic Broyden logic."""
 
     memory = 50
     max_iterations = 100_000
     acceleration_cap = 100
+    reset_on_as_change = True
+    pd_store_reset_on_as_change = True
+    wrong_position = True
 
     def prepare_loop(self):
         """Create storage arrays."""
@@ -259,6 +517,7 @@ class BroydenEqNNCQR(EquilibratedNewNewCQR):
         self.step = np.empty(self.m, dtype=float)
         self.pri_res = np.empty(self.m, dtype=float)
         self.dua_res = np.empty(self.m, dtype=float)
+        self.as_changed = np.empty(self.m, dtype=bool)
         self.used_memory = 0
         self.nonneg_activity = np.empty(self.nonneg, dtype=bool)
         self.old_nonneg_activity = np.empty(self.nonneg, dtype=bool)
@@ -269,34 +528,13 @@ class BroydenEqNNCQR(EquilibratedNewNewCQR):
         self.pd_scales = []
         self.exponents = []
 
-    def compute_nonneg_activity(self, z):
-        """Compute activity (bool) of nonneg cones."""
-        return z[self.zero: self.zero+self.nonneg] > 0
-
-    def compute_soc_activity(self, z):
-        """Compute activity (-1, 0, 1) of soc cones."""
-        result = np.empty(len(self.soc), dtype=int)
-        cur = self.zero + self.nonneg
-        for index, soc_size in enumerate(self.soc):
-            z_cone = z[cur:cur+soc_size]
-            t, x = z_cone[0], z_cone[1:]
-            nrm = np.linalg.norm(x)
-            if t > nrm:
-                result[index] = 1
-            elif t < -nrm:
-                result[index] = -1
-            else:
-                result[index] = 0
-            cur += soc_size
-        assert cur == self.m
-        return result
-
     def iterate(self):
         """Simple Douglas Rachford iteration with Broyden update to override.
         """
-        if self.memory == 0: # fall back to non-broyden logic
-            super().iterate()
-            return
+
+        # if self.memory == 0: # fall back to non-broyden logic
+        #     super().iterate()
+        #     return
 
         cur_iter = len(self.solution_qualities)
         cur_index = cur_iter % self.memory
@@ -305,7 +543,7 @@ class BroydenEqNNCQR(EquilibratedNewNewCQR):
         # will only need one storage each; probably soc works with just 1 bit
         self.nonneg_activity = self.compute_nonneg_activity(self.z)
         self.soc_activity = self.compute_soc_activity(self.z)
-        if cur_iter > 0:
+        if cur_iter > 1:
             if (np.all(self.nonneg_activity == self.old_nonneg_activity)
                     and np.all(self.soc_activity == self.soc_activity)):
                 active_set_changed = False
@@ -320,22 +558,25 @@ class BroydenEqNNCQR(EquilibratedNewNewCQR):
         # self.step[:] = step_base + self.e
         self.s[:], self.y[:], self.pri_res[:], self.dua_res[:] = self.compute_pridual_step(self.z)
 
-        # HERE THE LOGIC TO UPDATE THE SCALE
-        # we store the primal and dual res norms
-        self.pri_res_norms.append(float(np.linalg.norm(self.pri_res)))
-        self.dua_res_norms.append(float(np.linalg.norm(self.dua_res)))
-        # we choose the scale
-        # we append to self.exponents inside this for now...
-        self.update_pd_scale() # change z in place
-        # and the primal dual scale chosen
-        self.pd_scales.append(float(self.pd_scale))
+        if self.wrong_position:
+            # HERE THE LOGIC TO UPDATE THE SCALE - is here by mistake should have been after the reset
+            # we store the primal and dual res norms
+            self.pri_res_norms.append(float(np.linalg.norm(self.pri_res)))
+            self.dua_res_norms.append(float(np.linalg.norm(self.dua_res)))
+            # we choose the scale
+            # we append to self.exponents inside this for now...
+            self.update_pd_scale() # change z in place
+            # and the primal dual scale chosen
+            self.pd_scales.append(float(self.pd_scale))
 
         # update Broyden stores
-        if cur_iter > 0:
+        if cur_iter > 1:
             self.dys[cur_index] = self.y - self.old_y
             self.dss[cur_index] = self.s - self.old_s
             self.dpriress[cur_index] = self.pri_res - self.old_prires
             self.dduaress[cur_index] = self.dua_res - self.old_duares
+            self.as_changed[cur_index] = active_set_changed
+            self.used_memory = min(self.used_memory + 1, self.memory)
             # self.dzs_norms[cur_index] = np.linalg.norm(self.dzs[cur_index])
         self.old_y[:] = self.y
         self.old_s[:] = self.s
@@ -349,18 +590,33 @@ class BroydenEqNNCQR(EquilibratedNewNewCQR):
         #     #     self.dsteps[cur_index])
         # self.old_step[:] = self.step
 
-        # update used_memory
-        if cur_iter > 0:
-            self.used_memory = min(self.used_memory + 1, self.memory)
-        if active_set_changed: # we could have skipped saving them...
+        if cur_iter > 1 and active_set_changed and self.reset_on_as_change: # we could have skipped saving them...
             if self.internal_verbose:
                 print(f'ITER {cur_iter} SETTING USED_MEMORY TO ZERO B/C ACTIVITY CHANGE')
             self.used_memory = 0
             # reset stores used to choose scale
+        if cur_iter > 1 and active_set_changed and self.pd_store_reset_on_as_change:
+            print(f'ITER {cur_iter} SETTING PD STORES TO ZERO B/C ACTIVITY CHANGE')
             self.reset_pd_stores()
 
+        if not self.wrong_position:
+            # HERE THE LOGIC TO UPDATE THE SCALE - is here by mistake should have been after the reset
+            # we store the primal and dual res norms
+            self.pri_res_norms.append(float(np.linalg.norm(self.pri_res)))
+            self.dua_res_norms.append(float(np.linalg.norm(self.dua_res)))
+            # we choose the scale
+            # we append to self.exponents inside this for now...
+            self.update_pd_scale() # change z in place
+            # and the primal dual scale chosen
+            self.pd_scales.append(float(self.pd_scale))
+
         # update with Broyden step
-        self.z[:] = self.z[:] - self.compute_broyden_step()
+        br_step = self.compute_broyden_step()
+        if np.all(np.abs(br_step) < 1e-16):
+            breakpoint()
+        if np.any(np.isnan(br_step)):
+            breakpoint()
+        self.z[:] = self.z[:] - br_step
 
     def reset_pd_stores(self):
         """Reset stores used to choose pd scale."""
@@ -386,7 +642,7 @@ class BroydenEqNNCQR(EquilibratedNewNewCQR):
             self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
             ) - self.pd_scale * getattr(self, self.used_b)
 
-    def serve_broyden_elements(self):
+    def serve_broyden_elements(self, also_as_change=False):
         """Serve pieces used for Broyden loop."""
 
         cur_iter = len(self.solution_qualities)
@@ -394,12 +650,21 @@ class BroydenEqNNCQR(EquilibratedNewNewCQR):
 
         for back_index in range(self.used_memory):
             index = (cur_index - back_index) % self.memory
-            yield (
-                self.dss[index],
-                self.dys[index],
-                self.dpriress[index],
-                self.dduaress[index],
-                )
+            if also_as_change:
+                yield (
+                    self.dss[index],
+                    self.dys[index],
+                    self.dpriress[index],
+                    self.dduaress[index],
+                    self.as_changed[index],
+                    )
+            else:
+                yield (
+                    self.dss[index],
+                    self.dys[index],
+                    self.dpriress[index],
+                    self.dduaress[index],
+                    )
 
     def compute_broyden_step(self):
         """Base method to compute a Broyden-style approximate Newton step."""
@@ -788,15 +1053,20 @@ class BroydenAdaScaleTest7EqNNCQR(BroydenEqNNCQR):
 
         if len(self.pd_scales) > self.plot_iters_pd_scale:
             # if not self.has_done_plot:
+            print('MAE ERROR', np.mean(np.abs(errors)))
+            print('RMSE ERROR', np.sqrt(np.mean(errors**2)))
             import matplotlib.pyplot as plt
             plt.plot(errors)
             plt.show()
 
-            plt.plot(
-                1./np.fft.rfftfreq(len(errors)),
-                np.abs(np.fft.rfft(errors)));
-            plt.title("noise energy by period")
-            plt.show()
+            # plt.plot(
+            #     1./np.fft.rfftfreq(len(errors)),
+            #     np.abs(np.fft.rfft(errors)));
+            # plt.title("noise energy by period")
+            # plt.show()
+
+            print('MAE ERROR', np.mean(np.abs(errors)))
+            print('RMSE ERROR', np.sqrt(np.mean(errors**2)))
             breakpoint()
                 # self.had_done_plot = True
 
@@ -1001,3 +1271,221 @@ class BroydenAdaScalePidTest10EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
     Kp = 0.25 # changed from 0.25
     Ki = 0.15 # changed from 0.15
     Kd = 0.075 # changed from 0.075
+
+class BroydenAdaScalePidTest11EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Test with AS reset.
+    
+    Many things learnt. First, we needed to change the order of stores reset
+    for pd scale choice - was wrong by mistake but the error had seemingly
+    slight beneficial effect on the previous tests (with Broyden stores reset),
+    but here it's important to put wrong_positions = False. Main change is here
+    we don't reset the Broyden stores. The AS choice is better to be reset, or
+    maybe not? What matters is that we put down a lot the acceleration cap.
+    What we get with changing only wrong_position, reset_on_as_change, and
+    acceleration_cap, is something only a bit worse than before, but
+    hopefully that won't deteriorate as much by reducing memory. PID parameters
+    will have to be recalibrated presumably. We can also make the acceleration
+    cap adaptive on history of AS changes; easy to test, we just add an
+    as_changed Boolean for each served tuple and handle it in the Broyden
+    method; e.g., every time we get one we halve the acceleration cap for that
+    update and the following ones.
+    """
+
+    internal_verbose = True
+    plot_iters_pd_scale = 10_000 # we hit the 1000 limit
+    max_iterations = 10000
+    reset_on_as_change = False
+    pd_store_reset_on_as_change = True
+    acceleration_cap = 20
+    memory = 50
+    wrong_position = False
+
+    # PID
+    Kp = 0.25 # changed from 0.25
+    Ki = 0.15 # changed from 0.15
+    Kd = 0.075 # changed from 0.075
+
+class BroydenAdaScaleASChangeTest(BroydenAdaScaleTest7EqNNCQR):
+    """Test for the idea above.
+    
+    Works, it's better than above, still worse than BTSF. Test above dead
+    branch, definitely good to make acceleration_cap aware of as_change.
+    Could be that pd_store_reset_on_as_change = False works better.
+    """
+
+    internal_verbose = True
+    plot_iters_pd_scale = 10_000 # we hit the 1000 limit
+    max_iterations = 10000
+    reset_on_as_change = False
+    pd_store_reset_on_as_change = True
+    acceleration_cap = 100
+    memory = 50
+    wrong_position = False
+
+    # new parameter; might be better higher value
+    acceleration_cap_reduce = 2.
+    overall_reduce = 1.
+
+    # PID
+    Kp = 0.25 # changed from 0.25
+    Ki = 0.15 # changed from 0.15
+    Kd = 0.075 # changed from 0.075
+
+    def compute_broyden_step(self):
+        """Base method to compute a Broyden-style approximate Newton step."""
+        mystep = self.pd_scale * self.pri_res + self.dua_res
+        result = np.zeros_like(mystep)
+        used_acceleration_cap = float(self.acceleration_cap)
+        used_overall_reduce = 1.
+
+        # this should be correct
+        for _, (ds, dy, dprires, dduares, as_change) in enumerate(
+            self.serve_broyden_elements(also_as_change=True)):
+
+            if as_change:
+                used_acceleration_cap /= self.acceleration_cap_reduce
+                used_overall_reduce *= self.overall_reduce
+
+            dz = dy - self.pd_scale * ds
+            dstep = self.pd_scale * dprires + dduares
+
+            dz_norm = np.linalg.norm(dz)
+            dstep_norm = np.linalg.norm(dstep)
+
+            # correction by current index
+            dstep_normed = dstep / dstep_norm
+            dz_snormed = dz / dstep_norm
+            acceleration = dz_norm / dstep_norm
+
+            # we cap the acceleration
+            if acceleration > used_acceleration_cap:
+                reduction_factor = acceleration / used_acceleration_cap
+            else:
+                reduction_factor = 1.
+
+            dstep_component_reduced = (mystep @ dstep_normed) / (reduction_factor * used_overall_reduce)
+            mystep -= dstep_normed * dstep_component_reduced
+            result +=  (dz_snormed * dstep_component_reduced)
+
+        # final correction
+        result -= self.final_correction(mystep)
+
+        return result
+
+    def final_correction(self, mystep):
+        return mystep
+
+class BroydenAdaScaleASChange2Test(BroydenAdaScaleASChangeTest):
+    """Test for the idea above.
+    
+    Better. Might be BTSF."""
+
+    pd_store_reset_on_as_change = False
+
+class BroydenAdaScaleASChange3Test(BroydenAdaScaleASChangeTest):
+    """With less memory.
+    
+    Improves on same experiment vs previous model (with resets).
+    """
+
+    pd_store_reset_on_as_change = False
+    memory = 20
+
+class BroydenAdaScaleASChange4Test(BroydenAdaScaleASChangeTest):
+    """With bigger discount.
+
+    Maybe improves over ASChange2Test, unclear.
+    
+    """
+
+    pd_store_reset_on_as_change = False
+    acceleration_cap_reduce = 3
+
+class BroydenAdaScaleASChange5Test(BroydenAdaScaleASChangeTest):
+    """Random test."""
+    internal_verbose = False
+    pd_store_reset_on_as_change = False
+    ruiz_norm = np.inf
+    ruiz_col_limit = 1.
+    ruiz_row_limit = 1.
+
+    plot_iters_pd_scale = 5_000 # we hit the 1000 limit
+
+    # PID
+    Kp = 0.15 # changed from 0.25
+    Ki = 0.26 # changed from 0.15
+    Kd = 0.05 # changed from 0.075
+
+class BroydenAdaScaleASChange6Test(BroydenAdaScaleASChange2Test):
+    """Same as 2Test with LevMar final correction."""
+
+    lsqr_iters = 5
+    damp = 1e-8
+
+    internal_verbose = True
+    plot_iters_pd_scale = 10_000 # we hit the 1000 limit
+    max_iterations = 10000
+    reset_on_as_change = False
+    pd_store_reset_on_as_change = False
+    acceleration_cap = 100
+    memory = 10
+    wrong_position = False
+
+    # new parameter; might be better higher value
+    acceleration_cap_reduce = 1.
+    overall_reduce = 2.5
+
+    # PID
+    Kp = 0.225 # changed from 0.25
+    Ki = 0.25 # changed from 0.15
+    Kd = 0.075 # changed from 0.075
+
+    def final_correction(self, mystep):
+        # we'll have to unpack the algorithm if we end up using it
+        result_lsqr = sp.sparse.linalg.lsqr(
+            sp.sparse.linalg.LinearOperator(
+                shape=(self.m, self.m),
+                matvec=lambda dz: self.multiply_jacobian_dstep(self.z, dz),
+                rmatvec=lambda dr: self.multiply_jacobian_dstep_transpose(
+                    self.z, dr)), -mystep,
+                    x0=mystep,
+                    damp=self.damp, # might make sense to change this?
+                    atol=0., btol=0., # might make sense to change this
+                    iter_lim=self.lsqr_iters)
+        return result_lsqr[0]
+
+class BroydenAdaScaleASChange7Test(BroydenAdaScaleASChange2Test):
+    """Same as 2Test but with overall reduce instead of ac reduce."""
+
+    # new parameter; might be better higher value
+    acceleration_cap_reduce = 1.
+    overall_reduce = 2.
+
+class BroydenAdaScaleASChange8Test(BroydenAdaScaleASChange6Test):
+    """Same as 2Test but with overall LSQR-1."""
+
+    lsqr_iters = 1
+    damp = 1e-8
+
+    internal_verbose = True
+    plot_iters_pd_scale = 10_000 # we hit the 1000 limit
+    max_iterations = 10000
+    reset_on_as_change = False
+    pd_store_reset_on_as_change = False
+    acceleration_cap = 100
+    memory = 50
+    wrong_position = False
+
+    # new parameter; might be better higher value
+    acceleration_cap_reduce = 2.
+    overall_reduce = 1.
+
+    # PID
+    Kp = 0.25 # changed from 0.25
+    Ki = 0.15 # changed from 0.15
+    Kd = 0.075 # changed from 0.075
+
+class BroydenAdaScaleASChange9Test(BroydenAdaScaleASChange8Test):
+    """Same but LSQR-2."""
+
+    lsqr_iters = 2

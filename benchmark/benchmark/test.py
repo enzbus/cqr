@@ -202,6 +202,7 @@ class Benchmark(TestCase):
     def _run_benchmark(self, program_generator):
         """Run many instances, save history of solution qualities."""
         if MODE == "BENCHMARK":
+            total_num_iters = 0
             print('solver class', SOLVER_CLASS)
             solution_quality_curves = []
             print("PROGRAM", program_generator.__name__)
@@ -223,8 +224,10 @@ class Benchmark(TestCase):
                 sol_qual = np.array(
                     prog.solver_stats.extra_stats['solution_qualities'])
                 solution_quality_curves.append(sol_qual)
+                total_num_iters += len(sol_qual)
                 # print("CQR iters (bit higher acc)", len(sol_qual))
 
+            print('AVG NUM ITERS', total_num_iters / NUM_INSTANCES)
             # very rough
             sol_quals = pd.DataFrame(solution_quality_curves).T.ffill()
 
