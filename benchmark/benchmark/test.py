@@ -182,7 +182,7 @@ class Benchmark(TestCase):
         """Run first program class."""
         self._run_benchmark(self._generate_problem_one)
 
-    #@skip("slow test, skip for now")
+    # @skip("slow test, skip for now")
     def test_program_two(self):
         """Run second program class."""
         self._run_benchmark(self._generate_problem_two)
@@ -194,7 +194,7 @@ class Benchmark(TestCase):
         """Run portf opt class."""
         self._run_benchmark(self._generate_portfolio_problem)
 
-    @skip("slow test, skip for now")
+    # @skip("slow test, skip for now")
     def test_po_program_bad(self):
         """Run portf opt class."""
         self._run_benchmark(self._generate_portfolio_problem_bad)

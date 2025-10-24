@@ -1380,6 +1380,9 @@ class BroydenAdaScaleASChange2Test(BroydenAdaScaleASChangeTest):
     
     Better. Might be BTSF."""
 
+    max_iterations = 100_000
+    plot_iters_pd_scale = 200_000 # we hit the 1000 limit
+
     pd_store_reset_on_as_change = False
 
 class BroydenAdaScaleASChange3Test(BroydenAdaScaleASChangeTest):
@@ -1420,6 +1423,7 @@ class BroydenAdaScaleASChange6Test(BroydenAdaScaleASChange2Test):
     """Same as 2Test with LevMar final correction."""
 
     lsqr_iters = 5
+    use_x0 = True
     damp = 1e-8
 
     internal_verbose = True
@@ -1448,7 +1452,7 @@ class BroydenAdaScaleASChange6Test(BroydenAdaScaleASChange2Test):
                 matvec=lambda dz: self.multiply_jacobian_dstep(self.z, dz),
                 rmatvec=lambda dr: self.multiply_jacobian_dstep_transpose(
                     self.z, dr)), -mystep,
-                    x0=mystep,
+                    x0=mystep if self.use_x0 else None,
                     damp=self.damp, # might make sense to change this?
                     atol=0., btol=0., # might make sense to change this
                     iter_lim=self.lsqr_iters)
@@ -1486,6 +1490,240 @@ class BroydenAdaScaleASChange8Test(BroydenAdaScaleASChange6Test):
     Kd = 0.075 # changed from 0.075
 
 class BroydenAdaScaleASChange9Test(BroydenAdaScaleASChange8Test):
-    """Same but LSQR-2."""
+    """Same but LSQR-2. Not worth it."""
 
     lsqr_iters = 2
+
+class BroydenAdaScaleASChange10Test(BroydenAdaScaleASChange8Test):
+    """Like 2Test but w/o x0 - then each LSQR iter costs like 1 base iter.
+    
+    Doesn't work. Seems PD scaling doesn't affect the system any more."""
+
+    use_x0 = False
+    # lsqr_iters = 10
+    # Kp=0.2
+    # Ki=0.1
+    # Kd=0.
+
+
+class Broyden2EqNNCQR(EquilibratedNewNewCQR):
+    """Redo base class.
+    
+    Broyden, PID, and AdaCap logic; remove AS logic.
+    
+    Mixed results; it doesn't clearly improve basic results (it does at least
+    for one tail) *but* is the best test so far on the "portfolio_bad" program,
+    with the badly scaled constraint. Indeed, first one that seems to converge
+    on most or all (slowly). Idea is that PD scaling *and* adaptive Broyden
+    "l2" normalization (of the inverse Jacobian) is the way forward, having
+    recognized that they can be done together. Rather than the "AdaCap" logic
+    we should figure out correct l2 regularization scheme for Broyden loop. And
+    then use improvement or not of step length to update regularization (like
+    done here for the update norm cap). We can forget the AS logic, at least
+    for now. Interaction of PD scaling and AdaCap doesn't seem too bad and with
+    better regularization it may disappear. So going forward we should
+    re-introduce the portfolio_bad program in tests and rebase on this
+    experiment. Obvious first steps is re-write it to avoid unncessary double
+    calculations and redo the Broyden logic using orthogonalities to leave off
+    scale until the end.
+    """
+
+    memory = 50
+    max_iterations = 100_000
+
+    # initial value
+    acceleration_cap = 5
+    cap_decrease_factor = 0.9
+    cap_increase_factor = 1.005
+    cap_floor = 1.
+    cap_ceil = 100.
+
+    Kp = 0.25
+    Ki = 0.15
+    Kd = 0.075
+
+    internal_verbose = True
+
+    def prepare_loop(self):
+        """Create storage arrays."""
+        super().prepare_loop()
+        self.dys = np.empty((self.memory, self.m), dtype=float)
+        self.dss = np.empty((self.memory, self.m), dtype=float)
+        # self.dzs_norms = np.empty(self.memory, dtype=float)
+        self.dpriress = np.empty((self.memory, self.m), dtype=float)
+        self.dduaress = np.empty((self.memory, self.m), dtype=float)
+        # self.dsteps_norms = np.empty(self.memory, dtype=float)
+        self.old_y = np.empty(self.m, dtype=float)
+        self.old_s = np.empty(self.m, dtype=float)
+        self.old_prires = np.empty(self.m, dtype=float)
+        self.old_duares = np.empty(self.m, dtype=float)
+        self.step = np.empty(self.m, dtype=float)
+        self.pri_res = np.empty(self.m, dtype=float)
+        self.dua_res = np.empty(self.m, dtype=float)
+        self.pri_res_norms = []
+        self.dua_res_norms = []
+        self.pd_scales = []
+        self.exponents = []
+        self.used_memory = 0
+
+    def iterate(self):
+        """Simple Douglas Rachford iteration with Broyden update to override.
+        """
+
+        cur_iter = len(self.solution_qualities)
+        cur_index = cur_iter % self.memory
+
+        # compute DR step
+        # self.y[:] = self.cone_project(self.z)
+        # step_base = self.linspace_project_basic(2 * self.y - self.z) - self.y
+        # self.step[:] = step_base + self.e
+        self.s[:], self.y[:], self.pri_res[:], self.dua_res[:] = self.compute_pridual_step(self.z)
+
+        # update Broyden stores
+        if cur_iter > 1:
+            self.dys[cur_index] = self.y - self.old_y
+            self.dss[cur_index] = self.s - self.old_s
+            self.dpriress[cur_index] = self.pri_res - self.old_prires
+            self.dduaress[cur_index] = self.dua_res - self.old_duares
+            self.used_memory = min(self.used_memory + 1, self.memory)
+            # self.dzs_norms[cur_index] = np.linalg.norm(self.dzs[cur_index])
+        self.old_y[:] = self.y
+        self.old_s[:] = self.s
+        self.old_prires[:] = self.pri_res
+        self.old_duares[:] = self.dua_res
+
+        # we store the primal and dual res norms
+        self.pri_res_norms.append(float(np.linalg.norm(self.pri_res)))
+        self.dua_res_norms.append(float(np.linalg.norm(self.dua_res)))
+        # we choose the scale
+        # we append to self.exponents inside this for now...
+        self.update_pd_scale() # change z in place
+        # and the primal dual scale chosen
+        self.pd_scales.append(float(self.pd_scale))
+
+        # update with Broyden step
+        br_step = self.compute_broyden_step()
+        if np.all(np.abs(br_step) < 1e-16):
+            breakpoint()
+        if np.any(np.isnan(br_step)):
+            breakpoint()
+        self.z[:] = self.z[:] - br_step
+
+    def reset_pd_stores(self):
+        """Reset stores used to choose pd scale."""
+        self.pri_res_norms = []
+        self.dua_res_norms = []
+        self.pd_scales = []
+        self.exponents = []
+
+    def update_pd_scale(self):
+        cur_iter = len(self.solution_qualities)
+
+        errors = np.log(np.array(self.pri_res_norms) / np.array(self.dua_res_norms))
+        error_t = errors[-1]
+        integral_error = np.sum(errors)
+        derivative_error = errors[-1] - errors[-2] if len(errors) > 1 else 0
+        control = self.Kp * error_t + self.Ki * integral_error + self.Kd * derivative_error
+        if self.internal_verbose:
+            print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+            print("ITER", cur_iter, "ERROR", error_t, "INTEGRAL", integral_error, "DERIVATIVE", derivative_error, "CONTROL", control)
+
+        # if len(self.pd_scales) > self.plot_iters_pd_scale:
+        #     # if not self.has_done_plot:
+        #     print('MAE ERROR', np.mean(np.abs(errors)))
+        #     print('RMSE ERROR', np.sqrt(np.mean(errors**2)))
+        #     import matplotlib.pyplot as plt
+        #     plt.plot(errors)
+        #     plt.show()
+
+        #     # plt.plot(
+        #     #     1./np.fft.rfftfreq(len(errors)),
+        #     #     np.abs(np.fft.rfft(errors)));
+        #     # plt.title("noise energy by period")
+        #     # plt.show()
+
+        #     print('MAE ERROR', np.mean(np.abs(errors)))
+        #     print('RMSE ERROR', np.sqrt(np.mean(errors**2)))
+        #     breakpoint()
+        #         # self.had_done_plot = True
+
+        new_scale = np.exp(control)
+
+        if self.internal_verbose:
+            print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+    def serve_broyden_elements(self):
+        """Serve pieces used for Broyden loop."""
+
+        cur_iter = len(self.solution_qualities)
+        cur_index = cur_iter % self.memory
+
+        for back_index in range(self.used_memory):
+            index = (cur_index - back_index) % self.memory
+            yield (
+                self.dss[index],
+                self.dys[index],
+                self.dpriress[index],
+                self.dduaress[index],
+                )
+
+    def compute_broyden_step(self):
+        """Base method to compute a Broyden-style approximate Newton step."""
+        mystep = self.pd_scale * self.pri_res + self.dua_res
+        result = np.zeros_like(mystep)
+
+        cap_hit = False
+
+        # this should be correct
+        for _, (ds, dy, dprires, dduares) in enumerate(
+            self.serve_broyden_elements()):
+
+            dz = dy - self.pd_scale * ds
+            dstep = self.pd_scale * dprires + dduares
+
+            dz_norm = np.linalg.norm(dz)
+            dstep_norm = np.linalg.norm(dstep)
+
+            # correction by current index
+            dstep_normed = dstep / dstep_norm
+            dz_snormed = dz / dstep_norm
+            acceleration = dz_norm / dstep_norm
+
+            # we cap the acceleration
+            if acceleration > self.acceleration_cap:
+                reduction_factor = acceleration / self.acceleration_cap
+                cap_hit = True
+            else:
+                reduction_factor = 1.
+
+            dstep_component_reduced = (mystep @ dstep_normed) / reduction_factor
+            mystep -= dstep_normed * dstep_component_reduced
+            result +=  (dz_snormed * dstep_component_reduced)
+
+        # final correction
+        result -= mystep
+
+        # logic for update
+        if cap_hit:
+            current_step_len = np.linalg.norm(mystep)
+            # with refactoring we won't need to calculate this twice
+            next_z = self.z - result
+            _, _, next_pri_res, next_dua_res = self.compute_pridual_step(next_z)
+            next_step_len = np.linalg.norm(self.pd_scale * next_pri_res + next_dua_res)
+            it = len(self.solution_qualities)
+            if next_step_len < current_step_len:
+                print(f'ITER {it} CURRENT ACCEL CAP {self.acceleration_cap}, INCREASING')
+                self.acceleration_cap *= self.cap_increase_factor
+                self.acceleration_cap = np.minimum(self.cap_ceil, self.acceleration_cap)
+            else:
+                print(f'ITER {it} CURRENT ACCEL CAP {self.acceleration_cap}, DECREASING')
+                self.acceleration_cap *= self.cap_decrease_factor
+                self.acceleration_cap = np.maximum(self.cap_floor, self.acceleration_cap)
+
+        return result
