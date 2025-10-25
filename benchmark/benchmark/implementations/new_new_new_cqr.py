@@ -13,9 +13,7 @@
 #
 # You should have received a copy of the GNU General Public License along with
 # CQR. If not, see <https://www.gnu.org/licenses/>.
-"""Branch off new_cqr module, to iron out a few more choices.
-
-Minor code fixes here and there to simplify something.
+"""Probably last rewriting; figure out correct Br regularization.
 """
 
 import numpy as np
@@ -23,7 +21,7 @@ import scipy as sp
 from ..base_solver import BaseSolver
 from pyspqr import qr
 
-class TemporaryNewNewCQR(BaseSolver):
+class NewNewNewCQR(BaseSolver):
     """New idea for base CQR formulation."""
 
     max_iterations = 100000
@@ -33,18 +31,6 @@ class TemporaryNewNewCQR(BaseSolver):
     used_c = "c"
     use_numpy = True
     pd_scale = 1.0
-
-    # def change_scale(self, newscale):
-    #     print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {newscale}")
-    #     y = self.cone_project(self.z)
-    #     s = y - self.z
-    #     s /= self.pd_scale
-    #     self.pd_scale = newscale
-    #     s *= self.pd_scale
-    #     self.z[:] = y - s
-    #     self.e = self.qr_matrix @ (
-    #         self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
-    #         ) - self.pd_scale * getattr(self, self.used_b)
 
     def prepare_loop(self):
         """Define anything we need to re-use."""
@@ -86,38 +72,17 @@ class TemporaryNewNewCQR(BaseSolver):
                 self.pyspqr_r.T, self.pyspqr_e @ getattr(
                     self, self.used_c), lower=True)
 
-        # shift in the linspace projector
-        self.e = self.qr_matrix @ (
-            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
-            ) - self.pd_scale * getattr(self, self.used_b)
-
         self.z = np.zeros(self.m)
         self.y = np.zeros(self.m)
         self.s = np.zeros(self.m)
         self.x = np.zeros(self.n)
-
-        self.nonneg_activity = np.empty(self.nonneg, dtype=bool)
-        self.old_nonneg_activity = np.empty(self.nonneg, dtype=bool)
-        self.soc_activity = np.empty(len(self.soc), dtype=int)
-        self.old_soc_activity = np.empty(len(self.soc), dtype=int)
-
-        self.pri_res_norms = []
-        self.dua_res_norms = []
-        self.pd_scales = []
-        self.exponents = []
+        self.pri_res = np.zeros(self.m)
+        self.dua_res = np.zeros(self.m)
 
     def cone_project(self, z):
         """Project on y cone."""
         return self.composed_cone_project(
             z, has_zero=False, has_free=True, has_hsde=False)
-
-    def linspace_project(self, y_plus_s):
-        """Linspace project (y+s) -> y."""
-        return self.nullspace @ (self.nullspace.T @ y_plus_s) + self.e
-
-    def linspace_project_basic(self, y_plus_s):
-        """Linspace project (y+s) -> y, w/out shift."""
-        return y_plus_s - self.qr_matrix @ (self.qr_matrix.T @ y_plus_s)
 
     def compute_pridual_step(self, z):
         """Compute primal dual things, all descaled; steps are the residuals.
@@ -129,32 +94,21 @@ class TemporaryNewNewCQR(BaseSolver):
         y = self.cone_project(z)
         s = y - z
         s /= self.pd_scale
-        # step = dr_step(z)
-        # pri_step = self.nullspace @ self.nullspace.T @ step
-        # dua_step = self.qr_matrix @ self.qr_matrix.T @ step = step - pri_step
-        # step = self.nullspace @ (self.nullspace.T @ y) + self.nullspace @ (self.nullspace.T @ s) - y - (self.nullspace @ self.nullspace.T @ getattr(
-        #    self, self.used_b)) - self.qr_matrix @ self.c_qr
-        # step = self.nullspace @ (self.nullspace.T @ (y + s - getattr(self, self.used_b))) - y - self.qr_matrix @ self.c_qr
         pri_step = self.nullspace @ (self.nullspace.T @ (s - getattr(self, self.used_b)))
         dua_step = -self.qr_matrix @ (self.qr_matrix.T @ y + self.c_qr)
-        assert np.allclose(self.pd_scale * pri_step + dua_step, self.dr_step(z))
         return s, y, pri_step, dua_step
-
-    def dr_step(self, z):
-        """DR step."""
-        y = self.cone_project(z)
-        return self.linspace_project_basic(2 * y - z) - y + self.e
 
     def iterate(self):
         """Simple Douglas Rachford iteration."""
-        self.y[:] = self.cone_project(self.z)
-        step = self.linspace_project_basic(2 * self.y - self.z) - self.y + self.e
-        # print(np.linalg.norm(step))
-        self.z[:] = self.z + step
-        breakpoint()
+        # compute primal-dual things, DR step is obtained from them
+        self.s[:], self.y[:], self.pri_res[:], self.dua_res[:] = \
+            self.compute_pridual_step(self.z)
+
+        self.z[:] = (self.y + self.dua_res[:]) + self.pd_scale * (-self.s[:] + self.pri_res)
 
     def obtain_x_and_y(self):
         """Redefine if/as needed."""
+        # this projection is probably superflous but it's just for diagnostics
         self.y[:] = self.cone_project(self.z)
         self.s[:] = (self.y - self.z) / self.pd_scale
         x_qr = self.qr_matrix.T @ (getattr(self, self.used_b) - self.s)
@@ -164,7 +118,7 @@ class TemporaryNewNewCQR(BaseSolver):
             self.x[:] = self.pyspqr_e.T @ sp.sparse.linalg.spsolve_triangular(
                 self.pyspqr_r, x_qr, lower=False)
 
-class TemporaryEquilibratedNewNewCQR(TemporaryNewNewCQR):
+class EquilibratedNewNewNewCQR(NewNewNewCQR):
     """With Ruiz equilibration."""
 
     # max_iterations = 1000
@@ -252,29 +206,33 @@ class TemporaryEquilibratedNewNewCQR(TemporaryNewNewCQR):
         self.y = (self.equil_d * self.y) / self.equil_rho
 
 
-class BroydenEqNNNCQR(TemporaryEquilibratedNewNewCQR):
+class BroydenEqNNNCQR(EquilibratedNewNewNewCQR):
     """Redo base class; refactored Broyden2EqNNCqr with minor fixes.
 
-    Pest test so far 2025-10-25; even if unfinished. Initial fixes already
-    improve portfolio_bad, we're now safely well convergent on that
-    one (1000 tests). It's slower b/c regularization is now more conservative.
+    Work in progress, best test so far 2025-10-25.
 
-    There was error in adacap before, minor, same logic but correct seems to
-    improve. Also simplified it and it improves portfolio_bad, made it more
-    stringent in fact. Refactored so that we can test other schemes. Pri-dual
-    fix of Broyden update probably matters a lot. Also we're doing a lot of
-    redundant computations now, need to streamline.
+    Main changes: rewritten Broyden loop with full primal dual separation.
+    Doesn't seem to have big effect but does probably improve a bit numerical
+    accuracy. It costs one more dot and 2 more vector sums per Broyden step
+    (so, many) so need to figure out if really useful. Changed Broyden
+    regularization to something which probably is really quadratic
+    regularization, seems to work with higher cap. Increasing the cap makes it
+    better convergent on the portfolio_bad class. It might be that original
+    flat cap works as well, with higher cap limits. Thing missing is loop to
+    increase regularization if step len doesn't improve, online. 
     """
 
     memory = 50
     max_iterations = 100_000
 
-    # basic regularization scheme
+    # basic regularization scheme; this is really inverse quadratic reg
     acceleration_cap = 5
     cap_decrease_factor = 0.9
     cap_increase_factor = 1.005
     cap_floor = 1.
-    cap_ceil = 100.
+    cap_ceil = 1000.
+
+    use_numpy = False
 
     # PID
     Kp = 0.25
@@ -301,21 +259,21 @@ class BroydenEqNNNCQR(TemporaryEquilibratedNewNewCQR):
         self.dss = np.empty((self.memory, self.m), dtype=float)
         self.dpriress = np.empty((self.memory, self.m), dtype=float)
         self.dduaress = np.empty((self.memory, self.m), dtype=float)
-        self.dys_norms = np.empty(self.memory, dtype=float)
-        self.dss_norms = np.empty(self.memory, dtype=float)
-        self.dpriress_norms = np.empty(self.memory, dtype=float)
-        self.dduaress_norms = np.empty(self.memory, dtype=float)
+
+        # norms squared; we cache them to avoid recomputing self.memory times
+        self.dydys = np.empty(self.memory, dtype=float)
+        self.dsdss = np.empty(self.memory, dtype=float)
+        self.dydss = np.empty(self.memory, dtype=float)
+        self.dpriresdpriress = np.empty(self.memory, dtype=float)
+        self.dduaresdduaress = np.empty(self.memory, dtype=float)
 
         self.old_y = np.empty(self.m, dtype=float)
         self.old_s = np.empty(self.m, dtype=float)
         self.old_prires = np.empty(self.m, dtype=float)
         self.old_duares = np.empty(self.m, dtype=float)
 
-        self.step = np.empty(self.m, dtype=float)
-        self.pri_res = np.empty(self.m, dtype=float)
-        self.dua_res = np.empty(self.m, dtype=float)
-
         self.pd_errors = []
+        self.pd_errors_running_sum = 0.
         self.pd_scales = []
 
         self.used_memory = 0
@@ -336,16 +294,15 @@ class BroydenEqNNNCQR(TemporaryEquilibratedNewNewCQR):
         if self.cur_iter > 0:
 
             self.dys[self.cur_index] = self.y - self.old_y
-            self.dys_norms[self.cur_index] = np.linalg.norm(self.dys[self.cur_index])
-
             self.dss[self.cur_index] = self.s - self.old_s
-            self.dss_norms[self.cur_index] = np.linalg.norm(self.dss[self.cur_index])
-
             self.dpriress[self.cur_index] = self.pri_res - self.old_prires
-            self.dpriress_norms[self.cur_index] = np.linalg.norm(self.dpriress[self.cur_index])
-
             self.dduaress[self.cur_index] = self.dua_res - self.old_duares
-            self.dduaress_norms[self.cur_index] = np.linalg.norm(self.dduaress[self.cur_index])
+
+            self.dydys[self.cur_index] = self.dys[self.cur_index] @ self.dys[self.cur_index]
+            self.dsdss[self.cur_index] = self.dss[self.cur_index] @ self.dss[self.cur_index]
+            self.dydss[self.cur_index] = self.dys[self.cur_index] @ self.dss[self.cur_index]
+            self.dpriresdpriress[self.cur_index] = self.dpriress[self.cur_index] @ self.dpriress[self.cur_index]
+            self.dduaresdduaress[self.cur_index] = self.dduaress[self.cur_index] @ self.dduaress[self.cur_index]
 
             self.used_memory = min(self.used_memory + 1, self.memory)
 
@@ -353,6 +310,7 @@ class BroydenEqNNNCQR(TemporaryEquilibratedNewNewCQR):
 
         # we store the primal and dual res norms
         self.pd_errors.append(np.log(self.pri_res_norm / self.dua_res_norm))
+        self.pd_errors_running_sum += self.pd_errors[-1]
 
         # we choose the scale
         self.update_pd_scale() # change z in place
@@ -360,14 +318,14 @@ class BroydenEqNNNCQR(TemporaryEquilibratedNewNewCQR):
         # and the primal dual scale chosen
         self.pd_scales.append(float(self.pd_scale))
 
-        # update with Broyden step
-        br_step = self.compute_broyden_step()
-        if np.all(np.abs(br_step) < 1e-16):
-            breakpoint()
-        if np.any(np.isnan(br_step)):
-            breakpoint()
+        # TODO: these 2 in a loop to accept/reject update changing regularization;
+        # careful about order of execution (where old's are saved)
 
-        self.z[:] = self.z[:] - br_step
+        # compute primal and dual Broyden step
+        pri_br_step, dua_br_step = self.compute_pridual_broyden_step()
+
+        # update z
+        self.z[:] = (self.y - dua_br_step) - self.pd_scale * (self.s + pri_br_step)
 
         # store old things
         self.old_y[:] = self.y
@@ -387,10 +345,11 @@ class BroydenEqNNNCQR(TemporaryEquilibratedNewNewCQR):
                 self.dys[index],
                 self.dpriress[index],
                 self.dduaress[index],
-                self.dss_norms[index],
-                self.dys_norms[index],
-                self.dpriress_norms[index],
-                self.dduaress_norms[index],
+                self.dsdss[index],
+                self.dydys[index],
+                self.dydss[index],
+                self.dpriresdpriress[index],
+                self.dduaresdduaress[index],
                 )
 
     ###
@@ -400,7 +359,7 @@ class BroydenEqNNNCQR(TemporaryEquilibratedNewNewCQR):
     def update_pd_scale(self):
         """PID update of PD scale."""
         error_t = self.pd_errors[-1]
-        integral_error = np.sum(self.pd_errors)
+        integral_error = self.pd_errors_running_sum
         derivative_error = self.pd_errors[-1] - self.pd_errors[-2] if len(self.pd_errors) > 1 else 0
         control = self.Kp * error_t + self.Ki * integral_error + self.Kd * derivative_error
 
@@ -413,11 +372,9 @@ class BroydenEqNNNCQR(TemporaryEquilibratedNewNewCQR):
         if self.internal_verbose:
             print(f"ITER {self.cur_iter} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
         self.pd_scale = new_scale
+
+        # this is probably not needed
         self.z[:] = self.y - self.s * new_scale
-        # for b/w compatibility with dr_step old method
-        self.e[:] = self.qr_matrix @ (
-            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
-            ) - self.pd_scale * getattr(self, self.used_b)
 
     ###
     # Regularized Broyden logic
@@ -440,48 +397,42 @@ class BroydenEqNNNCQR(TemporaryEquilibratedNewNewCQR):
         self.acceleration_cap = np.clip(self.acceleration_cap, self.cap_floor, self.cap_ceil)
         # breakpoint()
 
-    def get_broyden_regularization_factor(self, acceleration):
+    def get_broyden_regularization_factor(self, norm_update):
         """Regularize the norm of a single Broyden update."""
+        return np.sqrt(1. + (norm_update / self.acceleration_cap)**2)
 
-        # we cap the acceleration
-        if acceleration > self.acceleration_cap:
-            reduction_factor = acceleration / self.acceleration_cap
-        else:
-            reduction_factor = 1.
-        return reduction_factor
-
-    def compute_broyden_step(self):
+    def compute_pridual_broyden_step(self):
         """Base method to compute a Broyden-style approximate Newton step."""
-        mystep = self.pd_scale * self.pri_res + self.dua_res
-        result = np.zeros_like(mystep)
+
+        mystep_pri = np.array(self.pri_res)
+        mystep_dua = np.array(self.dua_res)
+        result_pri = np.zeros(self.m)
+        result_dua = np.zeros(self.m)
 
         # this should be correct
-        for (
-                ds, dy, dprires, dduares,
-                ds_norm, dy_norm, dprires_norm, dduares_norm
-            ) in self.serve_broyden_elements():
+        for (ds, dy, dprires, dduares, dsds, dydy, dyds,
+            dpriresdprires, dduaresdduares) in self.serve_broyden_elements():
 
-            dz = dy - self.pd_scale * ds
-            dstep = self.pd_scale * dprires + dduares
-            assert np.isclose(dprires @ dduares, 0.)
+            dzdz = dydy + dsds * self.pd_scale**2 - 2 * self.pd_scale * dyds
+            dstepdstep = dpriresdprires * self.pd_scale**2 + dduaresdduares
 
-            dz_norm = np.linalg.norm(dz)
-            dstep_norm = np.linalg.norm(dstep)
+            # get regularizer - makes more sense to work with square of this
+            reduction_factor = self.get_broyden_regularization_factor(
+                np.sqrt(dzdz/dstepdstep))
 
-            # correction by current index
-            dstep_normed = dstep / dstep_norm
-            dz_snormed = dz / dstep_norm
-            acceleration = dz_norm / dstep_norm
+            new_dstep_component = (
+                (self.pd_scale**2 * (mystep_pri @ dprires) + mystep_dua @ dduares) /
+                dstepdstep)
+            new_dstep_component_reduced = new_dstep_component / reduction_factor
 
-            # get regularizer
-            reduction_factor = self.get_broyden_regularization_factor(acceleration)
-
-            # apply the update
-            dstep_component_reduced = (mystep @ dstep_normed) / reduction_factor
-            mystep -= dstep_normed * dstep_component_reduced
-            result +=  (dz_snormed * dstep_component_reduced)
+            # careful with the signs, these are correct
+            mystep_pri -= dprires * new_dstep_component_reduced
+            mystep_dua -= dduares * new_dstep_component_reduced
+            result_pri -= ds * new_dstep_component_reduced
+            result_dua += dy * new_dstep_component_reduced
 
         # final correction
-        result -= mystep
+        result_pri -= mystep_pri
+        result_dua -= mystep_dua
 
-        return result
+        return result_pri, result_dua
