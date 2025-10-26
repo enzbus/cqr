@@ -181,7 +181,8 @@ class EquilibratedNewNewNewCQR(NewNewNewCQR):
 
             r1 = max(nr[nr > 0]) / min(nr[nr > 0])
             r2 = max(nc[nc > 0]) / min(nc[nc > 0])
-            print(r1, r2)
+            if self.internal_verbose:
+                print("Ruiz ratio rows", r1, "Ruiz ratio cols", r2)
             if (r1-1 < self.ruiz_row_limit) and (r2-1 < self.ruiz_col_limit):
                 break
             d_and_rho[nr > 0] *= nr[nr > 0]**(-0.5)
@@ -225,12 +226,12 @@ class BroydenEqNNNCQR(EquilibratedNewNewNewCQR):
     memory = 50
     max_iterations = 100_000
 
-    # basic regularization scheme; this is really inverse quadratic reg
-    acceleration_cap = 5
-    cap_decrease_factor = 0.9
-    cap_increase_factor = 1.005
-    cap_floor = 1.
-    cap_ceil = 1000.
+    # basic regularization scheme
+    broyden_regularizer = 1.0
+    broyden_regularizer_increment = 2.0
+    broyden_regularizer_decrement = broyden_regularizer_increment**(-1./memory)
+    broyden_regularizer_ceil = 1.
+    broyden_regularizer_floor = 1e-8
 
     use_numpy = False
 
@@ -275,6 +276,7 @@ class BroydenEqNNNCQR(EquilibratedNewNewNewCQR):
         self.pd_errors = []
         self.pd_errors_running_sum = 0.
         self.pd_scales = []
+        self.regularizations = []
 
         self.used_memory = 0
 
@@ -308,6 +310,8 @@ class BroydenEqNNNCQR(EquilibratedNewNewNewCQR):
 
             self.update_broyden_regularization()
 
+        self.regularizations.append(self.broyden_regularizer)
+
         # we store the primal and dual res norms
         self.pd_errors.append(np.log(self.pri_res_norm / self.dua_res_norm))
         self.pd_errors_running_sum += self.pd_errors[-1]
@@ -318,8 +322,9 @@ class BroydenEqNNNCQR(EquilibratedNewNewNewCQR):
         # and the primal dual scale chosen
         self.pd_scales.append(float(self.pd_scale))
 
-        # TODO: these 2 in a loop to accept/reject update changing regularization;
-        # careful about order of execution (where old's are saved)
+        # Maybe: these 2 in a loop to accept/reject update changing regularization;
+        # error prone, and not sure it is good idea; if we do be careful about
+        # order of execution (where old's are saved)
 
         # compute primal and dual Broyden step
         pri_br_step, dua_br_step = self.compute_pridual_broyden_step()
@@ -334,6 +339,19 @@ class BroydenEqNNNCQR(EquilibratedNewNewNewCQR):
         self.old_duares[:] = self.dua_res
         self.old_prires_norm = float(self.pri_res_norm)
         self.old_duares_norm = float(self.dua_res_norm)
+
+    # def callback_converged(self):
+    #     """Override this to do diagnostics with the instance at convergence."""
+    #     import matplotlib.pyplot as plt
+    #     plt.semilogy(self.regularizations, label='regularizations')
+    #     plt.show()
+    #     plt.scatter(np.log(self.pd_scales[:-1]), np.diff(self.pd_errors))
+    #     print(np.corrcoef(np.log(self.pd_scales[:-1]), np.diff(self.pd_errors)))
+    #     plt.show()
+    #     X = np.vstack([np.log(self.pd_scales[:-1]), np.log(self.regularizations)[:-1]]).T
+    #     Y = np.diff(self.pd_errors)
+    #     print(np.linalg.solve(X.T @ X, X.T @ Y))
+    #     breakpoint()
 
     def serve_broyden_elements(self):
         """Serve pieces used for Broyden loop."""
@@ -356,6 +374,8 @@ class BroydenEqNNNCQR(EquilibratedNewNewNewCQR):
     # Primal-Dual scaling
     ###
 
+    pid_scale_corrector = 0.0 # doesn't seem to work
+
     def update_pd_scale(self):
         """PID update of PD scale."""
         error_t = self.pd_errors[-1]
@@ -367,7 +387,7 @@ class BroydenEqNNNCQR(EquilibratedNewNewNewCQR):
             print("ITER", self.cur_iter, "PRIMAL RESIDUAL", self.pri_res_norm, "DUAL RESIDUAL", self.dua_res_norm)
             print("ITER", self.cur_iter, "ERROR", error_t, "INTEGRAL", integral_error, "DERIVATIVE", derivative_error, "CONTROL", control)
 
-        new_scale = np.exp(control)
+        new_scale = np.exp(control * (self.broyden_regularizer**self.pid_scale_corrector))
 
         if self.internal_verbose:
             print(f"ITER {self.cur_iter} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
@@ -387,19 +407,22 @@ class BroydenEqNNNCQR(EquilibratedNewNewNewCQR):
 
         if cur_step_len < old_step_len:
             if self.internal_verbose:
-                print(f'ITER {self.cur_iter} CURRENT ACCEL CAP {self.acceleration_cap}, INCREASING')
-            self.acceleration_cap *= self.cap_increase_factor
+                print(f'ITER {self.cur_iter} CURRENT REGULARIZER {self.broyden_regularizer}, DECREASING')
+            self.broyden_regularizer *= self.broyden_regularizer_decrement
         else:
             if self.internal_verbose:
-                print(f'ITER {self.cur_iter} CURRENT ACCEL CAP {self.acceleration_cap}, DECREASING')
-            self.acceleration_cap *= self.cap_decrease_factor
+                print(f'ITER {self.cur_iter} CURRENT REGULARIZER {self.broyden_regularizer}, INCREASING')
+            self.broyden_regularizer *= self.broyden_regularizer_increment
 
-        self.acceleration_cap = np.clip(self.acceleration_cap, self.cap_floor, self.cap_ceil)
+        self.broyden_regularizer = np.clip(
+            self.broyden_regularizer,
+            self.broyden_regularizer_floor,
+            self.broyden_regularizer_ceil)
         # breakpoint()
 
-    def get_broyden_regularization_factor(self, norm_update):
+    def get_broyden_regularization_factor(self, norm_square_update):
         """Regularize the norm of a single Broyden update."""
-        return np.sqrt(1. + (norm_update / self.acceleration_cap)**2)
+        return np.sqrt(1. + norm_square_update * self.broyden_regularizer)
 
     def compute_pridual_broyden_step(self):
         """Base method to compute a Broyden-style approximate Newton step."""
@@ -416,9 +439,9 @@ class BroydenEqNNNCQR(EquilibratedNewNewNewCQR):
             dzdz = dydy + dsds * self.pd_scale**2 - 2 * self.pd_scale * dyds
             dstepdstep = dpriresdprires * self.pd_scale**2 + dduaresdduares
 
-            # get regularizer - makes more sense to work with square of this
+            # get regularizer
             reduction_factor = self.get_broyden_regularization_factor(
-                np.sqrt(dzdz/dstepdstep))
+                dzdz/dstepdstep)
 
             new_dstep_component = (
                 (self.pd_scale**2 * (mystep_pri @ dprires) + mystep_dua @ dduares) /
@@ -436,3 +459,34 @@ class BroydenEqNNNCQR(EquilibratedNewNewNewCQR):
         result_dua -= mystep_dua
 
         return result_pri, result_dua
+
+
+class BroydenEqMem10NNNCQR(BroydenEqNNNCQR):
+    """With 10 memory."""
+    memory = 20
+    broyden_regularizer_floor = 1e-12
+    internal_verbose = False
+    use_numpy = True
+
+# class BroydenEqMem20NNNCQR(BroydenEqNNNCQR):
+#     """With 20 memory.
+
+#     Removing cap_ceil makes portfolio_bad converge better, but that introduces
+#     issue with simple LP, at very low residuals interaction with PD scaling,
+#     oscillation (around 1e-10). Maybe we can make pd scale aware of current
+#     Br regularization - lower regularization should make the system more
+#     reactive to scale change. Also if we do "backtrack" loop it affects it.
+
+#     This seems least bad, cap_ceil=1e5, converges on all (1k tests) but worst
+#     on problem_one has oscillations and worst on PPB takes 80k iters.
+#     """
+#     internal_verbose = False
+#     memory = 20
+#     use_numpy = True
+
+#     # need higher cap_ceil
+#     # acceleration_cap = 5
+#     # cap_decrease_factor = 0.9
+#     # cap_increase_factor = 1.005
+#     # cap_floor = 1.
+#     cap_ceil = 1e5 # tried np.inf, see comment; 1e4 fails 1 instance of PPB;

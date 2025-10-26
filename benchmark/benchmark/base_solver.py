@@ -117,9 +117,13 @@ class BaseSolver:
         self.obtain_x_and_y()
         self.solution_qualities.append(self.check_solution_quality())
         if self.solution_qualities[-1] < self.epsilon_convergence:
+            self.callback_converged()
             logger.info(
                 f'Converged in {len(self.solution_qualities)} iterations!')
             raise StopIteration
+
+    def callback_converged(self):
+        """Override this to do diagnostics with the instance at convergence."""
 
     def loop(self):
         """Either use this default loop, or redefine based on your needs."""
