@@ -374,7 +374,7 @@ class BroydenEqNNNCQR(EquilibratedNewNewNewCQR):
     # Primal-Dual scaling
     ###
 
-    pid_scale_corrector = 0.0 # doesn't seem to work
+    # pid_scale_corrector = 0.0 # doesn't seem to work
 
     def update_pd_scale(self):
         """PID update of PD scale."""
@@ -387,7 +387,8 @@ class BroydenEqNNNCQR(EquilibratedNewNewNewCQR):
             print("ITER", self.cur_iter, "PRIMAL RESIDUAL", self.pri_res_norm, "DUAL RESIDUAL", self.dua_res_norm)
             print("ITER", self.cur_iter, "ERROR", error_t, "INTEGRAL", integral_error, "DERIVATIVE", derivative_error, "CONTROL", control)
 
-        new_scale = np.exp(control * (self.broyden_regularizer**self.pid_scale_corrector))
+        # new_scale = np.exp(control * (self.broyden_regularizer**self.pid_scale_corrector))
+        new_scale = np.exp(control)
 
         if self.internal_verbose:
             print(f"ITER {self.cur_iter} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
@@ -460,9 +461,73 @@ class BroydenEqNNNCQR(EquilibratedNewNewNewCQR):
 
         return result_pri, result_dua
 
+class BroydenEqDecayNNNCQR(BroydenEqNNNCQR):
+    """With PID decay.
+    
+    Add exponential decay to control over time. Start with very small. With
+    this simple trick we recover theoretical guarantees on convergence :)
+    although that's not very useful obv, let's see if it actually improves.
 
-class BroydenEqMem10NNNCQR(BroydenEqNNNCQR):
-    """With 10 memory."""
+    Yes it appears some improvement, tiny amount of decay for now. At least for
+    one or two tails, but it's very minor. Most noticeable difference is
+    improvement on worst instances of PPB.
+    """
+
+    decay = 0.99999 # scales down ~0.35 at iter 100k
+    # decay = 0.9999 # scales down ~4.5e-5 at iter 100k
+    internal_verbose = False
+    use_numpy = False # note that the numpy (dense) QR is a tiny bit worse,
+    # noticeable on worst instances; better to do Householder's explicitly;
+    # don't change it
+
+    def update_pd_scale(self):
+        """PID update of PD scale."""
+        error_t = self.pd_errors[-1]
+        integral_error = self.pd_errors_running_sum
+        derivative_error = self.pd_errors[-1] - self.pd_errors[-2] if len(self.pd_errors) > 1 else 0
+        control = self.Kp * error_t + self.Ki * integral_error + self.Kd * derivative_error
+
+        if self.internal_verbose:
+            print("ITER", self.cur_iter, "PRIMAL RESIDUAL", self.pri_res_norm, "DUAL RESIDUAL", self.dua_res_norm)
+            print("ITER", self.cur_iter, "ERROR", error_t, "INTEGRAL", integral_error, "DERIVATIVE", derivative_error, "CONTROL", control)
+
+        new_scale = np.exp(control)
+
+        new_scale *= (self.decay ** self.cur_iter)
+
+        if self.internal_verbose:
+            print(f"ITER {self.cur_iter} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+        self.pd_scale = new_scale
+
+        # this is probably not needed
+        self.z[:] = self.y - self.s * new_scale
+
+class BroydenEqDecay2NNNCQR(BroydenEqDecayNNNCQR):
+    """With stronger PID decay.
+    
+    This one is probably a tiny bit better, only one tail worse all else seems
+    better than base (decay = 1.). Although differences are small, and we'll
+    have to search over parameteres all together anyways; but I guess we can
+    keep this extra one in the mix.
+    """
+    decay = 0.99995 # scales down ~6e-3 at iter 100k
+
+class BroydenEqMem20NNNCQR(BroydenEqNNNCQR):
+    """With 20 memory.
+
+    Removing broyden_regularizer_floor makes portfolio_bad converge better, but
+    that introduces issue with simple LP, at very low residuals sometimes
+    interaction with PD scaling, oscillation (around 1e-10). Maybe we can make
+    pd scale aware of current Br regularization - lower regularization should
+    make the system more reactive to scale change. Also if we do "backtrack"
+    loop it affects it. Also probably better idea testing now is decay of PD
+    scale.
+
+    This seems least bad, converges on all (1k tests - not any more since I
+    refactored changing parameters for br reg; now 1-2 instances don't, it was
+    0.99/1.005, we'll reoptimize all parameters) but worst on problem_one has
+    oscillations and worst on PPB takes 80k iters.
+    """
     memory = 20
     broyden_regularizer_floor = 1e-12
     internal_verbose = False
@@ -490,3 +555,117 @@ class BroydenEqMem10NNNCQR(BroydenEqNNNCQR):
 #     # cap_increase_factor = 1.005
 #     # cap_floor = 1.
 #     cap_ceil = 1e5 # tried np.inf, see comment; 1e4 fails 1 instance of PPB;
+
+
+class BroydenEqBTNNNCQR(BroydenEqNNNCQR):
+    """Try back-tracking.
+
+    This is minimal change, some redundant comp.
+    
+    It appears true that for high enough regularizer the step len decreases,
+    but with memory=50 that may be very high (like 1e5), so I guess in general
+    better to let it explore. Then try with less memory. We can also maybe
+    modify loop so that in "back-tracking" mode we still update the Broyden
+    stores with the information from the rejected update.
+    """
+
+    # broyden_regularizer_increment = 2.0
+    # broyden_regularizer_ceil = 1.0
+    # memory = 20
+    internal_verbose = False
+    use_numpy = False # note that the numpy (dense) QR is a tiny bit worse,
+    # noticeable on worst instances; better to do Householder's explicitly;
+    # don't change it
+
+    def iterate(self):
+        """Simple Douglas Rachford iteration with Broyden update to override.
+        """
+
+        # compute primal-dual things, DR step is obtained from them
+        self.s[:], self.y[:], self.pri_res[:], self.dua_res[:] = \
+            self.compute_pridual_step(self.z)
+
+        # compute norms once
+        self.pri_res_norm = np.linalg.norm(self.pri_res)
+        self.dua_res_norm = np.linalg.norm(self.dua_res)
+
+        # update Broyden stores, update Broyden regularization
+        if self.cur_iter > 0:
+
+            self.dys[self.cur_index] = self.y - self.old_y
+            self.dss[self.cur_index] = self.s - self.old_s
+            self.dpriress[self.cur_index] = self.pri_res - self.old_prires
+            self.dduaress[self.cur_index] = self.dua_res - self.old_duares
+
+            self.dydys[self.cur_index] = self.dys[self.cur_index] @ self.dys[self.cur_index]
+            self.dsdss[self.cur_index] = self.dss[self.cur_index] @ self.dss[self.cur_index]
+            self.dydss[self.cur_index] = self.dys[self.cur_index] @ self.dss[self.cur_index]
+            self.dpriresdpriress[self.cur_index] = self.dpriress[self.cur_index] @ self.dpriress[self.cur_index]
+            self.dduaresdduaress[self.cur_index] = self.dduaress[self.cur_index] @ self.dduaress[self.cur_index]
+
+            self.used_memory = min(self.used_memory + 1, self.memory)
+
+            self.update_broyden_regularization()
+
+        self.regularizations.append(self.broyden_regularizer)
+
+        # we store the primal and dual res norms
+        self.pd_errors.append(np.log(self.pri_res_norm / self.dua_res_norm))
+        self.pd_errors_running_sum += self.pd_errors[-1]
+
+        # we choose the scale
+        self.update_pd_scale() # change z in place
+
+        # and the primal dual scale chosen
+        self.pd_scales.append(float(self.pd_scale))
+
+        # Maybe: these 2 in a loop to accept/reject update changing regularization;
+        # error prone, and not sure it is good idea; if we do be careful about
+        # order of execution (where old's are saved)
+
+        _cur_step_len = np.linalg.norm(self.pd_scale * self.pri_res + self.dua_res)
+
+        for _ in range(10):
+            # compute primal and dual Broyden step
+            pri_br_step, dua_br_step = self.compute_pridual_broyden_step()
+
+            # back-tracking
+            _newz = (self.y - dua_br_step) - self.pd_scale * (self.s + pri_br_step)
+            _s, _y, _pr, _dr = self.compute_pridual_step(_newz)
+            _next_step_len = np.linalg.norm(self.pd_scale * _pr + _dr)
+            if _next_step_len > _cur_step_len:
+                if self.broyden_regularizer == self.broyden_regularizer_ceil:
+                    print("WE'RE ALREADY AT THE CEIL, SKIPPING INCREMENT")
+                    break
+                print('BACKTRACKING')
+                self.broyden_regularizer = min(
+                    self.broyden_regularizer * self.broyden_regularizer_increment,
+                    self.broyden_regularizer_ceil)
+                # breakpoint()
+            else:
+                break
+
+        # update z
+        self.z[:] = (self.y - dua_br_step) - self.pd_scale * (self.s + pri_br_step)
+
+        # store old things
+        self.old_y[:] = self.y
+        self.old_s[:] = self.s
+        self.old_prires[:] = self.pri_res
+        self.old_duares[:] = self.dua_res
+        self.old_prires_norm = float(self.pri_res_norm)
+        self.old_duares_norm = float(self.dua_res_norm)
+
+
+class BroydenEqBTmem20NNNCQR(BroydenEqBTNNNCQR):
+    """Try with memory 20.
+    
+    Result: seems to mitigate issue with oscilations on found problematic
+    instance of problem_one, but makes PPB worse. If we do BT worth trying
+    Broyden update using rejected iters. Overall probably not worth adding this
+    complexity.
+    """
+
+    memory = 20
+    broyden_regularizer_floor = 1e-12
+    internal_verbose = True
