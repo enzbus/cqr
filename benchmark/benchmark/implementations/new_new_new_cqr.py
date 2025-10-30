@@ -308,7 +308,7 @@ class BroydenEqNNNCQR(EquilibratedNewNewNewCQR):
 
             self.used_memory = min(self.used_memory + 1, self.memory)
 
-            self.update_broyden_regularization()
+            steplen_improved = self.update_broyden_regularization()
 
         self.regularizations.append(self.broyden_regularizer)
 
@@ -406,20 +406,23 @@ class BroydenEqNNNCQR(EquilibratedNewNewNewCQR):
         old_step_len = np.linalg.norm(self.pd_scale * self.old_prires + self.old_duares)
         cur_step_len = np.linalg.norm(self.pd_scale * self.pri_res + self.dua_res)
 
+        accept = (cur_step_len < old_step_len) or (self.broyden_regularizer == self.broyden_regularizer_ceil)
+
         if cur_step_len < old_step_len:
             if self.internal_verbose:
-                print(f'ITER {self.cur_iter} CURRENT REGULARIZER {self.broyden_regularizer}, DECREASING')
+                print(f'ITER {self.cur_iter} CURRENT REGULARIZER {self.broyden_regularizer}, DECREASING TO {self.broyden_regularizer * self.broyden_regularizer_decrement}')
             self.broyden_regularizer *= self.broyden_regularizer_decrement
         else:
             if self.internal_verbose:
-                print(f'ITER {self.cur_iter} CURRENT REGULARIZER {self.broyden_regularizer}, INCREASING')
+                print(f'ITER {self.cur_iter} CURRENT REGULARIZER {self.broyden_regularizer}, INCREASING TO {self.broyden_regularizer * self.broyden_regularizer_increment}')
             self.broyden_regularizer *= self.broyden_regularizer_increment
 
         self.broyden_regularizer = np.clip(
             self.broyden_regularizer,
             self.broyden_regularizer_floor,
             self.broyden_regularizer_ceil)
-        # breakpoint()
+
+        return accept
 
     def get_broyden_regularization_factor(self, norm_square_update):
         """Regularize the norm of a single Broyden update."""
@@ -488,7 +491,6 @@ class BroydenEqDecayNNNCQR(BroydenEqNNNCQR):
         control = self.Kp * error_t + self.Ki * integral_error + self.Kd * derivative_error
 
         if self.internal_verbose:
-            print("ITER", self.cur_iter, "PRIMAL RESIDUAL", self.pri_res_norm, "DUAL RESIDUAL", self.dua_res_norm)
             print("ITER", self.cur_iter, "ERROR", error_t, "INTEGRAL", integral_error, "DERIVATIVE", derivative_error, "CONTROL", control)
 
         new_scale = np.exp(control)
@@ -511,6 +513,24 @@ class BroydenEqDecay2NNNCQR(BroydenEqDecayNNNCQR):
     keep this extra one in the mix.
     """
     decay = 0.99995 # scales down ~6e-3 at iter 100k
+
+
+class BroydenEqTest2NNNCQR(BroydenEqDecayNNNCQR):
+    """Try same reg parameters as before.
+    
+    Adapted from cap parameters. Not clearly better or worse - will have to
+    search over params more.
+    """
+    # cap_decrease_factor = 0.9
+    # cap_increase_factor = 1.005
+    # cap_floor = 1.
+    # cap_ceil = 100.
+    internal_verbose = True
+    broyden_regularizer = 1.0
+    broyden_regularizer_increment = (1/0.9)**2
+    broyden_regularizer_decrement = (1/1.005)**2
+    broyden_regularizer_ceil = 1.0 # increased
+    broyden_regularizer_floor = 1e-10 # decreased
 
 class BroydenEqMem20NNNCQR(BroydenEqNNNCQR):
     """With 20 memory.
@@ -669,3 +689,106 @@ class BroydenEqBTmem20NNNCQR(BroydenEqBTNNNCQR):
     memory = 20
     broyden_regularizer_floor = 1e-12
     internal_verbose = True
+
+
+class BroydenEqNewBTNNNCQR(BroydenEqBTNNNCQR):
+    """With back-tracking but still updating Broyden stores.
+    
+    Probably dead end - seems to have improved only one tail, made PPB tails
+    worse. I had to fallback to accepting "bad" step after one rejection, or
+    it would get stuck never accepting steps in some cases. It doesn't help -
+    especially on the PPB class which was the reason to try this. Spikes are
+    still there, it just takes more iters to converge.
+    """
+
+    internal_verbose = False
+    # broyden_regularizer_ceil = 100. # increased
+    # memory = 20
+
+    # last_step_accepted = False
+
+    def iterate(self):
+        """Simple Douglas Rachford iteration with Broyden update to override.
+        """
+        if self.internal_verbose:
+            print(f'\nSTARTING ITERATION {self.cur_iter}')
+
+        # compute primal-dual things, DR step is obtained from them
+        self.s[:], self.y[:], self.pri_res[:], self.dua_res[:] = \
+            self.compute_pridual_step(self.z)
+
+        # compute norms once
+        self.pri_res_norm = np.linalg.norm(self.pri_res)
+        self.dua_res_norm = np.linalg.norm(self.dua_res)
+
+        if self.internal_verbose:
+            print("ITER", self.cur_iter, "PRIMAL RESIDUAL", self.pri_res_norm, "DUAL RESIDUAL", self.dua_res_norm)
+
+        # update Broyden stores, update Broyden regularization
+        if self.cur_iter > 0:
+
+            self.dys[self.cur_index] = self.y - self.old_y
+            self.dss[self.cur_index] = self.s - self.old_s
+            self.dpriress[self.cur_index] = self.pri_res - self.old_prires
+            self.dduaress[self.cur_index] = self.dua_res - self.old_duares
+
+            self.dydys[self.cur_index] = self.dys[self.cur_index] @ self.dys[self.cur_index]
+            self.dsdss[self.cur_index] = self.dss[self.cur_index] @ self.dss[self.cur_index]
+            self.dydss[self.cur_index] = self.dys[self.cur_index] @ self.dss[self.cur_index]
+            self.dpriresdpriress[self.cur_index] = self.dpriress[self.cur_index] @ self.dpriress[self.cur_index]
+            self.dduaresdduaress[self.cur_index] = self.dduaress[self.cur_index] @ self.dduaress[self.cur_index]
+
+            self.used_memory = min(self.used_memory + 1, self.memory)
+
+            steplen_improved = self.update_broyden_regularization()
+            # if not self.last_step_accepted and not steplen_improved:
+            #     if self.internal_verbose:
+            #         print('WE REJECTED LAST STEP, ACCEPTING THIS ANYWAY')
+            #     steplen_improved = True
+        else:
+            steplen_improved = True
+
+        # self.last_step_accepted = steplen_improved
+
+        self.regularizations.append(self.broyden_regularizer)
+
+        if steplen_improved:
+
+            if self.internal_verbose:
+                print('STEP LEN IMPROVED, ACCEPTING STEP')
+
+            # we store the primal and dual res norms
+            self.pd_errors.append(np.log(self.pri_res_norm / self.dua_res_norm))
+            self.pd_errors_running_sum += self.pd_errors[-1]
+
+            # we choose the scale
+            self.update_pd_scale() # change z in place
+
+            # and the primal dual scale chosen
+            self.pd_scales.append(float(self.pd_scale))
+
+            # store old things
+            self.old_y[:] = self.y
+            self.old_s[:] = self.s
+            self.old_prires[:] = self.pri_res
+            self.old_duares[:] = self.dua_res
+            self.old_prires_norm = float(self.pri_res_norm)
+            self.old_duares_norm = float(self.dua_res_norm)
+
+        else:
+            if self.internal_verbose:
+                print('STEP LEN DID NOT IMPROVE, REPEATING')
+            # restore old things
+            self.y[:] = self.old_y
+            self.s[:] = self.old_s
+            self.pri_res[:] = self.old_prires
+            self.dua_res[:] = self.old_duares
+            # shouldn't be needed
+            self.pri_res_norm = float(self.old_prires_norm)
+            self.dua_res_norm = float(self.old_duares_norm)
+
+        # compute primal and dual Broyden step
+        pri_br_step, dua_br_step = self.compute_pridual_broyden_step()
+
+        # update z
+        self.z[:] = (self.y - dua_br_step) - self.pd_scale * (self.s + pri_br_step)
