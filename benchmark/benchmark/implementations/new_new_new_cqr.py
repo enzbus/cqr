@@ -32,6 +32,9 @@ class NewNewNewCQR(BaseSolver):
     use_numpy = True
     pd_scale = 1.0
 
+    # for implementation we're probably going with colamd
+    spqr_ordering = "AMD"
+
     def prepare_loop(self):
         """Define anything we need to re-use."""
 
@@ -46,7 +49,7 @@ class NewNewNewCQR(BaseSolver):
         else:
             matrix.indices = matrix.indices.astype(np.int32)
             matrix.indptr = matrix.indptr.astype(np.int32)
-            q, r, e = qr(matrix, ordering='AMD')
+            q, r, e = qr(matrix, ordering=self.spqr_ordering)
             shape1 = min(self.n, self.m)
             self.qr_matrix = sp.sparse.linalg.LinearOperator(
                 shape=(self.m, shape1),
@@ -459,10 +462,16 @@ class BroydenEqNNNCQR(EquilibratedNewNewNewCQR):
             result_dua += dy * new_dstep_component_reduced
 
         # final correction
-        result_pri -= mystep_pri
-        result_dua -= mystep_dua
+        fin_cor_pri, fin_cor_dua = self.final_correction(
+            mystep_pri, mystep_dua)
+        result_pri -= fin_cor_pri
+        result_dua -= fin_cor_dua
 
         return result_pri, result_dua
+
+    def final_correction(self, mystep_pri, mystep_dua):
+        """To be overridden using LSQR."""
+        return mystep_pri, mystep_dua
 
 class BroydenEqDecayNNNCQR(BroydenEqNNNCQR):
     """With PID decay.
@@ -491,6 +500,7 @@ class BroydenEqDecayNNNCQR(BroydenEqNNNCQR):
         control = self.Kp * error_t + self.Ki * integral_error + self.Kd * derivative_error
 
         if self.internal_verbose:
+            print("ITER", self.cur_iter, "PRIMAL RESIDUAL", self.pri_res_norm, "DUAL RESIDUAL", self.dua_res_norm)
             print("ITER", self.cur_iter, "ERROR", error_t, "INTEGRAL", integral_error, "DERIVATIVE", derivative_error, "CONTROL", control)
 
         new_scale = np.exp(control)
@@ -503,6 +513,23 @@ class BroydenEqDecayNNNCQR(BroydenEqNNNCQR):
 
         # this is probably not needed
         self.z[:] = self.y - self.s * new_scale
+
+class BroydenHugeEqDecayNNNCQR(BroydenEqDecayNNNCQR):
+    """Trying same with program_size huge.
+    
+    Takes forever but good news is that it doesn't seem to take many more
+    iterations than program_size normal (which is 10 times smaller). Tails of
+    the same order too. Found issues with pyspqr, which we probably won't use
+    at all even as temporary solution. Doing too many Ruiz iterations can also
+    give strange outliers. We should start to move to a more serious
+    implementation.
+    """
+    internal_verbose = True
+    use_numpy = True # pyspqr seems to give numerical instabilities sometimes
+    spqr_ordering = "COLAMD"
+    ruiz_col_limit = 1 # ran test with 0.001, some strange outliers
+    ruiz_row_limit = 1 # ran test with 0.001, some strange outliers
+    broyden_regularizer_floor = 1e-12
 
 class BroydenEqDecay2NNNCQR(BroydenEqDecayNNNCQR):
     """With stronger PID decay.
@@ -690,6 +717,31 @@ class BroydenEqBTmem20NNNCQR(BroydenEqBTNNNCQR):
     broyden_regularizer_floor = 1e-12
     internal_verbose = True
 
+class BroydenEqBTmem100NNNCQR(BroydenEqBTNNNCQR):
+    """Try with memory 100.
+    
+    Best tail on PPB so far, although the one with decay is not much little
+    worse. Less iters convergence on all, seems scheme is robust to increasing
+    Broyden memory.
+    """
+
+    memory = 100
+    internal_verbose = True
+
+class BroydenEqTest2mem20NNNCQR(BroydenEqNNNCQR):
+    """Other test with mem 20.
+
+    One weird instance of PPB, worse overall than previous.
+    """
+
+    memory = 20
+    broyden_regularizer_floor = 0.
+    broyden_regularizer_ceil = np.inf
+    broyden_regularizer_increment = (1/0.99)**2
+    broyden_regularizer_decrement = (1/1.001)**2
+    # broyden_regularizer_decrement = broyden_regularizer_increment**(-1./memory)
+    internal_verbose = False
+
 
 class BroydenEqNewBTNNNCQR(BroydenEqBTNNNCQR):
     """With back-tracking but still updating Broyden stores.
@@ -792,3 +844,65 @@ class BroydenEqNewBTNNNCQR(BroydenEqBTNNNCQR):
 
         # update z
         self.z[:] = (self.y - dua_br_step) - self.pd_scale * (self.s + pri_br_step)
+
+
+class BroydenEqLSQRNNNCQR(BroydenEqNNNCQR):
+    """Try again with LSQR."""
+
+    damp = 1e-8 # this should be equal to broyden regularizer
+    lsqr_iters = 10 # probably this should be cur_iter ?
+
+    # TEMPORARY; to re-write LSQR part using pri-dual
+
+    def multiply_cone_project_derivative(self, z, dz):
+        """Derivative projection on y cone."""
+
+        result = np.zeros_like(z)
+
+        # zero cone
+        result[:self.zero] = dz[:self.zero]
+        cur = self.zero
+
+        # nonneg cone
+        result[cur:cur+self.nonneg] = (
+            z[cur:cur+self.nonneg] > 0.) * dz[cur:cur+self.nonneg]
+        cur += self.nonneg
+
+        # soc cones
+        for soc_dim in self.soc:
+            result[cur:cur+soc_dim] = \
+                self.multiply_jacobian_second_order_project(
+                    z[cur:cur+soc_dim], dz[cur:cur+soc_dim])
+            cur += soc_dim
+        assert cur == self.m
+
+        return result
+
+    def linspace_project_derivative(self, dz):
+        """Derivative linspace project (y+s) -> y."""
+        return self.nullspace @ (self.nullspace.T @ dz)
+
+    def multiply_jacobian_dstep(self, z, dz):
+        """Multiply by Jacobian of DR step operator."""
+        # breakpoint()
+        tmp = self.multiply_cone_project_derivative(z, dz)
+        return self.linspace_project_derivative(2 * tmp - dz) - tmp
+
+    def multiply_jacobian_dstep_transpose(self, z, dr):
+        """Multiply by Jacobian of DR step operator transpose."""
+        tmp = self.linspace_project_derivative(dr)
+        return self.multiply_cone_project_derivative(z, 2 * tmp - dr) - tmp
+
+    def final_correction(self, mystep):
+        # we'll have to unpack the algorithm if we end up using it
+        result_lsqr = sp.sparse.linalg.lsqr(
+            sp.sparse.linalg.LinearOperator(
+                shape=(self.m, self.m),
+                matvec=lambda dz: self.multiply_jacobian_dstep(self.z, dz),
+                rmatvec=lambda dr: self.multiply_jacobian_dstep_transpose(
+                    self.z, dr)), -mystep,
+                    x0=mystep,
+                    damp=self.damp, # might make sense to change this?
+                    atol=0., btol=0., # might make sense to change this
+                    iter_lim=self.lsqr_iters)
+        return result_lsqr[0]
