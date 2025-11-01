@@ -22,33 +22,23 @@ Each method, which should be very small and simple, translates to a C function.
 Experiments (new features, ...) should be done as subclasses.
 """
 
-import logging
-
 # import cvxpy as cp
 import numpy as np
 import scipy as sp
 
-from .equilibrate import hsde_ruiz_equilibration #, new_equilibrate
+from .equilibrate import hsde_ruiz_equilibration
 # from .line_search import LineSearcher, LineSearchFailed
 
 from pyspqr import qr
 
-logger = logging.getLogger(__name__)
-
-class CQRFlow(Exception):
-    """Base exception used to control program flow."""
 
 class Unbounded(Exception):
     """Program unbounded."""
 
+
 class Infeasible(Exception):
     """Program infeasible."""
 
-class Solved(Exception):
-    """Solution found."""
-
-class CQRError(Exception):
-    """Base class for CQR error."""
 
 class Solver:
     """Solver class.
@@ -73,13 +63,7 @@ class Solver:
 
     def __init__(
             self, matrix, b, c, zero, nonneg, soc=(), x0=None, y0=None,
-            qr='PYSPQR',
-            ruiz_iters=5, # very unclear heavier equilibration helps
-            ruiz_norm=2, # very unclear np.inf is better
-            verbose=True,
-            lsqr_iters=2,
-            damp=1e-8, # in some corner cases with zero damp LSQR fails, change to CG
-            ):
+            qr='PYSPQR', verbose=True):
 
         # process program data
         self.matrix = sp.sparse.csc_matrix(matrix)
@@ -99,14 +83,6 @@ class Solver:
         assert qr in ['NUMPY', 'PYSPQR']
         self.qr = qr
         self.verbose = verbose
-        self.ruiz_iters = int(ruiz_iters)
-        assert self.ruiz_iters >= 0
-        self.ruiz_norm = ruiz_norm
-        assert self.ruiz_norm in [2, np.inf]
-        self.lsqr_iters = int(lsqr_iters)
-        assert self.lsqr_iters >= 0
-        self.damp = float(damp)
-        assert self.damp >= 0.
 
         if self.verbose:
             print(
@@ -124,8 +100,26 @@ class Solver:
         try:
             self._equilibrate()
             self._qr_transform_program_data()
-            self._create_linspace_shift()
-            self._new_cqr()
+            self._qr_transform_dual_space()
+            self._qr_transform_gap()
+
+            self.admm_intercept = self.admm_linspace_project(np.zeros(self.m*2))
+
+            #### self.toy_solve()
+            ##### self.x_transf, self.y = self.solve_program_cvxpy(
+            #####     self.matrix_qr_transf, b, self.c_qr_transf)
+
+            # self.new_toy_solve()
+            # self.var_reduced = self.toy_admm_solve(self.var_reduced)
+            # self.var_reduced = self.old_toy_douglas_rachford_solve(self.var_reduced)
+
+            # self.decide_solution_or_certificate()
+            # self.toy_douglas_rachford_solve()
+            self.new_toy_douglas_rachford_solve()
+            self.decide_solution_or_certificate()
+
+            self._invert_qr_transform_gap()
+            self._invert_qr_transform_dual_space()
             self._invert_qr_transform()
             self.status = 'Optimal'
         except Infeasible:
@@ -193,10 +187,8 @@ class Solver:
             self.matrix_ruiz_equil, self.b_ruiz_equil, self.c_ruiz_equil = \
             hsde_ruiz_equilibration(
                 self.matrix, self.b, self.c, dimensions={
-                    'zero': self.zero, 'nonneg': self.nonneg,
-                    'second_order': self.soc},
-                max_iters=self.ruiz_iters, l_norm=self.ruiz_norm, eps_cols=1e-5,
-                eps_rows=1e-5)
+                    'zero': self.zero, 'nonneg': self.nonneg, 'second_order': self.soc},
+                max_iters=5, l_norm=2, eps_cols=1e-12, eps_rows=1e-12)
 
         self.x_equil = self.equil_sigma * (self.x / self.equil_e)
         self.y_equil = self.equil_rho * (self.y / self.equil_d)
@@ -265,217 +257,6 @@ class Solver:
         result = self.backsolve_r(
             vector=self.x_transf, transpose=False)
         self.x_equil = result * self.sigma_qr
-
-    def _create_linspace_shift(self):
-        """Create shift vector for linspace project."""
-        self.linspace_project_shift = -self.nullspace_projector @ (
-            self.nullspace_projector.T @ self.b_qr_transf
-                ) - self.matrix_qr_transf @ self.c_qr_transf
-
-    def _stats_convergence(self):
-        """Evaluate statistics, determine convergence, write logs."""
-        self.y_equil[:] = self.dual_cone_project_basic(self.newcqr_z)
-        self.s_equil[:] = self.y_equil - self.newcqr_z
-        self.x_transf[:] = self.matrix_qr_transf.T @ (
-            self.b_qr_transf - self.s_equil)
-
-        eps_infeas = 1e-12
-        eps_unbound = 1e-12
-        eps_pri = 1e-12
-        eps_dua = 1e-12
-        eps_gap = 1e-12
-
-        # all metrics should be normalized using SCS paper formulas
-
-        # need to de-equilibrate this
-        primal_residual_equil = self.matrix_qr_transf @ self.x_transf - self.b_qr_transf + self.s_equil
-        # need to de-qr and de-equilibrate this
-        dual_residual_qr = self.matrix_qr_transf.T @ self.y_equil + self.c_qr_transf
-        # this one should be good to go
-        gap = self.c_qr_transf @ self.x_transf + self.b_qr_transf @ self.y_equil
-
-        # unbounded
-        x_cert = (self.matrix_qr_transf.T @ self.step)
-        # de-equil
-        s_cert = -self.matrix_qr_transf @ x_cert
-        unbound_err = np.linalg.norm(self.cone_project(s_cert) - s_cert)
-        # should be good
-        unbound_gap = self.c_qr_transf.T @ x_cert
-
-        # infeasible
-        y_cert = self.step
-        # de-qr and de-equil
-        infeas_err_1 = np.linalg.norm(self.matrix_qr_transf.T @ y_cert)
-        # de-equil
-        infeas_err_2 = np.linalg.norm(self.dual_cone_project_basic(y_cert) - y_cert)
-        # should be good
-        infeas_gap = self.b_qr_transf.T @ y_cert
-
-        logger.info(
-            "it=%5d pri=%.2e dua=%.2e  gap=%.2e; inf=(%.1e, %.1e, %.1e), unb=(%.1e, %.1e)",
-            self.iter, np.linalg.norm(primal_residual_equil),
-            np.linalg.norm(dual_residual_qr), gap,
-            infeas_err_1, infeas_err_2, infeas_gap,
-            unbound_err, unbound_gap,
-        )
-
-        if np.abs(gap) < eps_gap and np.linalg.norm(primal_residual_equil) < eps_pri and np.linalg.norm(dual_residual_qr) < eps_dua:
-            raise Solved()
-
-        if infeas_gap < 0 and (infeas_err_1 / (-infeas_gap) < eps_infeas) and (infeas_err_2 / (-infeas_gap) < eps_infeas):
-            self.x_transf[:] = x_cert
-            self.y_equil[:] = y_cert
-            raise Infeasible()
-
-        if unbound_gap < 0 and (unbound_err / (-unbound_gap) < eps_unbound):
-            self.x_transf[:] = x_cert
-            self.y_equil[:] = y_cert
-            raise Unbounded()
-
-    def multiply_cone_project_derivative(self, z, dz):
-        """Derivative projection on y cone."""
-
-        result = np.zeros_like(z)
-
-        # zero cone
-        result[:self.zero] = dz[:self.zero]
-        cur = self.zero
-
-        # nonneg cone
-        result[cur:cur+self.nonneg] = (
-            z[cur:cur+self.nonneg] > 0.) * dz[cur:cur+self.nonneg]
-        cur += self.nonneg
-
-        # soc cones
-        for soc_dim in self.soc:
-            result[cur:cur+soc_dim] = \
-                self.multiply_jacobian_second_order_project(
-                    z[cur:cur+soc_dim], dz[cur:cur+soc_dim])
-            cur += soc_dim
-        assert cur == self.m
-
-        return result
-
-    def linspace_project_derivative(self, dz):
-        """Derivative linspace project (y+s) -> y."""
-        return self.nullspace_projector @ (self.nullspace_projector.T @ dz)
-
-    def multiply_jacobian_dstep(self, z, dz):
-        """Multiply by Jacobian of DR step operator."""
-        # breakpoint()
-        tmp = self.multiply_cone_project_derivative(z, dz)
-        return self.linspace_project_derivative(2 * tmp - dz) - tmp
-
-    def multiply_jacobian_dstep_transpose(self, z, dr):
-        """Multiply by Jacobian of DR step operator transpose."""
-        tmp = self.linspace_project_derivative(dr)
-        return self.multiply_cone_project_derivative(z, 2 * tmp - dr) - tmp
-
-    def _new_cqr(self, max_iter=int(1e5), eps=1e-12):
-        """Main ADMM iterations."""
-        # this should come down from equil instead?
-        self.s_equil = self.b_qr_transf - (
-            self.matrix_qr_transf @ self.x_transf)
-        self.newcqr_z = self.y_equil - self.s_equil
-        self.step = np.zeros_like(self.newcqr_z)
-
-        losses = []
-
-        for self.iter in range(max_iter):
-            self.y_equil[:] = self.dual_cone_project_basic(self.newcqr_z)
-
-            if self.iter % 100 == 0:
-                try:
-                    self._stats_convergence()
-                except Solved:
-                    break
-
-            self.step[:] = self.nullspace_projector @ (self.nullspace_projector.T @ (
-                    2 * self.y_equil - self.newcqr_z))
-            self.step[:] += self.linspace_project_shift
-            self.step[:] -= self.y_equil
-            losses.append(np.linalg.norm(self.step))
-
-            if (self.lsqr_iters) > 0 and (self.lsqr_iters < self.iter):
-                result = sp.sparse.linalg.lsqr(
-                    sp.sparse.linalg.LinearOperator(
-                        shape=(self.m, self.m),
-                        matvec=lambda dz: self.multiply_jacobian_dstep(self.newcqr_z, dz),
-                        rmatvec=lambda dr: self.multiply_jacobian_dstep_transpose(
-                            self.newcqr_z, dr)), -np.copy(self.step),
-                            x0=np.copy(self.step),
-                            damp=self.damp, # might make sense to change this?
-                            atol=0., btol=0., # might make sense to change this
-                            iter_lim=self.lsqr_iters)
-                self.newcqr_z[:] += result[0]
-            else:
-                self.newcqr_z[:] += self.step
-
-            if losses[-1] < eps:
-                break
-
-        self.y_equil[:] = self.dual_cone_project_basic(self.newcqr_z)
-        self.s_equil[:] = self.y_equil - self.newcqr_z
-        self.x_transf[:] = self.matrix_qr_transf.T @ (
-            self.b_qr_transf - self.s_equil)
-
-        gap = self.c_qr_transf @ self.x_transf + self.b_qr_transf @ self.y_equil
-        print('gap', gap)
-
-        # TODO: this is the "inaccurate" part; we should decide which mode
-        # is better to return
-        if not np.isclose(gap, 0.):
-            ## UNBOUNDED
-            self.x_transf[:] = (self.matrix_qr_transf.T @ self.step)
-
-            ## INFEASIBLE
-            self.y_equil[:] = self.step
-
-            if self.c_qr_transf @ self.x_transf < -1e-8:
-                raise Unbounded()
-            if self.b_qr_transf @ self.y_equil < -1e-8:
-                raise Infeasible()
-
-    @staticmethod
-    def multiply_jacobian_second_order_project(z, dz):
-        """Multiply by Jacobian of projection on second-order cone.
-
-        We follow the derivation in `Solution Refinement at Regular Points of
-        Conic Problems
-        <https://stanford.edu/~boyd/papers/pdf/cone_prog_refine.pdf>`_.
-
-        :param z: Point at which the Jacobian is computed.
-        :type z: np.array
-        :param dz: Input array.
-        :type dz: np.array
-
-        :return: Multiplication of dz by the Jacobian
-        :rtype: np.array
-        """
-
-        assert len(z) >= 2
-        assert len(z) == len(dz)
-        result = np.zeros_like(z)
-
-        x, t = z[1:], z[0]
-
-        norm_x = np.linalg.norm(x)
-
-        if norm_x <= t:
-            result[:] = dz
-            return result
-
-        if norm_x <= -t:
-            return result
-
-        dx, dt = dz[1:], dz[0]
-
-        result[0] = norm_x * dt + x.T @ dx
-        result[1:] = x * dt + (t + norm_x) * dx - t * x * (
-            x.T @ dx) / (norm_x**2)
-        return result / (2 * norm_x)
-
-    # TODO: From here down it's probably all to throw
 
     def _qr_transform_dual_space(self):
         """Apply QR transformation to dual space."""

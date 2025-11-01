@@ -1,0 +1,1729 @@
+# Copyright 2024 Enzo Busseti
+#
+# This file is part of CQR, the Conic QR Solver.
+#
+# CQR is free software: you can redistribute it and/or modify it under the
+# terms of the GNU General Public License as published by the Free Software
+# Foundation, either version 3 of the License, or (at your option) any later
+# version.
+#
+# CQR is distributed in the hope that it will be useful, but WITHOUT ANY
+# WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
+# A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License along with
+# CQR. If not, see <https://www.gnu.org/licenses/>.
+"""Branch off new_cqr module, to iron out a few more choices.
+
+Minor code fixes here and there to simplify something.
+"""
+
+import numpy as np
+import scipy as sp
+from ..base_solver import BaseSolver
+from pyspqr import qr
+
+
+def _cg(A, b, x0, maxiter, callback=None):
+    bnrm2 = np.linalg.norm(b)
+
+    x = np.copy(x0)
+    if bnrm2 == 0:
+        return b, 0
+
+    r = b - A @ x
+
+    # Dummy value to initialize var, silences warnings
+    rho_prev, p = None, None
+
+    for iteration in range(maxiter):
+
+        z = r
+        rho_cur = np.dot(r, z)
+        if iteration > 0:
+            beta = rho_cur / rho_prev
+            p *= beta
+            p += z
+        else:  # First spin
+            p = np.empty_like(r)
+            p[:] = z[:]
+
+        q = A @ p
+        alpha = rho_cur / np.dot(p, q)
+        x += alpha*p
+        r -= alpha*q
+        rho_prev = rho_cur
+
+        if callback:
+            try:
+                callback(x)
+            except StopIteration:
+                return x, iteration
+
+    else:  # for loop exhausted
+        # Return incomplete progress
+        return x, maxiter
+
+
+class NewNewCQR(BaseSolver):
+    """New idea for base CQR formulation."""
+
+    max_iterations = 100000
+
+    used_matrix = "matrix"
+    used_b = "b"
+    used_c = "c"
+    use_numpy = True
+    pd_scale = 1.0
+
+    def change_scale(self, newscale):
+        print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {newscale}")
+        y = self.cone_project(self.z)
+        s = y - self.z
+        s /= self.pd_scale
+        self.pd_scale = newscale
+        s *= self.pd_scale
+        self.z[:] = y - s
+        self.e = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+    def prepare_loop(self):
+        """Define anything we need to re-use."""
+
+        matrix = getattr(self, self.used_matrix)
+
+        if self.use_numpy:
+            q, r = np.linalg.qr(
+                getattr(self, self.used_matrix).todense(), mode='complete')
+            self.qr_matrix = q[:, :self.n].A
+            self.nullspace = q[:, self.n:].A
+            self.triangular = r[:self.n].A
+        else:
+            matrix.indices = matrix.indices.astype(np.int32)
+            matrix.indptr = matrix.indptr.astype(np.int32)
+            q, r, e = qr(matrix, ordering='AMD')
+            shape1 = min(self.n, self.m)
+            self.qr_matrix = sp.sparse.linalg.LinearOperator(
+                shape=(self.m, shape1),
+                matvec=lambda x: q @ np.concatenate([x, np.zeros(self.m-shape1)]),
+                rmatvec=lambda y: (
+                    q.T @ np.array(y, copy=True).reshape(y.size))[:shape1],
+            )
+            shape2 = max(self.m - self.n, 0)
+            self.nullspace = sp.sparse.linalg.LinearOperator(
+                shape=(self.m, shape2),
+                matvec=lambda x: q @ np.concatenate([np.zeros(self.m-shape2), x]),
+                rmatvec=lambda y: (
+                    q.T @ np.array(y, copy=True).reshape(y.size))[self.m-shape2:]
+            )
+            self.pyspqr_r = r[:self.n]
+            self.pyspqr_e = e
+
+        if self.use_numpy:
+            self.c_qr = sp.linalg.solve_triangular(
+                self.triangular.T, getattr(self, self.used_c), lower=True)
+        else:
+            self.c_qr = sp.sparse.linalg.spsolve_triangular(
+                self.pyspqr_r.T, self.pyspqr_e @ getattr(
+                    self, self.used_c), lower=True)
+
+        # shift in the linspace projector
+        self.e = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+        self.z = np.zeros(self.m)
+        self.y = np.zeros(self.m)
+        self.s = np.zeros(self.m)
+        self.x = np.zeros(self.n)
+
+        self.nonneg_activity = np.empty(self.nonneg, dtype=bool)
+        self.old_nonneg_activity = np.empty(self.nonneg, dtype=bool)
+        self.soc_activity = np.empty(len(self.soc), dtype=int)
+        self.old_soc_activity = np.empty(len(self.soc), dtype=int)
+
+        self.pri_res_norms = []
+        self.dua_res_norms = []
+        self.pd_scales = []
+        self.exponents = []
+
+    def cone_project(self, z):
+        """Project on y cone."""
+        return self.composed_cone_project(
+            z, has_zero=False, has_free=True, has_hsde=False)
+
+    def linspace_project(self, y_plus_s):
+        """Linspace project (y+s) -> y."""
+        return self.nullspace @ (self.nullspace.T @ y_plus_s) + self.e
+
+    def linspace_project_basic(self, y_plus_s):
+        """Linspace project (y+s) -> y, w/out shift."""
+        return y_plus_s - self.qr_matrix @ (self.qr_matrix.T @ y_plus_s)
+
+    def compute_pridual_step(self, z):
+        """Compute primal dual things, all descaled; steps are the residuals.
+        
+        So, in basic DR
+        newz = y + dua_step + pd_scale * (-s + pri_step)
+        
+        """
+        y = self.cone_project(z)
+        s = y - z
+        s /= self.pd_scale
+        # step = dr_step(z)
+        # pri_step = self.nullspace @ self.nullspace.T @ step
+        # dua_step = self.qr_matrix @ self.qr_matrix.T @ step = step - pri_step
+        # step = self.nullspace @ (self.nullspace.T @ y) + self.nullspace @ (self.nullspace.T @ s) - y - (self.nullspace @ self.nullspace.T @ getattr(
+        #    self, self.used_b)) - self.qr_matrix @ self.c_qr
+        # step = self.nullspace @ (self.nullspace.T @ (y + s - getattr(self, self.used_b))) - y - self.qr_matrix @ self.c_qr
+        pri_step = self.nullspace @ (self.nullspace.T @ (s - getattr(self, self.used_b)))
+        dua_step = -self.qr_matrix @ (self.qr_matrix.T @ y + self.c_qr)
+        assert np.allclose(self.pd_scale * pri_step + dua_step, self.dr_step(z))
+        return s, y, pri_step, dua_step
+
+    def dr_step(self, z):
+        """DR step."""
+        y = self.cone_project(z)
+        return self.linspace_project_basic(2 * y - z) - y + self.e
+
+    def iterate(self):
+        """Simple Douglas Rachford iteration."""
+        self.y[:] = self.cone_project(self.z)
+        step = self.linspace_project_basic(2 * self.y - self.z) - self.y + self.e
+        # print(np.linalg.norm(step))
+        self.z[:] = self.z + step
+        breakpoint()
+
+    def obtain_x_and_y(self):
+        """Redefine if/as needed."""
+        self.y[:] = self.cone_project(self.z)
+        self.s[:] = (self.y - self.z) / self.pd_scale
+        x_qr = self.qr_matrix.T @ (getattr(self, self.used_b) - self.s)
+        if self.use_numpy:
+            self.x[:] = sp.linalg.solve_triangular(self.triangular, x_qr, lower=False)
+        else:
+            self.x[:] = self.pyspqr_e.T @ sp.sparse.linalg.spsolve_triangular(
+                self.pyspqr_r, x_qr, lower=False)
+
+    def compute_nonneg_activity(self, z):
+        """Compute activity (bool) of nonneg cones."""
+        return z[self.zero: self.zero+self.nonneg] > 0
+
+    def compute_soc_activity(self, z):
+        """Compute activity (-1, 0, 1) of soc cones."""
+        result = np.empty(len(self.soc), dtype=int)
+        cur = self.zero + self.nonneg
+        for index, soc_size in enumerate(self.soc):
+            z_cone = z[cur:cur+soc_size]
+            t, x = z_cone[0], z_cone[1:]
+            nrm = np.linalg.norm(x)
+            if t > nrm:
+                result[index] = 1
+            elif t < -nrm:
+                result[index] = -1
+            else:
+                result[index] = 0
+            cur += soc_size
+        assert cur == self.m
+        return result
+
+    def reset_pd_stores(self):
+        """Reset stores used to choose pd scale."""
+        self.pri_res_norms = []
+        self.dua_res_norms = []
+        self.pd_scales = []
+        self.exponents = []
+
+    def multiply_cone_project_derivative(self, z, dz):
+        """Derivative projection on y cone."""
+
+        result = np.zeros_like(z)
+
+        # zero cone
+        result[:self.zero] = dz[:self.zero]
+        cur = self.zero
+
+        # nonneg cone
+        result[cur:cur+self.nonneg] = (
+            z[cur:cur+self.nonneg] > 0.) * dz[cur:cur+self.nonneg]
+        cur += self.nonneg
+
+        # soc cones
+        for soc_dim in self.soc:
+            result[cur:cur+soc_dim] = \
+                self.multiply_jacobian_second_order_project(
+                    z[cur:cur+soc_dim], dz[cur:cur+soc_dim])
+            cur += soc_dim
+        assert cur == self.m
+
+        return result
+
+    def linspace_project_derivative(self, dz):
+        """Derivative linspace project (y+s) -> y."""
+        return self.nullspace @ (self.nullspace.T @ dz)
+
+    def multiply_jacobian_dstep(self, z, dz):
+        """Multiply by Jacobian of DR step operator."""
+        # breakpoint()
+        tmp = self.multiply_cone_project_derivative(z, dz)
+        return self.linspace_project_derivative(2 * tmp - dz) - tmp
+
+    def multiply_jacobian_dstep_transpose(self, z, dr):
+        """Multiply by Jacobian of DR step operator transpose."""
+        tmp = self.linspace_project_derivative(dr)
+        return self.multiply_cone_project_derivative(z, 2 * tmp - dr) - tmp
+
+class EquilibratedNewNewCQR(NewNewCQR):
+    """With Ruiz equilibration."""
+
+    # max_iterations = 1000
+
+    used_matrix = "eq_matrix"
+    used_b = "eq_b"
+    used_c = "eq_c"
+    ruiz_max_rounds = 100
+    ruiz_col_limit = 0.1 # converge if max norms cols <= 1.1 min norms cols
+    ruiz_row_limit = 0.1 # converge if max norms rows <= 1.1 min norms rows
+    ruiz_norm = 2
+    do_soc_equalization = True
+    internal_verbose = True
+
+    def prepare_loop(self):
+        """Do Ruiz equilibration."""
+
+        matrix = self.matrix.todense()
+        concatenated = np.block(
+            [[matrix, self.b.reshape(self.m, 1)],
+            [self.c.reshape(1, self.n), np.zeros((1, 1))]])
+        if hasattr(concatenated, "A"):
+            concatenated = concatenated.A
+        work_matrix = np.copy(concatenated)
+
+        def norm_cols(concatenated):
+            if self.ruiz_norm == np.inf:
+                return np.max(np.abs(concatenated), axis=0)
+            if self.ruiz_norm == 2:
+                return np.linalg.norm(concatenated, axis=0)
+
+        def norm_rows(concatenated):
+            if self.ruiz_norm == np.inf:
+                return np.max(np.abs(concatenated), axis=1)
+            if self.ruiz_norm == 2:
+                return np.linalg.norm(concatenated, axis=1)
+
+        m, n = matrix.shape
+
+        d_and_rho = np.ones(m+1)
+        e_and_sigma = np.ones(n+1)
+
+        for _ in range(self.ruiz_max_rounds):
+
+            nr = norm_rows(work_matrix)
+            nc = norm_cols(work_matrix)
+
+            # equalize nr for SOCs
+            cur = self.zero + self.nonneg
+            for soc_dim in self.soc:
+                if self.do_soc_equalization:
+                    if self.ruiz_norm == np.inf:
+                        nr[cur:cur+soc_dim] = np.max(nr[cur:cur+soc_dim])
+                    elif self.ruiz_norm == 2:
+                        nr[cur:cur+soc_dim] = np.sqrt(
+                            np.mean(nr[cur:cur+soc_dim]**2))
+                    else:
+                        raise SyntaxError
+                cur += soc_dim
+
+            r1 = max(nr[nr > 0]) / min(nr[nr > 0])
+            r2 = max(nc[nc > 0]) / min(nc[nc > 0])
+            print(r1, r2)
+            if (r1-1 < self.ruiz_row_limit) and (r2-1 < self.ruiz_col_limit):
+                break
+            d_and_rho[nr > 0] *= nr[nr > 0]**(-0.5)
+            e_and_sigma[nc > 0] *= ((m+1)/(n+1))**(1./(2 * self.ruiz_norm)) * nc[nc > 0]**(-0.5)
+
+            work_matrix = ((concatenated * e_and_sigma).T * d_and_rho).T
+
+        self.equil_e = e_and_sigma[:-1]
+        self.equil_d = d_and_rho[:-1]
+        self.equil_sigma = e_and_sigma[-1]
+        self.equil_rho = d_and_rho[-1]
+
+        self.eq_matrix = sp.sparse.csc_matrix(work_matrix[:-1, :-1])
+        self.eq_b = work_matrix[:-1, -1]
+        self.eq_c = work_matrix[-1, :-1]
+        super().prepare_loop()
+
+    def obtain_x_and_y(self):
+        """Redefine if/as needed."""
+        super().obtain_x_and_y()
+        self.x = (self.equil_e * self.x) / self.equil_sigma
+        self.y = (self.equil_d * self.y) / self.equil_rho
+
+
+class LevMarNNCQR(EquilibratedNewNewCQR):
+    """Add basic Levemberg-Marquardt logic.
+    
+    Turns out breaking loop with AS changes is bad idea.
+    """
+
+    lsqr_iters = 5
+    max_iterations = 100000//(2 * lsqr_iters + 2)
+    damp = 1e-8
+
+    def prepare_loop(self):
+        """Create storage arrays."""
+        super().prepare_loop()
+        self.step = np.empty(self.m, dtype=float)
+        self.pri_res = np.empty(self.m, dtype=float)
+        self.dua_res = np.empty(self.m, dtype=float)
+
+    def test1_cg_operator(self, z, dz):
+        """Using pieces above."""
+        dr = self.multiply_jacobian_dstep(z, dz)
+        return self.multiply_jacobian_dstep_transpose(z, dr)
+
+    def iterate(self):
+        """Simple Lev Mar DR iterate
+        """
+
+        # compute active set; will be factored in projection logic itself
+        # will only need one storage each; probably soc works with just 1 bit
+        self.old_nonneg_activity[:] = self.compute_nonneg_activity(self.z)
+        self.old_soc_activity[:] = self.compute_soc_activity(self.z)
+        # if cur_iter > 0:
+        #     if (np.all(self.nonneg_activity == self.old_nonneg_activity)
+        #             and np.all(self.soc_activity == self.soc_activity)):
+        #         active_set_changed = False
+        #     else:
+        #         active_set_changed = True
+        #     self.old_nonneg_activity[:] = self.nonneg_activity
+        #     self.old_soc_activity[:] = self.soc_activity
+
+        # compute DR step
+        self.s[:], self.y[:], self.pri_res[:], self.dua_res[:] = self.compute_pridual_step(self.z)
+
+        # HERE THE LOGIC TO UPDATE THE SCALE
+        # we store the primal and dual res norms
+        self.pri_res_norms.append(float(np.linalg.norm(self.pri_res)))
+        self.dua_res_norms.append(float(np.linalg.norm(self.dua_res)))
+
+        # we choose the scale
+        new_scale = self.choose_pd_scale()
+
+        # and update
+        self.base_update_pd_scale(new_scale)
+
+        # we append the primal dual scale chosen
+        self.pd_scales.append(float(self.pd_scale))
+
+        # base DR step
+        step = self.pd_scale * self.pri_res + self.dua_res
+        assert np.allclose(self.dr_step(self.z), step)
+
+        # breakpoint()
+        # print(np.linalg.norm(step))
+
+        # we'll have to unpack the algorithm if we end up using it
+        # result_lsqr = sp.sparse.linalg.lsqr(
+        #     sp.sparse.linalg.LinearOperator(
+        #         shape=(self.m, self.m),
+        #         matvec=lambda dz: self.multiply_jacobian_dstep(self.z, dz),
+        #         rmatvec=lambda dr: self.multiply_jacobian_dstep_transpose(
+        #             self.z, dr)), -step,
+        #             x0=step,
+        #             damp=self.damp, # might make sense to change this?
+        #             atol=0., btol=0., # might make sense to change this
+        #             iter_lim=self.lsqr_iters)
+
+        # without any touches CG seems slightly worse than LSQR
+        cg_linop = sp.sparse.linalg.LinearOperator(
+                shape=(self.m, self.m),
+                matvec=lambda dz: self.test1_cg_operator(self.z, dz)
+                    + self.damp**2 * dz)
+        cg_rhs = self.multiply_jacobian_dstep_transpose(self.z, step)
+
+        def _break_if_as_change(z_iter):
+            self.nonneg_activity[:] = self.compute_nonneg_activity(z_iter)
+            self.soc_activity[:] = self.compute_soc_activity(z_iter)
+            if not (np.all(self.nonneg_activity == self.old_nonneg_activity)
+                    and np.all(self.soc_activity == self.soc_activity)):
+                print('BREAKING B/C AS CHANGE')
+                raise StopIteration
+
+        # break already if the AS changes with x0
+        try:
+            _break_if_as_change(self.z + step)
+        except StopIteration:
+            print('BREAKING BEFORE LM STEP')
+            self.z[:] = self.z + step
+            return
+
+        result_cg = _cg(
+            cg_linop, -cg_rhs, x0=step,
+            # atol=0., rtol=0.,
+            maxiter=self.lsqr_iters,
+            callback=_break_if_as_change
+            )
+
+        # assert np.allclose(result_cg[0], result_lsqr[0])
+        # breakpoint()
+        # print(result[1:-1])
+        self.z[:] = self.z + result_cg[0]
+
+    def choose_pd_scale(self):
+        """To override, choose scaling."""
+        return (self.pri_res_norms[-1] / self.dua_res_norms[-1])**.5
+
+    def base_update_pd_scale(self, new_scale):
+        cur_iter = len(self.solution_qualities)
+        print(
+            "ITER", cur_iter, "PRIMAL RESIDUAL",
+            self.pri_res_norms[-1], "DUAL RESIDUAL", self.dua_res_norms[-1],
+            f"CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+
+class BroydenEqNNCQR(EquilibratedNewNewCQR):
+    """Add basic Broyden logic."""
+
+    memory = 50
+    max_iterations = 100_000
+    acceleration_cap = 100
+    reset_on_as_change = True
+    pd_store_reset_on_as_change = True
+    wrong_position = True
+
+    def prepare_loop(self):
+        """Create storage arrays."""
+        super().prepare_loop()
+        self.dys = np.empty((self.memory, self.m), dtype=float)
+        self.dss = np.empty((self.memory, self.m), dtype=float)
+        # self.dzs_norms = np.empty(self.memory, dtype=float)
+        self.dpriress = np.empty((self.memory, self.m), dtype=float)
+        self.dduaress = np.empty((self.memory, self.m), dtype=float)
+        # self.dsteps_norms = np.empty(self.memory, dtype=float)
+        self.old_y = np.empty(self.m, dtype=float)
+        self.old_s = np.empty(self.m, dtype=float)
+        self.old_prires = np.empty(self.m, dtype=float)
+        self.old_duares = np.empty(self.m, dtype=float)
+        self.step = np.empty(self.m, dtype=float)
+        self.pri_res = np.empty(self.m, dtype=float)
+        self.dua_res = np.empty(self.m, dtype=float)
+        self.as_changed = np.empty(self.m, dtype=bool)
+        self.used_memory = 0
+        self.nonneg_activity = np.empty(self.nonneg, dtype=bool)
+        self.old_nonneg_activity = np.empty(self.nonneg, dtype=bool)
+        self.soc_activity = np.empty(len(self.soc), dtype=int)
+        self.old_soc_activity = np.empty(len(self.soc), dtype=int)
+        self.pri_res_norms = []
+        self.dua_res_norms = []
+        self.pd_scales = []
+        self.exponents = []
+
+    def iterate(self):
+        """Simple Douglas Rachford iteration with Broyden update to override.
+        """
+
+        # if self.memory == 0: # fall back to non-broyden logic
+        #     super().iterate()
+        #     return
+
+        cur_iter = len(self.solution_qualities)
+        cur_index = cur_iter % self.memory
+
+        # compute active set; will be factored in projection logic itself
+        # will only need one storage each; probably soc works with just 1 bit
+        self.nonneg_activity = self.compute_nonneg_activity(self.z)
+        self.soc_activity = self.compute_soc_activity(self.z)
+        if cur_iter > 1:
+            if (np.all(self.nonneg_activity == self.old_nonneg_activity)
+                    and np.all(self.soc_activity == self.soc_activity)):
+                active_set_changed = False
+            else:
+                active_set_changed = True
+            self.old_nonneg_activity[:] = self.nonneg_activity
+            self.old_soc_activity[:] = self.soc_activity
+
+        # compute DR step
+        # self.y[:] = self.cone_project(self.z)
+        # step_base = self.linspace_project_basic(2 * self.y - self.z) - self.y
+        # self.step[:] = step_base + self.e
+        self.s[:], self.y[:], self.pri_res[:], self.dua_res[:] = self.compute_pridual_step(self.z)
+
+        if self.wrong_position:
+            # HERE THE LOGIC TO UPDATE THE SCALE - is here by mistake should have been after the reset
+            # we store the primal and dual res norms
+            self.pri_res_norms.append(float(np.linalg.norm(self.pri_res)))
+            self.dua_res_norms.append(float(np.linalg.norm(self.dua_res)))
+            # we choose the scale
+            # we append to self.exponents inside this for now...
+            self.update_pd_scale() # change z in place
+            # and the primal dual scale chosen
+            self.pd_scales.append(float(self.pd_scale))
+
+        # update Broyden stores
+        if cur_iter > 1:
+            self.dys[cur_index] = self.y - self.old_y
+            self.dss[cur_index] = self.s - self.old_s
+            self.dpriress[cur_index] = self.pri_res - self.old_prires
+            self.dduaress[cur_index] = self.dua_res - self.old_duares
+            self.as_changed[cur_index] = active_set_changed
+            self.used_memory = min(self.used_memory + 1, self.memory)
+            # self.dzs_norms[cur_index] = np.linalg.norm(self.dzs[cur_index])
+        self.old_y[:] = self.y
+        self.old_s[:] = self.s
+        self.old_prires[:] = self.pri_res
+        self.old_duares[:] = self.dua_res
+
+        # # update dstep
+        # if cur_iter > 0:
+        #     self.dsteps[cur_index] = self.step - self.old_step
+        #     # self.dsteps_norms[cur_index] = np.linalg.norm(
+        #     #     self.dsteps[cur_index])
+        # self.old_step[:] = self.step
+
+        if cur_iter > 1 and active_set_changed and self.reset_on_as_change: # we could have skipped saving them...
+            if self.internal_verbose:
+                print(f'ITER {cur_iter} SETTING USED_MEMORY TO ZERO B/C ACTIVITY CHANGE')
+            self.used_memory = 0
+            # reset stores used to choose scale
+        if cur_iter > 1 and active_set_changed and self.pd_store_reset_on_as_change:
+            print(f'ITER {cur_iter} SETTING PD STORES TO ZERO B/C ACTIVITY CHANGE')
+            self.reset_pd_stores()
+
+        if not self.wrong_position:
+            # HERE THE LOGIC TO UPDATE THE SCALE - is here by mistake should have been after the reset
+            # we store the primal and dual res norms
+            self.pri_res_norms.append(float(np.linalg.norm(self.pri_res)))
+            self.dua_res_norms.append(float(np.linalg.norm(self.dua_res)))
+            # we choose the scale
+            # we append to self.exponents inside this for now...
+            self.update_pd_scale() # change z in place
+            # and the primal dual scale chosen
+            self.pd_scales.append(float(self.pd_scale))
+
+        # update with Broyden step
+        br_step = self.compute_broyden_step()
+        if np.all(np.abs(br_step) < 1e-16):
+            breakpoint()
+        if np.any(np.isnan(br_step)):
+            breakpoint()
+        self.z[:] = self.z[:] - br_step
+
+    def reset_pd_stores(self):
+        """Reset stores used to choose pd scale."""
+        self.pri_res_norms = []
+        self.dua_res_norms = []
+        self.pd_scales = []
+        self.exponents = []
+
+    def update_pd_scale(self):
+        cur_iter = len(self.solution_qualities)
+        print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+        # if np.abs(np.log10(np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res)) > 3):
+        #     breakpoint()
+
+        # very simple logic, to start
+        new_scale = (np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**.5
+
+        print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+    def serve_broyden_elements(self, also_as_change=False):
+        """Serve pieces used for Broyden loop."""
+
+        cur_iter = len(self.solution_qualities)
+        cur_index = cur_iter % self.memory
+
+        for back_index in range(self.used_memory):
+            index = (cur_index - back_index) % self.memory
+            if also_as_change:
+                yield (
+                    self.dss[index],
+                    self.dys[index],
+                    self.dpriress[index],
+                    self.dduaress[index],
+                    self.as_changed[index],
+                    )
+            else:
+                yield (
+                    self.dss[index],
+                    self.dys[index],
+                    self.dpriress[index],
+                    self.dduaress[index],
+                    )
+
+    def compute_broyden_step(self):
+        """Base method to compute a Broyden-style approximate Newton step."""
+        mystep = self.pd_scale * self.pri_res + self.dua_res
+        result = np.zeros_like(mystep)
+
+        # this should be correct
+        for _, (ds, dy, dprires, dduares) in enumerate(
+            self.serve_broyden_elements()):
+
+            dz = dy - self.pd_scale * ds
+            dstep = self.pd_scale * dprires + dduares
+
+            dz_norm = np.linalg.norm(dz)
+            dstep_norm = np.linalg.norm(dstep)
+
+            # correction by current index
+            dstep_normed = dstep / dstep_norm
+            dz_snormed = dz / dstep_norm
+            acceleration = dz_norm / dstep_norm
+
+            # we cap the acceleration
+            if acceleration > self.acceleration_cap:
+                reduction_factor = acceleration / self.acceleration_cap
+            else:
+                reduction_factor = 1.
+
+            dstep_component_reduced = (mystep @ dstep_normed) / reduction_factor
+            mystep -= dstep_normed * dstep_component_reduced
+            result +=  (dz_snormed * dstep_component_reduced)
+
+        # final correction
+        result -= mystep
+
+        return result
+
+class BroydenAdaScaleEqNNCQR(BroydenEqNNCQR):
+    """Experiment on adaptive scale choice.
+    
+    Close to best test so far, Oct 15; improves the tails but can be further
+    improved.
+    """
+    base_exponent = 0
+    window = 100
+
+    def update_pd_scale(self):
+        cur_iter = len(self.solution_qualities)
+        print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+        # if np.abs(np.log10(np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res)) > 3):
+        #     breakpoint()
+
+        # count how many recent iters we've had same diff sign
+        diffnorms = np.array(self.pri_res_norms) - np.array(self.dua_res_norms)
+        last_diff_sign = np.sign(diffnorms[-1])
+        same_sign = np.sign(diffnorms) == last_diff_sign
+        iters_same_sign = np.argmin(same_sign[::-1])
+        if iters_same_sign == 0:
+            iters_same_sign = len(same_sign)
+
+        # if len(self.pd_scales)>10:
+        #     breakpoint()
+
+        exponent = self.base_exponent + np.tanh(iters_same_sign/self.window) * (1 - self.base_exponent)
+
+        # very simple logic, to start
+        new_scale = (np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**exponent
+
+        print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+    # def update_pd_scale(self):
+    #     cur_iter = len(self.solution_qualities)
+    #     print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+    #     # if np.abs(np.log10(np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res)) > 3):
+    #     #     breakpoint()
+
+    #     if len(self.pd_scales) > 10:
+
+    #         data = np.vstack([
+    #             np.log(self.pri_res_norms),
+    #             np.log(self.dua_res_norms)])
+    #         data = data.T - np.mean(data, axis=1)
+    #         data = data.T
+    #         data = data.T / np.std(data, axis=1)
+    #         data = data.T
+    #         X = data[:, :-1]
+    #         X = np.vstack([X, np.log(self.pd_scales)])
+    #         Y = data[:, 1:]
+    #         X = X.T
+    #         Y = Y.T
+    #         # learn linear rule b/w X and Y
+    #         beta = np.linalg.solve(X.T @ X, X.T @ Y)
+    #         import cvxpy as cp
+    #         log_scale = cp.Variable()
+    #         expected_prires = cp.hstack([Y[-1], log_scale]) @ beta[:,0]
+    #         expected_duares = cp.hstack([Y[-1], log_scale]) @ beta[:,1]
+    #         # breakpoint()
+    #         bounds = [np.log((np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))), np.log((np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**.25)]
+    #         print('BOUNDS', bounds)
+    #         cp.Problem(cp.Minimize(cp.sum_squares(expected_prires - expected_duares)), [log_scale >= min(bounds), log_scale <= max(bounds)]).solve(solver='ECOS')
+    #         new_scale = np.exp(log_scale.value)
+    #         print('chosen scale', np.exp(log_scale.value), 'exp prires', expected_prires.value, 'exp duares', expected_duares.value)
+    #         # breakpoint()
+
+    #         # cp.Problem(cp.Maximize(cp.log(expected_prires + 16) + cp.log(expected_duares + 16))).solve()
+    #         # breakpoint()
+
+    #         # # cp.Problem(cp.Maximize(cp.min(cp.hstack([expected_prires, expected_duares])))).solve()
+    #         # # cp.Problem(cp.Minimize(cp.sum_squares(expected_prires - expected_duares))).solve()
+    #         # print("CHOSEN SCALE", chosen_scale.value, "SQRT", (np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**.5)
+
+    #         # breakpoint()
+    #         # new_scale = chosen_scale.value if chosen_scale.value > 0 else (np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**.5
+    #     else:
+    #         # very simple logic, to start
+    #         new_scale = (np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**.5
+
+    #     print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+    #     self.pd_scale = new_scale
+    #     self.z[:] = self.y - self.s * new_scale
+    #     # for b/w compatibility with dr_step old method
+    #     self.e[:] = self.qr_matrix @ (
+    #         self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+    #         ) - self.pd_scale * getattr(self, self.used_b)
+
+class BroydenAdaScale2EqNNCQR(BroydenAdaScaleEqNNCQR):
+    """Experiment on adaptive scale choice. Doesn't work.
+    """
+    base_exponent = 0.5
+    window = 100
+
+class BroydenAdaScaleTest2EqNNCQR(BroydenEqNNCQR):
+    """Experiment on adaptive scale choice.
+    """
+
+    def update_pd_scale(self):
+        cur_iter = len(self.solution_qualities)
+        print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+
+        if len(self.pd_scales) > 10:
+            import matplotlib.pyplot as plt
+            past_logratios = np.log(np.array(self.pri_res_norms) / np.array(self.dua_res_norms))
+            diff_logratios = np.diff(past_logratios)
+            plt.plot(diff_logratios)
+            plt.plot(self.exponents)
+            plt.show()
+
+            # # try linear model
+            # cur_logratios = past_logratios[:-1]
+            # next_logratios = past_logratios[1:]
+            # X = np.zeros((len(cur_logratios), 3))
+            # X[:,0] = cur_logratios
+            # X[:,1] = self.exponents
+            # X[:, 2] = 1.
+            # y = next_logratios
+            # beta = np.linalg.solve(X.T @ X, X.T @ y)
+            # print("BETA", beta)
+            # opt_exponent = -(past_logratios[-1] * beta[0] + beta[2])/beta[1]
+            # print('LIN MODEL OPT EXPONENT', opt_exponent)
+            # exponent = np.clip(opt_exponent, 0.05, 0.75)
+            # print('ACTUAL CHOICE', exponent)
+            # # breakpoint()
+
+            # try linear model
+            last_logratios = past_logratios[:-2]
+            cur_logratios = past_logratios[1:-1]
+            next_logratios = past_logratios[2:]
+            X = np.zeros((len(cur_logratios), 5))
+            X[:, 0] = last_logratios
+            X[:, 1] = cur_logratios
+            X[:, 2] = self.exponents[:-1]
+            X[:, 3] = self.exponents[1:]
+            X[:, 4] = 1.
+            y = next_logratios
+            beta = np.linalg.solve(X.T @ X, X.T @ y)
+            print("BETA", beta)
+            opt_exponent = -(past_logratios[-2] * beta[0] + past_logratios[-1] * beta[1] + self.exponents[-1] * beta[2] + beta[4])/beta[3]
+            print('LIN MODEL OPT EXPONENT', opt_exponent)
+            exponent = np.clip(opt_exponent, 0.05, 0.75)
+            print('ACTUAL CHOICE', exponent)
+            # breakpoint()
+
+        else:
+            exponent = np.random.uniform(0.4, 0.6)
+        self.exponents.append(exponent)
+
+        # very simple logic, to start
+        new_scale = (np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**exponent
+
+        print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+class BroydenAdaScaleTest3EqNNCQR(BroydenEqNNCQR):
+    """Experiment on adaptive scale choice.
+    """
+
+    def update_pd_scale(self):
+        cur_iter = len(self.solution_qualities)
+        print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+
+        # breakpoint()
+
+        # very simple logic, to start
+        new_scale = np.exp(np.mean(np.log(np.array(self.pri_res_norms)/np.array(self.dua_res_norms))))**.75
+
+        print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+class BroydenAdaScaleTest4EqNNCQR(BroydenEqNNCQR):
+    """Experiment on adaptive scale choice.
+    """
+
+    def update_pd_scale(self):
+        cur_iter = len(self.solution_qualities)
+        print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+
+        if len(self.pd_scales) > 10:
+            # import matplotlib.pyplot as plt
+            past_logratios = np.log(np.array(self.pri_res_norms) / np.array(self.dua_res_norms))
+            # diff_logratios = np.diff(past_logratios)
+            # plt.plot(diff_logratios)
+            # plt.plot(np.log(self.pd_scales))
+            # plt.show()
+            # past_logratios -= np.mean(past_logratios)
+            # past_logratios /= np.std(past_logratios)
+            past_logscales = np.log(self.pd_scales)
+            # m,s = np.mean(past_logscales), np.std(past_logscales)
+            # past_logscales -= np.mean(past_logscales)
+            # past_logscales /= np.std(past_logscales)
+
+            # try linear model
+            cur_logratios = past_logratios[:-1]
+            next_logratios = past_logratios[1:]
+            X = np.zeros((len(cur_logratios), 3))
+            X[:, 0] = cur_logratios
+            X[:, 1] = past_logscales
+            X[:, 2] = 1.
+            y = next_logratios
+            beta = np.linalg.solve(X.T @ X, X.T @ y)
+            print("BETA", beta)
+            print("'exponent'", -beta[0]/beta[1], "multiplier", np.exp(-beta[2]/beta[1]))
+            # if beta[1] > 0:
+            #     import matplotlib.pyplot as plt
+            #     diff_logratios = np.diff(past_logratios)
+            #     plt.plot(diff_logratios, label='diff log ratios')
+            #     plt.plot(np.log(self.pd_scales), label='log pd scale')
+            #     plt.legend()
+            #     plt.show()
+            #     breakpoint()
+            opt_logscale = -(past_logratios[-1] * beta[0] + beta[2])/beta[1]
+            # opt_logscale *= s
+            # opt_logscale += m
+            print('OPT LOGSCALE', opt_logscale)
+            # breakpoint()
+            new_scale = np.clip(np.exp(opt_logscale), self.pd_scale * 0.9, self.pd_scale * 1.1)
+            # exponent = np.clip(opt_exponent, 0.05, 0.75)
+            # print('ACTUAL CHOICE', exponent)
+            # breakpoint()
+
+        else:
+            exponent = np.random.uniform(0.45, 0.55)
+            # very simple logic, to start
+            new_scale = (np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**exponent
+
+        print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+
+class BroydenAdaScaleTest5EqNNCQR(BroydenEqNNCQR):
+    """Experiment on adaptive scale choice.
+    """
+
+    def update_pd_scale(self):
+        cur_iter = len(self.solution_qualities)
+        print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+
+        if len(self.pd_scales) > 100:
+            import matplotlib.pyplot as plt
+            plt.plot(np.log(self.pri_res_norms))
+            plt.plot(np.log(self.dua_res_norms))
+            # diff_logratios = np.diff(past_logratios)
+            # plt.plot(diff_logratios)
+            # plt.plot(np.log(self.pd_scales))
+            plt.show()
+            exponent = 0.5
+            breakpoint()
+
+        else:
+            exponent = 0.5
+        # very simple logic, to start
+        new_scale = np.exp(np.mean(np.log(np.array(self.pri_res_norms)[-10:]/np.array(self.dua_res_norms)[-10:])))**exponent
+
+        print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+
+class BroydenAdaScaleTest6EqNNCQR(BroydenEqNNCQR):
+    """Experiment on adaptive scale choice.
+    """
+    base_exponent = 0.0
+    window = 10
+
+    def update_pd_scale(self):
+        cur_iter = len(self.solution_qualities)
+        print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+        # if np.abs(np.log10(np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res)) > 3):
+        #     breakpoint()
+
+        # count how many recent iters we've had same diff sign
+        diffnorms = np.array(self.pri_res_norms) - np.array(self.dua_res_norms)
+        last_diff_sign = np.sign(diffnorms[-1])
+        same_sign = np.sign(diffnorms) == last_diff_sign
+        iters_same_sign = np.argmin(same_sign[::-1])
+        if iters_same_sign == 0:
+            iters_same_sign = len(same_sign)
+
+        # if len(self.pd_scales)>10:
+        #     breakpoint()
+
+        exponent = self.base_exponent + np.tanh(iters_same_sign/self.window) * (1 - self.base_exponent)
+
+        # very simple logic, to start
+        new_scale = (np.linalg.norm(self.pri_res) / np.linalg.norm(self.dua_res))**exponent
+
+        print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+
+class BroydenAdaScaleTest7EqNNCQR(BroydenEqNNCQR):
+    """Experiment on adaptive scale choice, first with PID.
+
+    Best test so far, 2025-10-21; parameters can be tuned a little better.
+    """
+    Kp = 0.25
+    Ki = 0.15
+    Kd = 0.075
+
+    plot_iters_pd_scale = 1000
+
+    internal_verbose = True
+
+    # # make plot only once
+    # has_done_plot = False
+
+    def update_pd_scale(self):
+        cur_iter = len(self.solution_qualities)
+
+        errors = np.log(np.array(self.pri_res_norms) / np.array(self.dua_res_norms))
+        error_t = errors[-1]
+        integral_error = np.sum(errors)
+        derivative_error = errors[-1] - errors[-2] if len(errors) > 1 else 0
+        control = self.Kp * error_t + self.Ki * integral_error + self.Kd * derivative_error
+        if self.internal_verbose:
+            print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+            print("ITER", cur_iter, "ERROR", error_t, "INTEGRAL", integral_error, "DERIVATIVE", derivative_error, "CONTROL", control)
+
+        if len(self.pd_scales) > self.plot_iters_pd_scale:
+            # if not self.has_done_plot:
+            print('MAE ERROR', np.mean(np.abs(errors)))
+            print('RMSE ERROR', np.sqrt(np.mean(errors**2)))
+            import matplotlib.pyplot as plt
+            plt.plot(errors)
+            plt.show()
+
+            # plt.plot(
+            #     1./np.fft.rfftfreq(len(errors)),
+            #     np.abs(np.fft.rfft(errors)));
+            # plt.title("noise energy by period")
+            # plt.show()
+
+            print('MAE ERROR', np.mean(np.abs(errors)))
+            print('RMSE ERROR', np.sqrt(np.mean(errors**2)))
+            breakpoint()
+                # self.had_done_plot = True
+
+        new_scale = np.exp(control)
+
+        if self.internal_verbose:
+            print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+class BroydenAdaScalePidTest2EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Experiment on adaptive scale choice with PID.
+    
+    Collected all parameters.
+
+    This one changed only Ruiz limits. Worse tails, improves medians. Overall
+    might be BTSF.
+    """
+
+    # technical
+    use_numpy = True
+    internal_verbose = False
+    plot_iters_pd_scale = 1000
+
+    # ruiz
+    ruiz_max_rounds = 100
+    ruiz_col_limit = 0.5 # changed from 0.1
+    ruiz_row_limit = 0.5 # changed from 0.1
+    ruiz_norm = 2
+    do_soc_equalization = True
+
+    # base
+    max_iterations = 100_000
+    epsilon_convergence = 1e-12 # 1e-14 gets stuck in loop with 1e-16ish residuals
+
+    # broyden
+    memory = 50
+    acceleration_cap = 100
+
+    # PID
+    Kp = 0.25
+    Ki = 0.15
+    Kd = 0.075
+
+class BroydenAdaScalePidTest3EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Experiment on adaptive scale choice with PID.
+    
+    Collected all parameters.
+
+    This one changed only Ruiz limits. Seems roughly tied with original (0.1).
+    """
+
+    ruiz_col_limit = 0.2
+    ruiz_row_limit = 0.2
+
+class BroydenAdaScalePidTest4EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Experiment on adaptive scale choice with PID.
+    
+    Collected all parameters.
+
+    This one changed only Ruiz limits; improves tails worse median.
+
+    Might need to recalibrate PID parameters.
+    """
+
+    internal_verbose = False
+    plot_iters_pd_scale = 10_000 # just to run this test
+    ruiz_col_limit = 0.05
+    ruiz_row_limit = 0.05
+
+class BroydenAdaScalePidTest5EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Experiment on adaptive scale choice with PID.
+    
+    Collected all parameters.
+
+    This one changed only Ruiz limits; improved median worse tails.
+    """
+
+    internal_verbose = False
+    ruiz_col_limit = 1.
+    ruiz_row_limit = 1.
+
+class BroydenAdaScalePidTest6EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Experiment on adaptive scale choice with PID.
+    
+    Collected all parameters.
+
+    This one changed only Broyden memory. Seems to improve on num iters, minus
+    one tail, but obv it's too much.
+    """
+
+    internal_verbose = False
+    memory = 100 # making it smaller seems worse - might need to go back to LM
+    # plot_iters_pd_scale = 10_000 # just to run this test
+
+
+class BroydenAdaScalePidTest7EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Experiment on adaptive scale choice with PID. Doesn't work, too slow.
+    
+    Collected all parameters.
+
+    Changed parameters to something closer to typical ones. Changed Ruiz and
+    memory; turns out Ruiz seems more important, less memory makes it slower.
+    """
+
+    internal_verbose = False
+    plot_iters_pd_scale = 10_000 # we hit the 1000 limit
+
+    memory = 20 # 50 is too big, realistically costs like a mat mult
+    ruiz_col_limit = 1.
+    ruiz_row_limit = 1.
+    ruiz_norm = np.inf
+
+    # PID - recalibrated; oscillations with orig values
+    Kp = 0.125 # changed from 0.25
+    Ki = 0.075 # changed from 0.15
+    Kd = 0.0375 # changed from 0.075
+
+
+class BroydenAdaScalePidTest8EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Play with some PID tuning.
+    """
+
+    internal_verbose = False
+    plot_iters_pd_scale = 1_000 # we hit the 1000 limit
+
+    memory = 20 # 50 is too big, realistically costs like a mat mult
+    ruiz_col_limit = 1.
+    ruiz_row_limit = 1.
+    ruiz_norm = np.inf
+
+    # PID - trying recalibration
+    # Kp = 0.5625
+    # Ki = 0.0
+    # Kd = 0.0
+
+    # with (0.5, 0.0, 0.0) we get peak osc period = 167
+    # with (0.55, 0.0, 0.0) we get peak osc period = 200
+    # with (0.5625, 0.0, 0.0) we get super peak osc period = 2
+    # with (0.575, 0.0, 0.0) we get super peak osc period = 2
+    # with (0.6, 0.0, 0.0) we get super peak osc period = 2
+
+    # Let's try Ziegler–Nichols
+    # this one overshoots
+    # Ku = 0.5625
+    # Tu = 2
+    # Kp = Ku * 0.6
+    # Ki = 1.2 * Ku / Tu
+    # Kd = 0.075 * Ku * Tu
+
+    # retried with PI only - super slow
+    Ku = 0.5625
+    Tu = 2
+    Kp = Ku * 0.45
+    Ki = 0.54 * Ku / Tu
+
+class BroydenAdaScalePidTest9EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Experiment on adaptive scale choice with PID.
+
+    Try reducing memory only. Seems we don't need PID recal, so probably it was
+    Ruiz that changed things, or maybe I was over optimizing. This one is
+    slower esp. on the LPs but overall seems to work fine.
+
+    Yes works fine. PO program about the same as with memory = 50; the LPs are
+    about 2 times slower but indeed 50 was too much for them.
+    """
+
+    internal_verbose = False
+    plot_iters_pd_scale = 10_000 # we hit the 1000 limit
+
+    memory = 20 # 50 is too big, realistically costs like a mat mult
+
+
+class BroydenAdaScalePidTest10EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Experiment on adaptive scale choice with PID.
+
+    Same as 9 but with memory = 10. 
+
+    Problem 2 and PO seem to be fine, just slower. Problem 1 has few instances
+    it gets stuck. Maybe more aggressive PD?
+
+    Very interesting, it seems it gets stuck by switching b/w two or more
+    regions of the space (by activity set, in an LP, so polyhedra) and doesn't
+    spend too many iterations in each, so PD scaling is probably not too blame,
+    it doesn't diverge or anything. It may oscillate with some long period but
+    fine that's not a big issue. This seems similar behavior as the "bad" PO
+    problem with the misspecified SOC constraint. So improving quality of step
+    like Broyden with long memroy does can maybe solve this - we can do the
+    same with LM.
+    """
+
+    internal_verbose = True
+    plot_iters_pd_scale = 10_000 # we hit even the 10000 limit
+
+    memory = 10
+
+    # PID
+    Kp = 0.25 # changed from 0.25
+    Ki = 0.15 # changed from 0.15
+    Kd = 0.075 # changed from 0.075
+
+class BroydenAdaScalePidTest11EqNNCQR(BroydenAdaScaleTest7EqNNCQR):
+    """Test with AS reset.
+    
+    Many things learnt. First, we needed to change the order of stores reset
+    for pd scale choice - was wrong by mistake but the error had seemingly
+    slight beneficial effect on the previous tests (with Broyden stores reset),
+    but here it's important to put wrong_positions = False. Main change is here
+    we don't reset the Broyden stores. The AS choice is better to be reset, or
+    maybe not? What matters is that we put down a lot the acceleration cap.
+    What we get with changing only wrong_position, reset_on_as_change, and
+    acceleration_cap, is something only a bit worse than before, but
+    hopefully that won't deteriorate as much by reducing memory. PID parameters
+    will have to be recalibrated presumably. We can also make the acceleration
+    cap adaptive on history of AS changes; easy to test, we just add an
+    as_changed Boolean for each served tuple and handle it in the Broyden
+    method; e.g., every time we get one we halve the acceleration cap for that
+    update and the following ones.
+    """
+
+    internal_verbose = True
+    plot_iters_pd_scale = 10_000 # we hit the 1000 limit
+    max_iterations = 10000
+    reset_on_as_change = False
+    pd_store_reset_on_as_change = True
+    acceleration_cap = 20
+    memory = 50
+    wrong_position = False
+
+    # PID
+    Kp = 0.25 # changed from 0.25
+    Ki = 0.15 # changed from 0.15
+    Kd = 0.075 # changed from 0.075
+
+class BroydenAdaScaleASChangeTest(BroydenAdaScaleTest7EqNNCQR):
+    """Test for the idea above.
+    
+    Works, it's better than above, still worse than BTSF. Test above dead
+    branch, definitely good to make acceleration_cap aware of as_change.
+    Could be that pd_store_reset_on_as_change = False works better.
+    """
+
+    internal_verbose = True
+    plot_iters_pd_scale = 10_000 # we hit the 1000 limit
+    max_iterations = 10000
+    reset_on_as_change = False
+    pd_store_reset_on_as_change = True
+    acceleration_cap = 100
+    memory = 50
+    wrong_position = False
+
+    # new parameter; might be better higher value
+    acceleration_cap_reduce = 2.
+    overall_reduce = 1.
+
+    # PID
+    Kp = 0.25 # changed from 0.25
+    Ki = 0.15 # changed from 0.15
+    Kd = 0.075 # changed from 0.075
+
+    def compute_broyden_step(self):
+        """Base method to compute a Broyden-style approximate Newton step."""
+        mystep = self.pd_scale * self.pri_res + self.dua_res
+        result = np.zeros_like(mystep)
+        used_acceleration_cap = float(self.acceleration_cap)
+        used_overall_reduce = 1.
+
+        # this should be correct
+        for _, (ds, dy, dprires, dduares, as_change) in enumerate(
+            self.serve_broyden_elements(also_as_change=True)):
+
+            if as_change:
+                used_acceleration_cap /= self.acceleration_cap_reduce
+                used_overall_reduce *= self.overall_reduce
+
+            dz = dy - self.pd_scale * ds
+            dstep = self.pd_scale * dprires + dduares
+
+            dz_norm = np.linalg.norm(dz)
+            dstep_norm = np.linalg.norm(dstep)
+
+            # correction by current index
+            dstep_normed = dstep / dstep_norm
+            dz_snormed = dz / dstep_norm
+            acceleration = dz_norm / dstep_norm
+
+            # we cap the acceleration
+            if acceleration > used_acceleration_cap:
+                reduction_factor = acceleration / used_acceleration_cap
+            else:
+                reduction_factor = 1.
+
+            dstep_component_reduced = (mystep @ dstep_normed) / (reduction_factor * used_overall_reduce)
+            mystep -= dstep_normed * dstep_component_reduced
+            result +=  (dz_snormed * dstep_component_reduced)
+
+        # final correction
+        result -= self.final_correction(mystep)
+
+        return result
+
+    def final_correction(self, mystep):
+        return mystep
+
+class BroydenAdaScaleASChange2Test(BroydenAdaScaleASChangeTest):
+    """Test for the idea above.
+    
+    Better. Might be BTSF."""
+
+    max_iterations = 100_000
+    plot_iters_pd_scale = 200_000 # we hit the 1000 limit
+
+    pd_store_reset_on_as_change = False
+
+class BroydenAdaScaleASChange3Test(BroydenAdaScaleASChangeTest):
+    """With less memory.
+    
+    Improves on same experiment vs previous model (with resets).
+    """
+
+    pd_store_reset_on_as_change = False
+    memory = 20
+
+class BroydenAdaScaleASChange4Test(BroydenAdaScaleASChangeTest):
+    """With bigger discount.
+
+    Maybe improves over ASChange2Test, unclear.
+    
+    """
+
+    pd_store_reset_on_as_change = False
+    acceleration_cap_reduce = 3
+
+class BroydenAdaScaleASChange5Test(BroydenAdaScaleASChangeTest):
+    """Random test."""
+    internal_verbose = False
+    pd_store_reset_on_as_change = False
+    ruiz_norm = np.inf
+    ruiz_col_limit = 1.
+    ruiz_row_limit = 1.
+
+    plot_iters_pd_scale = 5_000 # we hit the 1000 limit
+
+    # PID
+    Kp = 0.15 # changed from 0.25
+    Ki = 0.26 # changed from 0.15
+    Kd = 0.05 # changed from 0.075
+
+class BroydenAdaScaleASChange6Test(BroydenAdaScaleASChange2Test):
+    """Same as 2Test with LevMar final correction."""
+
+    lsqr_iters = 5
+    use_x0 = True
+    damp = 1e-8
+
+    internal_verbose = True
+    plot_iters_pd_scale = 10_000 # we hit the 1000 limit
+    max_iterations = 10000
+    reset_on_as_change = False
+    pd_store_reset_on_as_change = False
+    acceleration_cap = 100
+    memory = 10
+    wrong_position = False
+
+    # new parameter; might be better higher value
+    acceleration_cap_reduce = 1.
+    overall_reduce = 2.5
+
+    # PID
+    Kp = 0.225 # changed from 0.25
+    Ki = 0.25 # changed from 0.15
+    Kd = 0.075 # changed from 0.075
+
+    def final_correction(self, mystep):
+        # we'll have to unpack the algorithm if we end up using it
+        result_lsqr = sp.sparse.linalg.lsqr(
+            sp.sparse.linalg.LinearOperator(
+                shape=(self.m, self.m),
+                matvec=lambda dz: self.multiply_jacobian_dstep(self.z, dz),
+                rmatvec=lambda dr: self.multiply_jacobian_dstep_transpose(
+                    self.z, dr)), -mystep,
+                    x0=mystep if self.use_x0 else None,
+                    damp=self.damp, # might make sense to change this?
+                    atol=0., btol=0., # might make sense to change this
+                    iter_lim=self.lsqr_iters)
+        return result_lsqr[0]
+
+class BroydenAdaScaleASChange7Test(BroydenAdaScaleASChange2Test):
+    """Same as 2Test but with overall reduce instead of ac reduce."""
+
+    # new parameter; might be better higher value
+    acceleration_cap_reduce = 1.
+    overall_reduce = 2.
+
+class BroydenAdaScaleASChange8Test(BroydenAdaScaleASChange6Test):
+    """Same as 2Test but with overall LSQR-1."""
+
+    lsqr_iters = 1
+    damp = 1e-8
+
+    internal_verbose = True
+    plot_iters_pd_scale = 10_000 # we hit the 1000 limit
+    max_iterations = 10000
+    reset_on_as_change = False
+    pd_store_reset_on_as_change = False
+    acceleration_cap = 100
+    memory = 50
+    wrong_position = False
+
+    # new parameter; might be better higher value
+    acceleration_cap_reduce = 2.
+    overall_reduce = 1.
+
+    # PID
+    Kp = 0.25 # changed from 0.25
+    Ki = 0.15 # changed from 0.15
+    Kd = 0.075 # changed from 0.075
+
+class BroydenAdaScaleASChange9Test(BroydenAdaScaleASChange8Test):
+    """Same but LSQR-2. Not worth it."""
+
+    lsqr_iters = 2
+
+class BroydenAdaScaleASChange10Test(BroydenAdaScaleASChange8Test):
+    """Like 2Test but w/o x0 - then each LSQR iter costs like 1 base iter.
+    
+    Doesn't work. Seems PD scaling doesn't affect the system any more."""
+
+    use_x0 = False
+    # lsqr_iters = 10
+    # Kp=0.2
+    # Ki=0.1
+    # Kd=0.
+
+
+class Broyden2EqNNCQR(EquilibratedNewNewCQR):
+    """Redo base class.
+    
+    Broyden, PID, and AdaCap logic; remove AS logic.
+    
+    Mixed results; it doesn't clearly improve basic results (it does at least
+    for one tail) *but* is the best test so far on the "portfolio_bad" program,
+    with the badly scaled constraint. Indeed, first one that seems to converge
+    on most or all (slowly). Idea is that PD scaling *and* adaptive Broyden
+    "l2" normalization (of the inverse Jacobian) is the way forward, having
+    recognized that they can be done together. Rather than the "AdaCap" logic
+    we should figure out correct l2 regularization scheme for Broyden loop. And
+    then use improvement or not of step length to update regularization (like
+    done here for the update norm cap). We can forget the AS logic, at least
+    for now. Interaction of PD scaling and AdaCap doesn't seem too bad and with
+    better regularization it may disappear. So going forward we should
+    re-introduce the portfolio_bad program in tests and rebase on this
+    experiment. Obvious first steps is re-write it to avoid unncessary double
+    calculations and redo the Broyden logic using orthogonalities to leave off
+    scale until the end.
+    """
+
+    memory = 50
+    max_iterations = 100_000
+
+    # initial value
+    acceleration_cap = 5
+    cap_decrease_factor = 0.9
+    cap_increase_factor = 1.005
+    cap_floor = 1.
+    cap_ceil = 100.
+
+    Kp = 0.25
+    Ki = 0.15
+    Kd = 0.075
+
+    internal_verbose = True
+
+    def prepare_loop(self):
+        """Create storage arrays."""
+        super().prepare_loop()
+        self.dys = np.empty((self.memory, self.m), dtype=float)
+        self.dss = np.empty((self.memory, self.m), dtype=float)
+        # self.dzs_norms = np.empty(self.memory, dtype=float)
+        self.dpriress = np.empty((self.memory, self.m), dtype=float)
+        self.dduaress = np.empty((self.memory, self.m), dtype=float)
+        # self.dsteps_norms = np.empty(self.memory, dtype=float)
+        self.old_y = np.empty(self.m, dtype=float)
+        self.old_s = np.empty(self.m, dtype=float)
+        self.old_prires = np.empty(self.m, dtype=float)
+        self.old_duares = np.empty(self.m, dtype=float)
+        self.step = np.empty(self.m, dtype=float)
+        self.pri_res = np.empty(self.m, dtype=float)
+        self.dua_res = np.empty(self.m, dtype=float)
+        self.pri_res_norms = []
+        self.dua_res_norms = []
+        self.pd_scales = []
+        self.exponents = []
+        self.used_memory = 0
+
+    def iterate(self):
+        """Simple Douglas Rachford iteration with Broyden update to override.
+        """
+
+        cur_iter = len(self.solution_qualities)
+        cur_index = cur_iter % self.memory
+
+        # compute DR step
+        # self.y[:] = self.cone_project(self.z)
+        # step_base = self.linspace_project_basic(2 * self.y - self.z) - self.y
+        # self.step[:] = step_base + self.e
+        self.s[:], self.y[:], self.pri_res[:], self.dua_res[:] = self.compute_pridual_step(self.z)
+
+        # update Broyden stores
+        if cur_iter > 1:
+            self.dys[cur_index] = self.y - self.old_y
+            self.dss[cur_index] = self.s - self.old_s
+            self.dpriress[cur_index] = self.pri_res - self.old_prires
+            self.dduaress[cur_index] = self.dua_res - self.old_duares
+            self.used_memory = min(self.used_memory + 1, self.memory)
+            # self.dzs_norms[cur_index] = np.linalg.norm(self.dzs[cur_index])
+        self.old_y[:] = self.y
+        self.old_s[:] = self.s
+        self.old_prires[:] = self.pri_res
+        self.old_duares[:] = self.dua_res
+
+        # we store the primal and dual res norms
+        self.pri_res_norms.append(float(np.linalg.norm(self.pri_res)))
+        self.dua_res_norms.append(float(np.linalg.norm(self.dua_res)))
+        # we choose the scale
+        # we append to self.exponents inside this for now...
+        self.update_pd_scale() # change z in place
+        # and the primal dual scale chosen
+        self.pd_scales.append(float(self.pd_scale))
+
+        # update with Broyden step
+        br_step = self.compute_broyden_step()
+        if np.all(np.abs(br_step) < 1e-16):
+            breakpoint()
+        if np.any(np.isnan(br_step)):
+            breakpoint()
+        self.z[:] = self.z[:] - br_step
+
+    def reset_pd_stores(self):
+        """Reset stores used to choose pd scale."""
+        self.pri_res_norms = []
+        self.dua_res_norms = []
+        self.pd_scales = []
+        self.exponents = []
+
+    def update_pd_scale(self):
+        cur_iter = len(self.solution_qualities)
+
+        errors = np.log(np.array(self.pri_res_norms) / np.array(self.dua_res_norms))
+        error_t = errors[-1]
+        integral_error = np.sum(errors)
+        derivative_error = errors[-1] - errors[-2] if len(errors) > 1 else 0
+        control = self.Kp * error_t + self.Ki * integral_error + self.Kd * derivative_error
+        if self.internal_verbose:
+            print("ITER", cur_iter, "PRIMAL RESIDUAL", np.linalg.norm(self.pri_res), "DUAL RESIDUAL", np.linalg.norm(self.dua_res))
+            print("ITER", cur_iter, "ERROR", error_t, "INTEGRAL", integral_error, "DERIVATIVE", derivative_error, "CONTROL", control)
+
+        # if len(self.pd_scales) > self.plot_iters_pd_scale:
+        #     # if not self.has_done_plot:
+        #     print('MAE ERROR', np.mean(np.abs(errors)))
+        #     print('RMSE ERROR', np.sqrt(np.mean(errors**2)))
+        #     import matplotlib.pyplot as plt
+        #     plt.plot(errors)
+        #     plt.show()
+
+        #     # plt.plot(
+        #     #     1./np.fft.rfftfreq(len(errors)),
+        #     #     np.abs(np.fft.rfft(errors)));
+        #     # plt.title("noise energy by period")
+        #     # plt.show()
+
+        #     print('MAE ERROR', np.mean(np.abs(errors)))
+        #     print('RMSE ERROR', np.sqrt(np.mean(errors**2)))
+        #     breakpoint()
+        #         # self.had_done_plot = True
+
+        new_scale = np.exp(control)
+
+        if self.internal_verbose:
+            print(f"ITER {len(self.solution_qualities)} CHANGING SCALE FROM {self.pd_scale} TO {new_scale}")
+        self.pd_scale = new_scale
+        self.z[:] = self.y - self.s * new_scale
+        # for b/w compatibility with dr_step old method
+        self.e[:] = self.qr_matrix @ (
+            self.pd_scale * self.qr_matrix.T @ getattr(self, self.used_b) - self.c_qr
+            ) - self.pd_scale * getattr(self, self.used_b)
+
+    def serve_broyden_elements(self):
+        """Serve pieces used for Broyden loop."""
+
+        cur_iter = len(self.solution_qualities)
+        cur_index = cur_iter % self.memory
+
+        for back_index in range(self.used_memory):
+            index = (cur_index - back_index) % self.memory
+            yield (
+                self.dss[index],
+                self.dys[index],
+                self.dpriress[index],
+                self.dduaress[index],
+                )
+
+    def compute_broyden_step(self):
+        """Base method to compute a Broyden-style approximate Newton step."""
+        mystep = self.pd_scale * self.pri_res + self.dua_res
+        result = np.zeros_like(mystep)
+
+        cap_hit = False
+
+        # this should be correct
+        for _, (ds, dy, dprires, dduares) in enumerate(
+            self.serve_broyden_elements()):
+
+            dz = dy - self.pd_scale * ds
+            dstep = self.pd_scale * dprires + dduares
+
+            dz_norm = np.linalg.norm(dz)
+            dstep_norm = np.linalg.norm(dstep)
+
+            # correction by current index
+            dstep_normed = dstep / dstep_norm
+            dz_snormed = dz / dstep_norm
+            acceleration = dz_norm / dstep_norm
+
+            # we cap the acceleration
+            if acceleration > self.acceleration_cap:
+                reduction_factor = acceleration / self.acceleration_cap
+                cap_hit = True
+            else:
+                reduction_factor = 1.
+
+            dstep_component_reduced = (mystep @ dstep_normed) / reduction_factor
+            mystep -= dstep_normed * dstep_component_reduced
+            result +=  (dz_snormed * dstep_component_reduced)
+
+        # final correction
+        result -= mystep
+
+        # logic for update
+        if cap_hit:
+            current_step_len = np.linalg.norm(mystep)
+            # with refactoring we won't need to calculate this twice
+            next_z = self.z - result
+            _, _, next_pri_res, next_dua_res = self.compute_pridual_step(next_z)
+            next_step_len = np.linalg.norm(self.pd_scale * next_pri_res + next_dua_res)
+            it = len(self.solution_qualities)
+            if next_step_len < current_step_len:
+                print(f'ITER {it} CURRENT ACCEL CAP {self.acceleration_cap}, INCREASING')
+                self.acceleration_cap *= self.cap_increase_factor
+                self.acceleration_cap = np.minimum(self.cap_ceil, self.acceleration_cap)
+            else:
+                print(f'ITER {it} CURRENT ACCEL CAP {self.acceleration_cap}, DECREASING')
+                self.acceleration_cap *= self.cap_decrease_factor
+                self.acceleration_cap = np.maximum(self.cap_floor, self.acceleration_cap)
+
+        return result
